@@ -1,0 +1,92 @@
+{
+  "name": "orbit",
+  "version": "1.0.0",
+  "main": "main.js",
+  "private": true,
+  "homepage": ".",
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^6.7.2",
+    "@fortawesome/free-brands-svg-icons": "^6.7.2",
+    "@fortawesome/free-regular-svg-icons": "^6.7.2",
+    "@fortawesome/free-solid-svg-icons": "^6.7.2",
+    "@fortawesome/react-fontawesome": "^0.2.2",
+    "better-sqlite3": "^12.2.0",
+    "concurrently": "^9.2.1",
+    "electron-rebuild": "^3.2.9",
+    "exiftool-vendored": "^30.4.0",
+    "fs": "^0.0.1-security",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-scripts": "5.0.1",
+    "react-window": "^1.8.11",
+    "sharp": "^0.33.5",
+    "wait-on": "^8.0.2",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "electron": "electron .",
+    "postinstall": "electron-rebuild && npx electron-rebuild -f -w better-sqlite3",
+    "dev": "concurrently \"npm start\" \"npx wait-on http://localhost:3000 && npm run electron\""
+  },
+  "build": {
+    "appId": "com.kiyantk.orbit",
+    "productName": "Orbit",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!**/dist/**/*",
+      "!**/*.map",
+      "database.js",
+      "node_modules/**/*",
+      "package.json",
+      "src/**/*"
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerSidebar": "build/orbit-v1-installfinished.bmp"
+    },
+    "mac": {
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "icon": "public/favicon-256x256.ico",
+      "target": "nsis"
+    },
+    "linux": {
+      "icon": "public/logo512.png",
+      "target": [
+        "tar.gz"
+      ]
+    }
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^34.2.0"
+  }
+}
