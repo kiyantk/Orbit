@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
+  faArrowDown,
+  faArrowLeft,
+  faArrowRight,
+  faArrowUp,
+  faComputerMouse,
   faDisplay,
   faHardDrive,
   faImages,
@@ -16,7 +21,8 @@ const SettingsView = ({
   currentSettings,
   applySettings,
   folderStatuses,
-  checkStatusses
+  checkStatusses,
+  newTab
 }) => {
   const [selectedTab, setSelectedTab] = useState("User");
   const [settings, setSettings] = useState(currentSettings);
@@ -86,6 +92,12 @@ const SettingsView = ({
         }
       });
   }, []);
+
+  useEffect(() => {
+    if(newTab) {
+      setSelectedTab(newTab)
+    }
+  }, [newTab]);
 
   // Set local settings
   const handleCheckboxChange = (event) => {
@@ -169,7 +181,7 @@ const removeFolder = async (folderPath) => {
     User: faUser,
     Media: faImages,
     Storage: faHardDrive,
-    Shortcuts: faKeyboard,
+    Controls: faKeyboard,
     App: faToolbox,
   };
 
@@ -250,7 +262,7 @@ const removeFolder = async (folderPath) => {
           <div className="settings-list">
             <h2>Settings</h2>
             <ul>
-              {["User", "Media", "Storage", "Shortcuts", "App"].map(
+              {["User", "Media", "Storage", "Controls", "App"].map(
                 (tab) => (
                   <li
                     key={tab}
@@ -284,7 +296,7 @@ const removeFolder = async (folderPath) => {
             {selectedTab === "Media" && (
               <div>
                 <div>
-                  <span>Indexed Folders</span>
+                  <h3>Indexed Folders</h3>
                   <FolderList folders={settings.indexedFolders} onRemoveFolder={removeFolder} folderStatuses={folderStatuses} />
                 </div>
                 <div>
@@ -327,13 +339,13 @@ const removeFolder = async (folderPath) => {
                   <button 
                     className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
                     onClick={checkStatusses}
-                    disabled={isIndexing}
+                    disabled={isIndexing || settings.indexedFolders.length === 0}
                   >
                     Check Status
                   </button>
                   {indexingStatus && (
                     <div className="welcome-popup-status">
-                      <span>{indexingStatus}</span>
+                      <span>{indexingStatus}</span><br></br><span>Don't close the app</span>
                     </div>
                   )}
                 </div>
@@ -349,6 +361,7 @@ const removeFolder = async (folderPath) => {
                   >
                     Fetch Usage
                   </button>
+                  {storageUsage.app !== 0 && (
                   <div className="storage-bar-container">
                     <div className="storage-legend">
                       <span className="storage-legend-text">
@@ -371,43 +384,34 @@ const removeFolder = async (folderPath) => {
                       </span>
                     </div>
                   </div>
+                  )}
                 </div>
               </div>
             )}
-            {selectedTab === "Shortcuts" && (
+            {selectedTab === "Controls" && (
               <div>
+                <h3>Explorer</h3>
                 <div className="settings-content-item">
                   <span>
-                    Save opened note:{" "}
-                    <span className="settings-shortcut-key">CTRL</span> +{" "}
-                    <span className="settings-shortcut-key">S</span>
-                  </span>
+                    Show preview:</span>{" "}
+                    <span className="settings-shortcut-key">Left Mouse Button</span>
                 </div>
                 <div className="settings-content-item">
                   <span>
-                    Refresh: <span className="settings-shortcut-key">CTRL</span>{" "}
-                    + <span className="settings-shortcut-key">R</span>
-                  </span>
+                    Open fullscreen:</span>{" "}
+                    <span className="settings-shortcut-key">Double Left Mouse Button</span>
                 </div>
                 <div className="settings-content-item">
                   <span>
-                    New Note:{" "}
-                    <span className="settings-shortcut-key">CTRL</span> +{" "}
-                    <span className="settings-shortcut-key">T</span>
-                  </span>
-                </div>
-                <div className="settings-content-item">
-                  <span>
-                    Close Note:{" "}
-                    <span className="settings-shortcut-key">CTRL</span> +{" "}
-                    <span className="settings-shortcut-key">W</span>
-                  </span>
+                    Navigate:</span>{" "}
+                    <span className="settings-shortcut-key">SCROLL</span> or <span className="settings-shortcut-key"><FontAwesomeIcon icon={faArrowLeft} />{" "}<FontAwesomeIcon icon={faArrowUp} />{" "}<FontAwesomeIcon icon={faArrowDown} />{" "}<FontAwesomeIcon icon={faArrowRight} /></span>
                 </div>
               </div>
             )}
             {selectedTab === "App" && (
               <div>
                 <div className="settings-content-item">
+                  <img width="50" src={process.env.PUBLIC_URL + "/logo-v1-orbit-bright-white-shadow-small.png"} />
                   <span>Orbit 1.0.0</span>
                 </div>
                 <div className="settings-content-item">

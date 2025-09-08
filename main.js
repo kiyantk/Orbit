@@ -11,6 +11,7 @@ const fs = require("fs");
 const Database = require("better-sqlite3");
 const { exiftool } = require("exiftool-vendored");
 const sharp = require("sharp");
+const { protocol } = require("electron");
 
 let mainWindow;
 
@@ -21,7 +22,7 @@ app.whenReady().then(() => {
     height: 800,
     minWidth: 400,
     minHeight: 400,
-    icon: path.join(__dirname, "./public/logo512-enhanced.png"),
+    icon: path.join(__dirname, "./public/logo512.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -57,6 +58,45 @@ app.whenReady().then(() => {
   app.on("ready", () => {
     process.chdir(path.dirname(app.getPath("exe")));
   });
+
+  // Serve thumbnails via a custom scheme: orbit://thumbs/<filename>
+  protocol.handle("orbit", async (request) => {
+    try {
+      const url = new URL(request.url);
+      // orbit://thumbs/<filename>
+      const pathname = url.pathname.replace(/^\/+/, ""); // strip leading slashes
+      const filePath = path.join(dataDir, "thumbnails", pathname);
+
+      return new Response(fs.readFileSync(filePath), {
+        headers: {
+          "Content-Type": "image/jpeg", // you can use mime.getType(filePath) if you want
+        },
+      });
+    } catch (err) {
+      console.error("orbit protocol error:", err);
+      return new Response("Not Found", { status: 404 });
+    }
+  });
+
+  const express = require("express");
+  const appServer = express();
+  const serverPort = 3001;
+
+  // Serve files from any path on disk
+  appServer.get("/files/*", (req, res) => {
+    const filePath = decodeURIComponent(req.path.replace("/files/", ""));
+    if (!fs.existsSync(filePath)) {
+      console.error("File not found:", filePath);
+      res.status(404).send("Not found");
+      return;
+    }
+    res.sendFile(filePath);
+  });
+
+  appServer.listen(serverPort, () => {
+    console.log(`Local file server running on http://localhost:${serverPort}`);
+  });
+
 
   mainWindow.loadURL("http://localhost:3000");
 });
@@ -100,6 +140,8 @@ function initDatabase() {
       orientation INTEGER,
       latitude REAL,
       longitude REAL,
+      altitude REAL,
+      create_date INTEGER,
       thumbnail_path TEXT
     )
   `);
@@ -143,6 +185,7 @@ ipcMain.handle("open-orbit-location", () => {
   shell.openPath(appPath);
 });
 
+
 // Folder selection
 ipcMain.handle("select-folders", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -150,6 +193,27 @@ ipcMain.handle("select-folders", async () => {
     title: "Select folders to index",
   });
   return result.canceled ? [] : result.filePaths;
+});
+
+// Fetch paginated files for the UI
+// Args: { offset: number, limit: number }
+// Returns: array of rows [{ id, filename, thumbnail_path, path, width, height, file_type }]
+ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200 } = {}) => {
+  try {
+    initDatabase();
+    // Use an index-friendly ORDER BY (id) - adjust if you want different ordering (e.g. by modified)
+    const stmt = db.prepare(`
+      SELECT id, filename, thumbnail_path, path, width, height, file_type, size, latitude, longitude, device_model, created, altitude, create_date
+      FROM files
+      ORDER BY id
+      LIMIT ? OFFSET ?
+    `);
+    const rows = stmt.all(limit, offset);
+    return { success: true, rows };
+  } catch (err) {
+    console.error("fetch-files error:", err);
+    return { success: false, error: err.message, rows: [] };
+  }
 });
 
 // Indexing
@@ -186,7 +250,8 @@ async function generateThumbnail(filePath, id) {
     const thumbnailFilename = `${id}_thumb.jpg`;
     const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
 
-    await sharp(filePath)
+    await sharp(filePath, { failOnError: false })
+      .rotate()
       .resize(200, 200, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 80 })
       .toFile(thumbnailPath);
@@ -211,6 +276,8 @@ async function extractMetadata(filePath) {
     orientation: null,
     latitude: null,
     longitude: null,
+    altitude: null,
+    create_date: null,
   };
 
   const ext = path.extname(filePath).toLowerCase();
@@ -247,6 +314,13 @@ async function extractMetadata(filePath) {
       metadata.latitude = exifData.GPSLatitude;
       metadata.longitude = exifData.GPSLongitude;
     }
+
+    // Altitude
+    if (exifData.GPSAltitude) metadata.altitude = exifData.GPSAltitude;
+    
+    // Create date (choose DateTimeOriginal if available)
+    const dateStr = exifData.DateTimeOriginal || exifData.CreateDate;
+    if (dateStr) metadata.create_date = Math.floor(new Date(dateStr).getTime() / 1000);
   } catch (err) {
     console.log(`No EXIF data for ${filePath}: ${err.message}`);
   }
@@ -254,62 +328,118 @@ async function extractMetadata(filePath) {
   return metadata;
 }
 
-// Recursive indexing
+const pLimit = require("p-limit");
+const os = require("os");
+const cpuCount = os.cpus().length;
+const METADATA_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 2));  // 1 task per 2 cores
+const THUMBNAIL_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 3)); // 1 task per 3 cores
+const BATCH_SIZE = 1000;             // insert batch size
+
 async function indexFilesRecursively(folderPath, rootFolder) {
-  const files = fs.readdirSync(folderPath, { withFileTypes: true });
+  const entries = fs.readdirSync(folderPath, { withFileTypes: true });
 
-  for (const file of files) {
-    const fullPath = path.join(folderPath, file.name);
-    if (file.isDirectory()) {
-      await indexFilesRecursively(fullPath, rootFolder);
-    } else if (file.isFile()) {
-      if (mainWindow) {
-        mainWindow.webContents.send("indexing-progress", file.name);
-      }
+  // Separate directories and files
+  const dirs = [];
+  const files = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) dirs.push(entry.name);
+    else if (entry.isFile()) files.push(entry.name);
+  }
 
-      const stats = fs.statSync(fullPath);
-      const metadata = await extractMetadata(fullPath);
+  // Recurse into directories first
+  for (const dirName of dirs) {
+    await indexFilesRecursively(path.join(folderPath, dirName), rootFolder);
+  }
 
-      // 1️⃣ Insert file first to get the ID
-      const insertStmt = db.prepare(`
-        INSERT OR REPLACE INTO files 
-        (filename, path, size, created, modified, extension, folder_path,
-         file_type, device_model, camera_make, camera_model, width, height,
-         orientation, latitude, longitude, thumbnail_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const info = insertStmt.run(
-        file.name,
-        fullPath,
-        stats.size,
-        Math.floor(stats.birthtimeMs / 1000),
-        Math.floor(stats.mtimeMs / 1000),
-        path.extname(file.name).toLowerCase(),
-        rootFolder,
-        metadata.file_type,
-        metadata.device_model,
-        metadata.camera_make,
-        metadata.camera_model,
-        metadata.width,
-        metadata.height,
-        metadata.orientation,
-        metadata.latitude,
-        metadata.longitude,
-        null
-      );
+  const limitMetadata = pLimit(METADATA_CONCURRENCY);
+  const limitThumb = pLimit(THUMBNAIL_CONCURRENCY);
 
-      // 2️⃣ Generate thumbnail using the new ID
-      let thumbnailPath = null;
-      if (metadata.file_type === "image") {
-        const id = info.lastInsertRowid;
-        thumbnailPath = await generateThumbnail(fullPath, id);
+  const insertStmt = db.prepare(`
+    INSERT OR REPLACE INTO files 
+    (filename, path, size, created, modified, extension, folder_path,
+     file_type, device_model, camera_make, camera_model, width, height,
+     orientation, latitude, longitude, altitude, create_date, thumbnail_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
 
-        // 3️⃣ Update the row with the thumbnail path
-        db.prepare(`UPDATE files SET thumbnail_path = ? WHERE id = ?`)
-          .run(thumbnailPath, id);
-      }
+  let batchRows = [];
+
+  for (const fileName of files) {
+    const fullPath = path.join(folderPath, fileName);
+    if (mainWindow) mainWindow.webContents.send("indexing-progress", fileName);
+
+    const stats = fs.statSync(fullPath);
+
+    // Skip already indexed files
+    const exists = db.prepare("SELECT id FROM files WHERE path = ?").get(fullPath);
+    if (exists) continue;
+
+    // Extract metadata with limited concurrency
+    const metadata = await limitMetadata(() => extractMetadata(fullPath));
+
+    batchRows.push({
+      fileName,
+      fullPath,
+      stats,
+      metadata
+    });
+
+    // When batch is full, insert transactionally
+    if (batchRows.length >= BATCH_SIZE) {
+      await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
+      batchRows = [];
     }
   }
+
+  // Insert any remaining files
+  if (batchRows.length > 0) {
+    await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
+  }
+}
+
+// Helper function for batch insert + thumbnail generation
+async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
+  // Transactional insert
+  const insertMany = db.transaction((batch) => {
+    for (const row of batch) {
+      const info = insertStmt.run(
+        row.fileName,
+        row.fullPath,
+        row.stats.size,
+        Math.floor(row.stats.birthtimeMs / 1000),
+        Math.floor(row.stats.mtimeMs / 1000),
+        path.extname(row.fileName).toLowerCase(),
+        rootFolder,
+        row.metadata.file_type,
+        row.metadata.device_model,
+        row.metadata.camera_make,
+        row.metadata.camera_model,
+        row.metadata.width,
+        row.metadata.height,
+        row.metadata.orientation,
+        row.metadata.latitude,
+        row.metadata.longitude,
+        row.metadata.altitude,
+        row.metadata.create_date,
+        null
+      );
+      row.id = info.lastInsertRowid;
+    }
+  });
+
+  insertMany(rows);
+
+  // Generate thumbnails in parallel with limited concurrency
+  const thumbPromises = rows
+    .filter(r => r.metadata.file_type === "image")
+    .map(r => limitThumb(async () => {
+      const thumbPath = await generateThumbnail(r.fullPath, r.id);
+      if (thumbPath) {
+        db.prepare(`UPDATE files SET thumbnail_path = ? WHERE id = ?`).run(thumbPath, r.id);
+      }
+    }));
+
+  await Promise.all(thumbPromises);
 }
 
 ipcMain.handle("check-folders", async (event, folders) => {

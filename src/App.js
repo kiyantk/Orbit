@@ -5,12 +5,17 @@ import SideBar from "./components/SideBar";
 import WelcomePopup from "./components/WelcomePopup";
 import SettingsView from "./components/SettingsView";
 import "./App.css";
+import ExplorerView from "./components/ExplorerView";
+import PreviewPanel from "./components/PreviewPanel";
 
 const App = () => {
     const [settings, setSettings] = useState(null);
     const [showWelcomePopup, setShowWelcomePopup] = useState(false);
     const [activeView, setActiveView] = useState(null);
     const [folderStatuses, setFolderStatuses] = useState({}); // { "C:/path": true/false }
+    const [selectedSettingsTab, setSelectedSettingsTab] = useState(null);
+    const [selectedItem, setSelectedItem] = useState(null);
+    const [isMuted, setIsMuted] = useState(true); // session-wide mute state
 
     useEffect(() => {
     // Load settings from Electron (preload.js)
@@ -92,6 +97,12 @@ const App = () => {
     const applySettings = (newSettings) => {
       setSettings(newSettings); // Update state
     };
+
+    // Apply new settings from Settings popup
+    const openMediaSettings = () => {
+      setActiveView('settings');
+      setSelectedSettingsTab('Media');
+    };
   return (
     <div className="App">
       <div className="App-main">
@@ -105,7 +116,29 @@ const App = () => {
               applySettings={applySettings} // Pass function to apply new settings
               folderStatuses={folderStatuses}
               checkStatusses={checkFolderStatuses}
+              newTab={selectedSettingsTab}
             />
+          )}
+          {activeView === "explore" && (
+            <div className="explorer-container">
+              <ExplorerView
+                currentSettings={settings} // Pass current settings
+                folderStatuses={folderStatuses}
+                openSettings={openMediaSettings}
+                onSelect={setSelectedItem}
+              />
+              <div className="border-l overflow-y-auto bg-gray-50">
+                {selectedItem ? (
+                  <PreviewPanel
+                    item={selectedItem}
+                    isMuted={isMuted}
+                    setIsMuted={setIsMuted}
+                  />
+                ) : (
+                  <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>
+                )}
+              </div>
+            </div>
           )}
         </div>
         <div>

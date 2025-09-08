@@ -839,7 +839,7 @@ body {
 
 /* Folder selection styles */
 .welcome-popup-select-folders-btn {
-  background-color: #404040;
+  background-color: #484050;
   padding: 10px 15px;
   color: white;
   border: none;
@@ -849,13 +849,57 @@ body {
   margin-bottom: 10px;
 }
 
+.explorer-container {
+    display: grid;
+    grid-template-columns: minmax(315px, 1fr) 400px;
+    width: 100%;
+}
+
 .welcome-popup-select-folders-btn:hover:not(:disabled) {
-  background-color: #464646;
+  background-color: #50475a !important;
 }
 
 .welcome-popup-select-folders-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.preview-center-text {
+  height: 100%;
+  align-content: center;
+}
+
+.preview-panel-content {
+  height: 562px;
+  align-content: center;
+}
+
+.preview-panel-content img, .preview-panel-content video {
+  width: 100%;
+}
+
+.metadata-panel {
+  font-size: 0.875rem; /* sm */
+  color: #6b7280; /* gray-600 */
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  padding: 8px 25px;
+  border-top: 1px solid #484050;
+}
+
+.metadata-row {
+  display: contents; /* keeps grid structure */
+}
+
+.metadata-label {
+  font-weight: 500;
+  color: #858585; /* darker gray for labels */
+}
+
+.metadata-value {
+  color: rgb(196 196 196); /* lighter gray for values */
+  overflow-wrap: anywhere;
 }
 
 .welcome-popup-selected-folders {
@@ -923,9 +967,9 @@ body {
 .welcome-popup-status {
   margin-top: 15px;
   padding: 8px;
-  background-color: #2a2a2a;
+  background-color: #27222d;
   border-radius: 4px;
-  border-left: 3px solid #4a8cff;
+  border-left: 3px solid #824aff;
   font-size: 13px;
   color: #e0e0e0;
 }

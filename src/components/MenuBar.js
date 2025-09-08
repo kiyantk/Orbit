@@ -85,33 +85,21 @@ const MenuBar = ({
 
   return (
     <div className="menu-bar">
-      <img className="menubar-icon" src={process.env.PUBLIC_URL + "/logo-v1-orbit-white-shadow-small.png"} alt="Logo" />
+      <img className="menubar-icon" src={process.env.PUBLIC_URL + "/logo-v1-orbit-bright-white-shadow-small.png"} alt="Logo" />
       <p className="menubar-app-name">Orbit</p>
-      <button onClick={(e) => toggleDropdown(e, "file")}>File</button>
+      {/* <button onClick={(e) => toggleDropdown(e, "file")}>File</button>
       <button onClick={(e) => toggleDropdown(e, "edit")}>Edit</button>
       <button onClick={(e) => toggleDropdown(e, "view")}>View</button>
-      <button onClick={(e) => toggleDropdown(e, "help")}>Help</button>
+      <button onClick={(e) => toggleDropdown(e, "help")}>Help</button> */}
       <button className="menubar-close-btn" onClick={closeOrbit}><FontAwesomeIcon icon={faXmark}/></button>
-      {(isDropdownOpen && dropdownType === "file") && (
+      {/* {(isDropdownOpen && dropdownType === "file") && (
         <div className="menubar-dropdown-overlay">
           <div
             ref={menuRef}
-            className={`dropdown-menu ${
-              settings?.userSettings.showMenubarIcons
-                ? "dropdown-menu-with-icons"
-                : ""
-            } `}
+            className={`dropdown-menu`}
             style={{ left: dropdownPosition }}
           >
             <button onClick={closeOrbit}>
-              <FontAwesomeIcon
-                icon={faRectangleXmark}
-                style={{
-                  display: settings?.userSettings.showMenubarIcons
-                    ? "initial"
-                    : "none",
-                }}
-              />
               <span>Exit</span>
             </button>
           </div>
@@ -200,9 +188,9 @@ const MenuBar = ({
               />
               <span>Changelog</span>
             </button>
-          </div>
-        </div>
-      )}
+          </div> */}
+        {/* </div>
+      )} */}
     </div>
   );
 };
