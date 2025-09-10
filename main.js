@@ -12,6 +12,9 @@ const Database = require("better-sqlite3");
 const { exiftool } = require("exiftool-vendored");
 const sharp = require("sharp");
 const { protocol } = require("electron");
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("ffmpeg-static");
+if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 
 let mainWindow;
 
@@ -203,7 +206,7 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200 } = {}) =>
     initDatabase();
     // Use an index-friendly ORDER BY (id) - adjust if you want different ordering (e.g. by modified)
     const stmt = db.prepare(`
-      SELECT id, filename, thumbnail_path, path, width, height, file_type, size, latitude, longitude, device_model, created, altitude, create_date
+      SELECT id, filename, thumbnail_path, path, width, height, file_type, size, latitude, longitude, device_model, created, altitude, create_date, folder_path
       FROM files
       ORDER BY id
       LIMIT ? OFFSET ?
@@ -225,7 +228,34 @@ ipcMain.handle("index-files", async (event, folders) => {
       const existing = db.prepare("SELECT * FROM folders WHERE path = ?").get(folder);
       if (!existing) {
         db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)").run(folder);
-        await indexFilesRecursively(folder, folder);
+        
+        // Count total files for progress tracking
+        const totalFiles = countTotalFiles(folder);
+        let processedFiles = 0;
+        
+        // Send initial progress with total files
+        if (mainWindow) {
+          mainWindow.webContents.send("indexing-progress", {
+            filename: "",
+            processed: 0,
+            total: totalFiles,
+            percentage: 0
+          });
+        }
+        
+        await indexFilesRecursively(folder, folder, totalFiles, (processed) => {
+          processedFiles = processed;
+          const percentage = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0;
+          
+          if (mainWindow) {
+            mainWindow.webContents.send("indexing-progress", {
+              filename: "",
+              processed: processedFiles,
+              total: totalFiles,
+              percentage: percentage
+            });
+          }
+        });
       }
     }
 
@@ -237,26 +267,71 @@ ipcMain.handle("index-files", async (event, folders) => {
 });
 
 // Thumbnail generation using sharp
+// async function generateThumbnail(filePath, id) {
+//   const ext = path.extname(filePath).toLowerCase();
+//   const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".heic", ".webp"];
+//   if (!imageExtensions.includes(ext)) return null;
+
+//   try {
+//     const thumbnailsDir = path.join(dataDir, "thumbnails");
+//     if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true });
+
+//     // Use ID for unique filename
+//     const thumbnailFilename = `${id}_thumb.jpg`;
+//     const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
+
+//     await sharp(filePath, { failOnError: false })
+//       .rotate()
+//       .resize(200, 200, { fit: "inside", withoutEnlargement: true })
+//       .jpeg({ quality: 80 })
+//       .toFile(thumbnailPath);
+
+//     return thumbnailPath;
+//   } catch (err) {
+//     console.error(`Error generating thumbnail for ${filePath}:`, err.message);
+//     return null;
+//   }
+// }
+
 async function generateThumbnail(filePath, id) {
   const ext = path.extname(filePath).toLowerCase();
   const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".heic", ".webp"];
-  if (!imageExtensions.includes(ext)) return null;
+  const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv"];
+
+  const thumbnailsDir = path.join(dataDir, "thumbnails");
+  if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true });
+
+  const thumbnailFilename = `${id}_thumb.jpg`;
+  const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
 
   try {
-    const thumbnailsDir = path.join(dataDir, "thumbnails");
-    if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true });
+    if (imageExtensions.includes(ext)) {
+      // --- Image thumbnails ---
+      await sharp(filePath, { failOnError: false })
+        .rotate()
+        .resize(200, 200, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toFile(thumbnailPath);
 
-    // Use ID for unique filename
-    const thumbnailFilename = `${id}_thumb.jpg`;
-    const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
+      return thumbnailPath;
+    } else if (videoExtensions.includes(ext)) {
+      // --- Video thumbnails ---
+      await new Promise((resolve, reject) => {
+        ffmpeg(filePath)
+          .on("end", resolve)
+          .on("error", reject)
+          .screenshots({
+            timestamps: ["10%"], // capture a frame ~10% into the video
+            filename: thumbnailFilename,
+            folder: thumbnailsDir,
+            size: "200x?"
+          });
+      });
 
-    await sharp(filePath, { failOnError: false })
-      .rotate()
-      .resize(200, 200, { fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 80 })
-      .toFile(thumbnailPath);
-
-    return thumbnailPath;
+      return thumbnailPath;
+    } else {
+      return null; // unsupported file type
+    }
   } catch (err) {
     console.error(`Error generating thumbnail for ${filePath}:`, err.message);
     return null;
@@ -335,7 +410,31 @@ const METADATA_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 2));  // 1 task p
 const THUMBNAIL_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 3)); // 1 task per 3 cores
 const BATCH_SIZE = 1000;             // insert batch size
 
-async function indexFilesRecursively(folderPath, rootFolder) {
+// Count total files for progress tracking
+function countTotalFiles(folderPath) {
+  let total = 0;
+  const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      total += countTotalFiles(path.join(folderPath, entry.name));
+    } else if (entry.isFile()) {
+      total++;
+    }
+  }
+  
+  return total;
+}
+
+async function indexFilesRecursively(folderPath, rootFolder, totalFiles, progressCallback) {
+  let processedFiles = 0;
+  
+  const updateProgress = () => {
+    processedFiles++;
+    if (progressCallback) {
+      progressCallback(processedFiles);
+    }
+  };
   const entries = fs.readdirSync(folderPath, { withFileTypes: true });
 
   // Separate directories and files
@@ -348,7 +447,7 @@ async function indexFilesRecursively(folderPath, rootFolder) {
 
   // Recurse into directories first
   for (const dirName of dirs) {
-    await indexFilesRecursively(path.join(folderPath, dirName), rootFolder);
+    await indexFilesRecursively(path.join(folderPath, dirName), rootFolder, totalFiles, progressCallback);
   }
 
   const limitMetadata = pLimit(METADATA_CONCURRENCY);
@@ -364,9 +463,16 @@ async function indexFilesRecursively(folderPath, rootFolder) {
 
   let batchRows = [];
 
-  for (const fileName of files) {
+    for (const fileName of files) {
     const fullPath = path.join(folderPath, fileName);
-    if (mainWindow) mainWindow.webContents.send("indexing-progress", fileName);
+    if (mainWindow) {
+      mainWindow.webContents.send("indexing-progress", {
+        filename: fileName,
+        processed: processedFiles,
+        total: totalFiles,
+        percentage: totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0
+      });
+    }
 
     const stats = fs.statSync(fullPath);
 
@@ -389,11 +495,15 @@ async function indexFilesRecursively(folderPath, rootFolder) {
       await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
       batchRows = [];
     }
+    
+    updateProgress();
   }
 
   // Insert any remaining files
   if (batchRows.length > 0) {
     await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
+    processedFiles += batchRows.length;
+    updateProgress();
   }
 }
 
@@ -431,13 +541,14 @@ async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
 
   // Generate thumbnails in parallel with limited concurrency
   const thumbPromises = rows
-    .filter(r => r.metadata.file_type === "image")
-    .map(r => limitThumb(async () => {
-      const thumbPath = await generateThumbnail(r.fullPath, r.id);
-      if (thumbPath) {
-        db.prepare(`UPDATE files SET thumbnail_path = ? WHERE id = ?`).run(thumbPath, r.id);
-      }
-    }));
+  .filter(r => ["image", "video"].includes(r.metadata.file_type))
+  .map(r => limitThumb(async () => {
+    const thumbPath = await generateThumbnail(r.fullPath, r.id);
+    if (thumbPath) {
+      db.prepare(`UPDATE files SET thumbnail_path = ? WHERE id = ?`).run(thumbPath, r.id);
+    }
+  }));
+
 
   await Promise.all(thumbPromises);
 }

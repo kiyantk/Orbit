@@ -11,6 +11,7 @@ import {
   faImages,
   faKeyboard,
   faPencil,
+  faPhotoFilm,
   faToolbox,
   faTriangleExclamation,
   faUser,
@@ -100,15 +101,13 @@ const SettingsView = ({
   }, [newTab]);
 
   // Set local settings
-  const handleCheckboxChange = (event) => {
-    setSettings((prev) => ({
-      ...prev,
-      userSettings: {
-        ...prev.userSettings,
-        autoSave: event.target.checked,
-      },
-    }));
-  };
+const handleCheckboxChange = (key) => (event) => {
+  setSettings((prev) => ({
+    ...prev,
+    [key]: event.target.checked,
+  }));
+};
+
 
 const handleUsernameChange = (event) => {
   const newValue = event.target.value;
@@ -130,10 +129,8 @@ const handleUsernameChange = (event) => {
 };
 
 useEffect(() => {
-  if (settings?.username !== undefined) {
-    saveSettings(settings);
-  }
-}, [settings.username]);
+  saveSettings(settings);
+}, [settings]);
 
 useEffect(() => {
   saveSettings(settings);
@@ -179,7 +176,8 @@ const removeFolder = async (folderPath) => {
   // Define tab icons
   const tabIcons = {
     User: faUser,
-    Media: faImages,
+    Media: faHardDrive,
+    // Explorer: faPhotoFilm,
     Storage: faHardDrive,
     Controls: faKeyboard,
     App: faToolbox,
@@ -242,19 +240,32 @@ const removeFolder = async (folderPath) => {
     }
   };
 
-  useEffect(() => {
-    const handleProgress = (data) => {
+useEffect(() => {
+  const handleProgress = (data) => {
+    if (typeof data === 'object' && data !== null) {
+      // New format with progress data
+      const { filename, processed, total, percentage } = data;
+      setCurrentFile(filename || "");
+      
+      if (total > 0) {
+        setIndexingStatus(`Indexing: ${processed}/${total} files (${percentage}%)`);
+      } else {
+        setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
+      }
+    } else {
+      // Old format - just filename string
       const filename = data || "";
       setCurrentFile(filename);
       setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
-    };
-  
-    window.electron.ipcRenderer.on("indexing-progress", handleProgress);
-  
-    return () => {
-      window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
-    };
-  }, []);
+    }
+  };
+
+  window.electron.ipcRenderer.on("indexing-progress", handleProgress);
+
+  return () => {
+    window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
+  };
+}, []);
 
   return (
       <div className="settings-view">
@@ -293,6 +304,18 @@ const removeFolder = async (folderPath) => {
                 </div>
               </div>
             )}
+            {/* {selectedTab === "Explorer" && (
+              <div>
+                <div className="settings-content-item">
+                  <input
+                    type="checkbox"
+                    checked={settings?.hideUnavailableMedia}
+                    onChange={handleCheckboxChange('hideUnavailableMedia')}
+                  />
+                  <span>Hide unavailable media</span>
+                </div>
+              </div>
+            )} */}
             {selectedTab === "Media" && (
               <div>
                 <div>
@@ -403,8 +426,18 @@ const removeFolder = async (folderPath) => {
                 </div>
                 <div className="settings-content-item">
                   <span>
+                    Open in default viewer:</span>{" "}
+                    <span className="settings-shortcut-key">CTRL</span> + <span className="settings-shortcut-key">Left Mouse Button</span>
+                </div>
+                <div className="settings-content-item">
+                  <span>
                     Navigate:</span>{" "}
                     <span className="settings-shortcut-key">SCROLL</span> or <span className="settings-shortcut-key"><FontAwesomeIcon icon={faArrowLeft} />{" "}<FontAwesomeIcon icon={faArrowUp} />{" "}<FontAwesomeIcon icon={faArrowDown} />{" "}<FontAwesomeIcon icon={faArrowRight} /></span>
+                </div>
+                <div className="settings-content-item">
+                  <span>
+                    Scale Grid:</span>{" "}
+                    <span className="settings-shortcut-key">CTRL</span> + <span className="settings-shortcut-key">SCROLL</span>
                 </div>
               </div>
             )}

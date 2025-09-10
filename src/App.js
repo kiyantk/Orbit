@@ -16,6 +16,8 @@ const App = () => {
     const [selectedSettingsTab, setSelectedSettingsTab] = useState(null);
     const [selectedItem, setSelectedItem] = useState(null);
     const [isMuted, setIsMuted] = useState(true); // session-wide mute state
+    const [forceFullscreen, setForceFullscreen] = useState(false);
+    const [explorerScale, setExplorerScale] = useState(1);
 
     useEffect(() => {
     // Load settings from Electron (preload.js)
@@ -71,7 +73,7 @@ const App = () => {
     const applyWelcomeData = async (welcomeData) => {
         const newConfig = { ...settings };
         newConfig.welcomePopupSeen = true;
-        newConfig.username = welcomeData.username ? welcomeData.username : null;
+        newConfig.username = null;
         newConfig.indexedFolders = welcomeData.selectedFolders || [];
         setSettings(newConfig);
         try {
@@ -103,6 +105,21 @@ const App = () => {
       setActiveView('settings');
       setSelectedSettingsTab('Media');
     };
+
+    const handleExplorerSelect = (item, type) => {
+      setSelectedItem(item);
+
+      if (type === "double") {
+        setForceFullscreen(true); // tell PreviewPanel to open fullscreen
+      } else {
+        setForceFullscreen(false);
+      }
+    };
+
+    const handleExplorerScale = (newScale) => {
+      setExplorerScale(newScale)
+    }
+
   return (
     <div className="App">
       <div className="App-main">
@@ -125,7 +142,8 @@ const App = () => {
                 currentSettings={settings} // Pass current settings
                 folderStatuses={folderStatuses}
                 openSettings={openMediaSettings}
-                onSelect={setSelectedItem}
+                onSelect={handleExplorerSelect}
+                onScale={handleExplorerScale}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (
@@ -133,6 +151,8 @@ const App = () => {
                     item={selectedItem}
                     isMuted={isMuted}
                     setIsMuted={setIsMuted}
+                    forceFullscreen={forceFullscreen}
+                    setForceFullscreen={setForceFullscreen}
                   />
                 ) : (
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>
@@ -149,6 +169,7 @@ const App = () => {
           )}
         </div>
         <BottomBar
+          explorerScale={explorerScale}
         />
       </div>
     </div>

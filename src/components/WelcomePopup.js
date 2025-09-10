@@ -95,9 +95,22 @@ const WelcomePopup = ({ submitWelcomePopup }) => {
 
 useEffect(() => {
   const handleProgress = (data) => {
-    const filename = data || "";
-    setCurrentFile(filename);
-    setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
+    if (typeof data === 'object' && data !== null) {
+      // New format with progress data
+      const { filename, processed, total, percentage } = data;
+      setCurrentFile(filename || "");
+      
+      if (total > 0) {
+        setIndexingStatus(`Indexing: ${processed}/${total} files (${percentage}%)`);
+      } else {
+        setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
+      }
+    } else {
+      // Old format - just filename string
+      const filename = data || "";
+      setCurrentFile(filename);
+      setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
+    }
   };
 
   window.electron.ipcRenderer.on("indexing-progress", handleProgress);

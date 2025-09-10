@@ -7,121 +7,46 @@ import {
   faToggleOff,
   faQuestion,
   faStarOfLife,
+  faPhotoFilm,
+  faMagnifyingGlass,
 } from "@fortawesome/free-solid-svg-icons";
 
-const BottomBar = ({
-  notes,
-  autosaveStatus,
-  editorContent,
-  isEditorContentDecoded,
-  onRefresh,
-  onManualSaveNote,
-  noteOpened,
-  manualSaveIcon,
-  manualSaveText,
-  onShortcutAddNote,
-  onShortcutCloseNote,
-  settings,
-}) => {
-  const [rotating, setRotating] = useState(false);
+const BottomBar = ({ explorerScale }) => {
 
-  // Function to count words and lines
-  const getWordAndLineCount = (text) => {
-    if (text !== null && text !== "") {
-      const lines = text.split(/\r\n|\r|\n/).length;
-      const words = text.trim() === "" ? 0 : text.trim().split(/\s+/).length;
-      return { words, lines };
-    } else {
-      return { words: null, lines: null };
-    }
-  };
-
-  // Get word and line count from editor's content
-  const { words, lines } = settings?.userSettings?.showTextStatistics
-    ? getWordAndLineCount(
-        isEditorContentDecoded ? editorContent : atob(editorContent)
-      )
-    : "";
-
-  // Autosave status logic
-  const getAutosaveStatus = () => {
-    switch (autosaveStatus) {
-      case 1:
-        return {
-          icon: faToggleOff,
-          text: "Autosave Off",
-          className: "status-off",
-        };
-      case 2:
-        return { icon: faCheck, text: "Up to date", className: "status-saved" };
-      case 3:
-        return {
-          icon: faStarOfLife,
-          text: "Changed",
-          className: "status-changed",
-        };
-      case 4:
-        return {
-          icon: faToggleOn,
-          text: "Autosave On",
-          className: "status-on",
-        };
-      default:
-        return { icon: faQuestion, text: "Unknown", className: "status-off" };
-    }
-  };
-
-  const { icon, text, className } = getAutosaveStatus();
-
-  // Refresh button click handler
-  const handleRefresh = () => {
-    setRotating(true);
-    onRefresh(); // Call the refresh function passed from parent
-    setTimeout(() => setRotating(false), 500); // Reset animation after 0.5s
-  };
-
-  // Manual save using Save button in bottom right corner
-  const doManualSave = () => {
-    onManualSaveNote();
-  };
-
-  // Bind keyboard shortcuts
+  const [photoCount, setPhotoCount] = useState(0);
+// Fetch photo count
   useEffect(() => {
-    const handleKeyDown = (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === "s") {
-        if (noteOpened) {
-          event.preventDefault();
-          doManualSave();
+    const fetchPhotoCount = async () => {
+      try {
+        if (window.electron.ipcRenderer) {
+          const count = await window.electron.ipcRenderer.invoke("get-indexed-files-count");
+          setPhotoCount(count);
         }
-      } else if ((event.ctrlKey || event.metaKey) && event.key === "r") {
-        event.preventDefault();
-        handleRefresh();
-      } else if ((event.ctrlKey || event.metaKey) && event.key === "t") {
-        event.preventDefault();
-        onShortcutAddNote();
-      } else if ((event.ctrlKey || event.metaKey) && event.key === "w") {
-        event.preventDefault();
-        onShortcutCloseNote();
+      } catch (err) {
+        console.error("Failed to fetch photo count:", err);
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    fetchPhotoCount();
 
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [noteOpened, editorContent]);
+    // Optional: refresh count every 10s
+    const interval = setInterval(fetchPhotoCount, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="bottom-bar">
       <div className="bottom-bar-left">
-        {/* Left: Photo Counter */}
-        {/* <div> */}
-          {/* <span className="Photos-counter">{Photos.length} Photos</span> */}
-        {/* </div> */}
+        <div className="bottom-bar-media-counter"><FontAwesomeIcon icon={faPhotoFilm} /><span>{photoCount}</span></div>
       </div>
 
       <div className="bottom-bar-right">
+        { Number(explorerScale) !== 1 ? (
+          <div className="bottom-bar-scale-counter">
+            <FontAwesomeIcon icon={faMagnifyingGlass} />
+            <span>{Number(explorerScale * 100).toFixed(0) + '%'}</span>
+          </div>
+        ) : ('') }
       </div>
     </div>
   );

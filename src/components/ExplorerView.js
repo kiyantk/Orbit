@@ -4,18 +4,36 @@ import { FixedSizeGrid as Grid } from "react-window";
 import InfiniteLoader from "react-window-infinite-loader";
 import "./ExplorerView.css"; // optional, add styles you like
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faArrowRight } from "@fortawesome/free-solid-svg-icons";
+import { faArrowRight, faVideo } from "@fortawesome/free-solid-svg-icons";
 
-const COLUMN_WIDTH = 130; // includes thumbnail + padding
-const ROW_HEIGHT = 130;
+const BASE_COLUMN_WIDTH = 130; 
+const BASE_ROW_HEIGHT = 130;
 const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
 
-const ExplorerView = ({ currentSettings, folderStatuses , openSettings, onSelect }) => {
+const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale }) => {
   const [settings, setSettings] = useState(currentSettings);
   const [totalCount, setTotalCount] = useState(null);
   const [items, setItems] = useState({}); // map index -> item
   const loadingPages = useRef(new Set());
+  const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
+
+  // Listen for ctrl+scroll
+  useEffect(() => {
+    const handleWheel = (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault(); // stop browser zoom
+        setScale((prev) => {
+          const next = prev + (e.deltaY < 0 ? 0.1 : -0.1);
+          const clamped = Math.min(3, Math.max(0.5, next));
+          onScale(clamped.toFixed(2));
+          return clamped;
+        });
+      }
+    };
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    return () => window.removeEventListener("wheel", handleWheel);
+  }, []);
 
   useEffect(() => {
     // Load settings on mount (you already do this elsewhere but keep for safety)
@@ -27,7 +45,7 @@ const ExplorerView = ({ currentSettings, folderStatuses , openSettings, onSelect
     window.electron.ipcRenderer.invoke("get-indexed-files-count").then((count) => {
       setTotalCount(Number(count || 0));
     });
-  }, []);
+  }, [currentSettings]);
 
   // Helper: fetch a page containing the given index
   const fetchPageForIndex = useCallback(
@@ -104,8 +122,9 @@ const containerRef = useCallback((node) => {
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
 
-
-  const columnCount = Math.max(1, Math.floor(containerWidth / (COLUMN_WIDTH + GUTTER)));
+  const columnWidth = BASE_COLUMN_WIDTH * scale;
+  const rowHeight = BASE_ROW_HEIGHT * scale;
+  const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + GUTTER)));
   const rowCount = totalCount ? Math.ceil(totalCount / columnCount) : 0;
 
   // render each cell
@@ -120,19 +139,23 @@ const containerRef = useCallback((node) => {
       <div style={{ ...style, padding: 8 }}>
         <div
           className="thumb-skeleton"
-          style={{ width: "100%", height: ROW_HEIGHT - 16, borderRadius: 6 }}
+          style={{ width: "100%", height: rowHeight - 16, borderRadius: 6 }}
         />
       </div>
     );
   }
 
+  const folderAvailable = folderStatuses[item.folder_path];
+
   const thumbSrc = item.thumbnail_path ? `orbit://thumbs/${item.id}_thumb.jpg` : null;
 
   return (
-    <div style={{ ...style, padding: 8, boxSizing: "border-box", textAlign: "center" }} onClick={() => onSelect(item)}>
+    <div style={{ ...style, padding: 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
+      onClick={() => folderAvailable && onSelect(item, "single")}
+      onDoubleClick={() => folderAvailable && onSelect(item, "double")}>
       <div
         className="thumb-card"
-        style={{ width: "100%", height: ROW_HEIGHT - 36 }} // leave space for filename
+        style={{ width: "100%", height: rowHeight - 36 }} // leave space for filename
       >
         {thumbSrc ? (
           <img
@@ -147,6 +170,18 @@ const containerRef = useCallback((node) => {
           />
         ) : (
           <div className="thumb-no-image">No preview</div>
+        )}
+        { item.file_type === "video" && (
+          <div className="thumb-video-indicator"><FontAwesomeIcon icon={faVideo} /></div>
+        ) }
+
+        {/* Overlay warning if folder unavailable */}
+        {!folderAvailable && (
+          <div
+            className="thumb-video-unavailable"
+          >
+            Unavailable
+          </div>
         )}
       </div>
       {/* Filename under the thumbnail */}
@@ -208,10 +243,10 @@ const containerRef = useCallback((node) => {
                 gridRef.current = grid;
               }}
               columnCount={columnCount}
-              columnWidth={COLUMN_WIDTH + GUTTER}
+              columnWidth={columnWidth + GUTTER}
               height={gridHeight}
               rowCount={rowCount}
-              rowHeight={ROW_HEIGHT}
+              rowHeight={rowHeight}
               width={containerWidth}
               onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex, visibleColumnStartIndex, visibleColumnStopIndex }) => {
                 // translate Grid visible indices into linear indices for InfiniteLoader

@@ -2,15 +2,16 @@
 .thumb-skeleton { background: #222 }
 .thumb-card { position: relative; overflow: hidden; background: #111; border-radius: 6px; display:flex; flex-direction:column; }
 .thumb-meta { position: absolute; left: 6px; bottom: 6px; right: 6px; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
-.thumb-filename { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thumb-filename { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none;}
 .thumb-no-image { display:flex; align-items:center; justify-content:center; height:100%; color:#999; font-size:12px; }
 .explorer-arrow-right {
     vertical-align: middle;
     font-size: 14px;
 }
 .explorer-main>div {
-    padding: 15px 0px 15px 15px !important;
-    height: calc(100vh - 23px - 26px - 15px) !important;
+    /* padding: 15px 0px 15px 15px !important; */
+    padding: 0px !important;
+    height: calc(100vh - 23px - 26px - 22px) !important;
     width: 100% !important;
     overflow-x: hidden !important;
 }

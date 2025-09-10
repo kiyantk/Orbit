@@ -268,6 +268,181 @@ body {
 .menu-bar button:hover {
   background: #1f1f1f;
 }
+.video-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.video-element {
+  max-height: 500px;
+  max-width: 100%;
+  /* border-radius: 0.5rem; */
+  background: black;
+  display: block;
+}
+
+.video-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  z-index: 10;
+}
+
+.overlay-darken {
+  position: absolute;
+  inset: 0;
+  /* background: rgba(0, 0, 0, 0.4); */
+  /* border-radius: 0.5rem; */
+  z-index: 5;
+}
+
+.video-control, .fullscreen-close {
+  color: white;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  border-radius: 9999px;
+  padding: 12px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  text-align: center;
+}
+
+.video-control:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.center-control {
+  font-size: 2rem;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  width: 60px;
+}
+
+.video-controls-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 6;
+}
+
+.fullscreen-content .video-controls-bottom {
+  margin-bottom: 10px;
+}
+
+.fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.fullscreen-content {
+  position: relative;
+  max-width: fit-content;
+  max-height: 95%;
+  display: contents;
+}
+
+.fullscreen-content>.video-wrapper {
+    height: 100%;
+    align-content: center;
+}
+
+.fullscreen-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 1rem;
+  color: white;
+  padding: 6px;
+  z-index: 20;
+  cursor: pointer;
+  width: 30px;
+  height: 30px;
+}
+
+.fullscreen-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.fullscreen-video .video-element {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+
+.video-track-wrapper {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,0.2); /* empty track */
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.video-track-filled {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: #ddd; /* light fill */
+  border-radius: 3px;
+}
+
+.video-track-overlay {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+}
+
+.mute-control {
+  font-size: 0.76rem;
+  width: 30px;
+  height: 30px;
+  padding: 0px;
+}
+
+.fullscreen-control {
+  font-size: 0.76rem;
+  width: 30px;
+  height: 30px;
+  padding: 0px;
+}
+
+.bottom-bar-media-counter, .bottom-bar-scale-counter {
+  line-height: 0.95;
+}
+
+.bottom-bar-media-counter svg, .bottom-bar-scale-counter svg {
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.bottom-bar-media-counter span {
+  margin-left: 6px;
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+.bottom-bar-scale-counter span {
+  margin-left: 4px;
+  font-size: 14px;
+  vertical-align: middle;
+}
 
 /* 🔹 Main Content Layout */
 .content {
@@ -302,6 +477,21 @@ body {
   /* height: 100%; Full height */
   height: calc(100% - 23px);
   user-select: none;
+}
+
+.thumb-video-unavailable {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgb(255 0 0 / 27%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  font-weight: bold;
+  border-radius: 6;
 }
 
 .note-list-bottombar-min {
@@ -567,12 +757,14 @@ body {
 
 /* Track */
 ::-webkit-scrollbar-track {
-  background: #4a4a4a;
+  background: #4a4a4a61;
+  border-radius: 5px;
 }
 
 /* Handle */
 ::-webkit-scrollbar-thumb {
-  background: #333333;
+  background: #eaeaea;
+  border-radius: 5px;
 }
 
 /* Handle on hover */
@@ -734,8 +926,8 @@ body {
 .bottom-bar-right {
   display: flex;
   position: absolute;
-  right: 0px;
-  font-size: 14px;
+  right: 10px;
+  /* font-size: 14px; */
   height: 100%;
 }
 
@@ -878,6 +1070,21 @@ body {
   width: 100%;
 }
 
+.preview-panel-content img {
+  cursor: pointer
+}
+
+.thumb-video-indicator {
+  position: absolute;
+  bottom: 5px;
+  right: 10px;
+}
+
+.thumb-video-indicator>svg>path {
+  stroke: #646464;
+  stroke-width: 15px;
+}
+
 .metadata-panel {
   font-size: 0.875rem; /* sm */
   color: #6b7280; /* gray-600 */
@@ -969,7 +1176,7 @@ body {
   padding: 8px;
   background-color: #27222d;
   border-radius: 4px;
-  border-left: 3px solid #824aff;
+  /* border-left: 3px solid #824aff; */
   font-size: 13px;
   color: #e0e0e0;
 }
