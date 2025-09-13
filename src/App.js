@@ -7,6 +7,8 @@ import SettingsView from "./components/SettingsView";
 import "./App.css";
 import ExplorerView from "./components/ExplorerView";
 import PreviewPanel from "./components/PreviewPanel";
+import ActionPanel from "./components/ActionPanel";
+import StatsView from "./components/StatsView";
 
 const App = () => {
     const [settings, setSettings] = useState(null);
@@ -18,6 +20,13 @@ const App = () => {
     const [isMuted, setIsMuted] = useState(true); // session-wide mute state
     const [forceFullscreen, setForceFullscreen] = useState(false);
     const [explorerScale, setExplorerScale] = useState(1);
+    const [actionPanelType, setActionPanelType] = useState(null);
+    const [filters, setFilters] = useState(null);
+
+const handleActionPanelApply = (data) => {
+  // setActionPanelType(null); // Close panel
+  setFilters(data);
+};
 
     useEffect(() => {
     // Load settings from Electron (preload.js)
@@ -120,12 +129,20 @@ const App = () => {
       setExplorerScale(newScale)
     }
 
+    const handleActionPanelClick = (type) => {
+      if(actionPanelType === null || actionPanelType !== type) {
+        setActionPanelType(type)
+      } else {
+        setActionPanelType(null)
+      }
+    }
+
   return (
     <div className="App">
       <div className="App-main">
         <MenuBar
         />
-        <SideBar activeView={activeView} activeViewChanged={setNewActiveView} />
+        <SideBar activeView={activeView} activeViewChanged={setNewActiveView} openActionPanel={handleActionPanelClick} actionPanelType={actionPanelType} />
         <div className="content">
           {activeView === "settings" && (
             <SettingsView
@@ -136,6 +153,9 @@ const App = () => {
               newTab={selectedSettingsTab}
             />
           )}
+          {activeView === "stats" && (
+            <StatsView birthDate={settings.birthDate}/>
+          )}
           {activeView === "explore" && (
             <div className="explorer-container">
               <ExplorerView
@@ -144,6 +164,7 @@ const App = () => {
                 openSettings={openMediaSettings}
                 onSelect={handleExplorerSelect}
                 onScale={handleExplorerScale}
+                filters={filters}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (
@@ -158,6 +179,7 @@ const App = () => {
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>
                 )}
               </div>
+              <ActionPanel type={actionPanelType} onApply={handleActionPanelApply}/>
             </div>
           )}
         </div>

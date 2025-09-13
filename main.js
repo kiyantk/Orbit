@@ -14,6 +14,8 @@ const sharp = require("sharp");
 const { protocol } = require("electron");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("ffmpeg-static");
+const lookup = require("coordinate_to_country");
+
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 
 let mainWindow;
@@ -23,8 +25,8 @@ app.whenReady().then(() => {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    minWidth: 400,
-    minHeight: 400,
+    minWidth: 788,
+    minHeight: 708,
     icon: path.join(__dirname, "./public/logo512.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -114,6 +116,7 @@ const defaultConfig = {
   welcomePopupSeen: false,
   username: null,
   indexedFolders: [],
+  birthDate: null,
 };
 
 // Database
@@ -145,7 +148,19 @@ function initDatabase() {
       longitude REAL,
       altitude REAL,
       create_date INTEGER,
-      thumbnail_path TEXT
+      thumbnail_path TEXT,
+      lens_model TEXT,
+      iso INTEGER,
+      software TEXT,
+      offset_time_original TEXT,
+      megapixels REAL,
+      exposure_time TEXT,
+      color_space TEXT,
+      flash TEXT,
+      aperture REAL,
+      focal_length REAL,
+      focal_length_35mm REAL,
+      country TEXT
     )
   `);
 
@@ -188,6 +203,15 @@ ipcMain.handle("open-orbit-location", () => {
   shell.openPath(appPath);
 });
 
+ipcMain.handle('open-in-default-viewer', async (event, filePath) => {
+  try {
+    await shell.openPath(filePath);
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to open file:", err);
+    return { success: false, error: err.message };
+  }
+});
 
 // Folder selection
 ipcMain.handle("select-folders", async () => {
@@ -201,23 +225,156 @@ ipcMain.handle("select-folders", async () => {
 // Fetch paginated files for the UI
 // Args: { offset: number, limit: number }
 // Returns: array of rows [{ id, filename, thumbnail_path, path, width, height, file_type }]
-ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200 } = {}) => {
+ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters = {} }) => {
   try {
     initDatabase();
-    // Use an index-friendly ORDER BY (id) - adjust if you want different ordering (e.g. by modified)
+
+    let whereClauses = [];
+    const params = [];
+
+    if (filters.dateFrom) {
+      whereClauses.push("create_date >= ?");
+      params.push(Math.floor(new Date(filters.dateFrom).getTime() / 1000));
+    }
+    if (filters.dateTo) {
+      whereClauses.push("create_date <= ?");
+      params.push(Math.floor(new Date(filters.dateTo).getTime() / 1000));
+    }
+    if (filters.device) {
+      whereClauses.push("device_model = ?");
+      params.push(filters.device);
+    }
+    if (filters.folder) {
+      whereClauses.push("folder_path = ?");
+      params.push(filters.folder);
+    }
+    if (filters.filetype) {
+      whereClauses.push("extension = ?");
+      params.push(filters.filetype);
+    }
+    if (filters.mediaType) {
+      whereClauses.push("file_type = ?");
+      params.push(filters.mediaType);
+    }
+    if (filters.country) {
+      whereClauses.push("country = ?");
+      params.push(filters.country);
+    }
+
+    // --- search ---
+    if (filters.searchBy && filters.searchTerm) {
+      if (filters.searchBy === "id") {
+        whereClauses.push("id = ?");
+        params.push(filters.searchTerm);
+      } else if (filters.searchBy === "name") {
+        whereClauses.push("filename LIKE ?");
+        params.push(`%${filters.searchTerm}%`);
+      }
+    }
+
+    // --- sorting ---
+    const validSorts = ["id", "filename", "create_date", "date_created"];
+    const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : "id";
+    const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC"
+
+    const whereSQL = whereClauses.length ? "WHERE " + whereClauses.join(" AND ") : "";
+
+    const countStmt = db.prepare(`SELECT COUNT(*) as count FROM files ${whereSQL}`);
+    const totalCount = countStmt.get(...params).count;
+
     const stmt = db.prepare(`
-      SELECT id, filename, thumbnail_path, path, width, height, file_type, size, latitude, longitude, device_model, created, altitude, create_date, folder_path
+      SELECT *
       FROM files
-      ORDER BY id
+      ${whereSQL}
+      ORDER BY ${safeSortBy} ${safeSortOrder}
       LIMIT ? OFFSET ?
     `);
-    const rows = stmt.all(limit, offset);
-    return { success: true, rows };
+
+    const rows = stmt.all(...params, limit, offset);
+
+    return { success: true, rows, totalCount };
   } catch (err) {
     console.error("fetch-files error:", err);
-    return { success: false, error: err.message, rows: [] };
+    return { success: false, error: err.message, rows: [], totalCount: 0 };
   }
 });
+
+// Load the mapped JSON once on startup
+const countriesPath = path.join(__dirname, 'countries_mapped.json');
+const countriesMap = JSON.parse(fs.readFileSync(countriesPath, 'utf8'));
+
+ipcMain.handle('get-country-name', async (event, isoCode) => {
+  if (!isoCode) return null;
+
+  // Normalize code to uppercase
+  const code = isoCode.toUpperCase();
+
+  // Lookup in the mapped JSON
+  return countriesMap[code] || null;
+});
+
+
+ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
+  try {
+    initDatabase();
+
+    let query = "SELECT COUNT(*) as count FROM files";
+    const conditions = [];
+    const params = [];
+
+    if (filters) {
+      if (filters.dateFrom) {
+        conditions.push("create_date >= ?");
+        params.push(Math.floor(new Date(filters.dateFrom).getTime() / 1000));
+      }
+      if (filters.dateTo) {
+        conditions.push("create_date <= ?");
+        params.push(Math.floor(new Date(filters.dateTo).getTime() / 1000));
+      }
+      if (filters.device) {
+        conditions.push("device_model = ?");
+        params.push(filters.device);
+      }
+      if (filters.filetype) {
+        conditions.push("extension = ?");
+        params.push(filters.filetype);
+      }
+      if (filters.folder) {
+        conditions.push("folder_path = ?");
+        params.push(filters.folder);
+      }
+      if (filters.mediaType) {
+        conditions.push("file_type = ?");
+        params.push(filters.mediaType);
+      }
+      if (filters.country) {
+        conditions.push("country = ?");
+        params.push(filters.country);
+      }
+      if (filters.searchBy && filters.searchTerm) {
+        if (filters.searchBy === "id") {
+          conditions.push("id = ?");
+          params.push(filters.searchTerm);
+        } else if (filters.searchBy === "name") {
+          conditions.push("filename LIKE ?");
+          params.push(`%${filters.searchTerm}%`);
+        }
+      }
+    }
+
+    if (conditions.length > 0) {
+      query += " WHERE " + conditions.join(" AND ");
+    }
+
+    const result = db.prepare(query).get(params);
+
+    return result?.count || 0;
+  } catch (err) {
+    console.error("get-filtered-files-count error", err);
+    return 0;
+  }
+});
+
 
 // Indexing
 ipcMain.handle("index-files", async (event, folders) => {
@@ -353,6 +510,18 @@ async function extractMetadata(filePath) {
     longitude: null,
     altitude: null,
     create_date: null,
+    lens_model: null,
+    iso: null,
+    software: null,
+    offset_time_original: null,
+    megapixels: null,
+    exposure_time: null,
+    color_space: null,
+    flash: null,
+    aperture: null,
+    focal_length: null,
+    focal_length_35mm: null,
+    country: null
   };
 
   const ext = path.extname(filePath).toLowerCase();
@@ -388,6 +557,7 @@ async function extractMetadata(filePath) {
     if (exifData.GPSLatitude && exifData.GPSLongitude) {
       metadata.latitude = exifData.GPSLatitude;
       metadata.longitude = exifData.GPSLongitude;
+      metadata.country = lookup(exifData.GPSLatitude, exifData.GPSLongitude, true)
     }
 
     // Altitude
@@ -396,6 +566,20 @@ async function extractMetadata(filePath) {
     // Create date (choose DateTimeOriginal if available)
     const dateStr = exifData.DateTimeOriginal || exifData.CreateDate;
     if (dateStr) metadata.create_date = Math.floor(new Date(dateStr).getTime() / 1000);
+
+    metadata.lens_model = exifData.LensModel || exifData.Lens || null;
+    metadata.iso = exifData.ISO || null;
+    metadata.software = exifData.Software || null;
+    metadata.offset_time_original = exifData.OffsetTimeOriginal || null;
+    metadata.megapixels = (exifData.ExifImageWidth && exifData.ExifImageHeight)
+      ? (exifData.ExifImageWidth * exifData.ExifImageHeight) / 1_000_000
+      : null;
+    metadata.exposure_time = exifData.ExposureTime || null;
+    metadata.color_space = exifData.ColorSpace || null;
+    metadata.flash = exifData.Flash || null;
+    metadata.aperture = exifData.FNumber || null;
+    metadata.focal_length = exifData.FocalLength || null;
+    metadata.focal_length_35mm = exifData.FocalLengthIn35mmFormat || null;
   } catch (err) {
     console.log(`No EXIF data for ${filePath}: ${err.message}`);
   }
@@ -457,8 +641,10 @@ async function indexFilesRecursively(folderPath, rootFolder, totalFiles, progres
     INSERT OR REPLACE INTO files 
     (filename, path, size, created, modified, extension, folder_path,
      file_type, device_model, camera_make, camera_model, width, height,
-     orientation, latitude, longitude, altitude, create_date, thumbnail_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     orientation, latitude, longitude, altitude, create_date, thumbnail_path,
+     lens_model, iso, software, offset_time_original, megapixels,
+     exposure_time, color_space, flash, aperture, focal_length, focal_length_35mm, country)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   let batchRows = [];
@@ -531,7 +717,19 @@ async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
         row.metadata.longitude,
         row.metadata.altitude,
         row.metadata.create_date,
-        null
+        null, // thumbnail path updated later
+        row.metadata.lens_model,
+        row.metadata.iso,
+        row.metadata.software,
+        row.metadata.offset_time_original,
+        row.metadata.megapixels,
+        row.metadata.exposure_time,
+        row.metadata.color_space,
+        row.metadata.flash,
+        row.metadata.aperture,
+        row.metadata.focal_length,
+        row.metadata.focal_length_35mm,
+        row.metadata.country
       );
       row.id = info.lastInsertRowid;
     }

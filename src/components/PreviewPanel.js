@@ -1,6 +1,15 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faPlay, faPause, faVolumeMute, faVolumeUp, faXmark, faExpand } from "@fortawesome/free-solid-svg-icons";
+import { MapContainer, TileLayer, Marker } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
+  iconUrl: require('leaflet/dist/images/marker-icon.png'),
+  shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
+});
 
 export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen }) {
   
@@ -17,6 +26,8 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   const [currentTime, setCurrentTime] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [itemCountry, setItemCountry] = useState(null)
 
   const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
   const currentTrackRef = isFullscreen ? trackRefFullscreen : trackRefNormal;
@@ -62,9 +73,22 @@ useEffect(() => {
   return () => document.removeEventListener("keydown", handleEsc);
 }, [isFullscreen]);
 
+  const convertItemCountry = useCallback(async () => {
+    if (!item.country) return;
+
+    try {
+      const country = await window.electron.ipcRenderer.invoke('get-country-name', item.country);
+      setItemCountry(country);
+    } catch (error) {
+      console.error("Error converting item country:", error);
+    }
+  }, [item]);
+
 useEffect(() => {
   setCurrentTime(0);
   setIsPlaying(true);
+  setIsLoading(true);
+  convertItemCountry();
 }, [item]);
 
 
@@ -112,8 +136,6 @@ const updateCurrentTime = (e) => {
   setCurrentTime(newTime);
   currentVideoRef.current.currentTime = newTime;
 };
-
-
 
   // Convert bytes to human-readable (KB, MB, GB etc.)
   function formatBytes(a, b = 2) {
@@ -175,6 +197,24 @@ const updateCurrentTime = (e) => {
   }, 0);
 };
 
+function formatDuration(seconds) {
+  // Round down to nearest whole second
+  const totalSeconds = Math.floor(seconds);
+
+  const hrs = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  // Pad with leading zeros if needed
+  const formatted = [
+    hrs.toString().padStart(2, '0'),
+    mins.toString().padStart(2, '0'),
+    secs.toString().padStart(2, '0')
+  ].join(':');
+
+  return formatted;
+}
+
 const closeFullscreen = () => {
   if (videoRefNormal.current && videoRefFullscreen.current) {
     videoRefNormal.current.currentTime = videoRefFullscreen.current.currentTime;
@@ -189,8 +229,13 @@ const closeFullscreen = () => {
   const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y- preview-panel-wrapper">
       <div className="flex justify-center preview-panel-content">
+          {isLoading && (
+            <div className="absolute inset-0 flex justify-center items-center bg-black/50 z-10">
+              <div className="loader"></div>
+            </div>
+          )}
 {isVideo ? (
   <div
     className="video-wrapper"
@@ -203,7 +248,8 @@ const closeFullscreen = () => {
       autoPlay
       muted={isMuted}
       loop
-      className="video-element"
+      className={`video-element ${isLoading ? "hidden" : ""}`}
+      onLoadedData={() => setIsLoading(false)}
     />
 
     {/* Overlay */}
@@ -267,34 +313,193 @@ const closeFullscreen = () => {
           <img
             src={fileUrl}
             alt={item.filename}
-            className="max-h-[500px] object-contain rounded-lg bg-gray-200"
+            className={`max-h-[500px] object-contain rounded-lg bg-gray-200 ${isLoading ? "hidden" : ""}`}
             onClick={openFullscreen}
+            onLoad={() => setIsLoading(false)}
           />
         )}
       </div>
 
-      <div className="metadata-panel">
-        <div className="metadata-row">
-          <span className="metadata-label">Filename</span>
-          <span className="metadata-value">{item.filename}</span>
+<div className="metadata-panel">
+  {item.filename && (
+    <div className="metadata-row">
+      <span className="metadata-label">Filename</span>
+      <span className="metadata-value">{item.filename}</span>
+    </div>
+  )}
+
+  {item.size != null && (
+    <div className="metadata-row">
+      <span className="metadata-label">Size</span>
+      <span className="metadata-value">{formatBytes(item.size)}</span>
+    </div>
+  )}
+
+  {(item.extension || item.file_type) && (
+    <div className="metadata-row">
+      <span className="metadata-label">Type</span>
+      <span className="metadata-value">{item.extension + (item.file_type ? ` (${item.file_type})` : '')}</span>
+    </div>
+  )}
+
+  {item.create_date && (
+    <div className="metadata-row">
+      <span className="metadata-label">Taken</span>
+      <span className="metadata-value">{formatTimestamp(item.create_date)}</span>
+    </div>
+  )}
+
+  {item.device_model && (
+    <div className="metadata-row">
+      <span className="metadata-label">Device</span>
+      <span className="metadata-value">{item.device_model}</span>
+    </div>
+  )}
+
+  {item.width && item.height && (
+    <div className="metadata-row">
+      <span className="metadata-label">Resolution</span>
+      <span className="metadata-value">{item.width + 'x' + item.height}</span>
+    </div>
+  )}
+
+  {item.latitude != null && item.longitude != null && (
+    <div className="metadata-row">
+      <span className="metadata-label">Location</span>
+      <span className="metadata-value">
+        <div style={{ width: "100%", height: "150px" }}>
+          {/* Using Leaflet for a simple map */}
+          <MapContainer key={item.id} center={[item.latitude, item.longitude]} zoom={13} style={{ width: "100%", height: "100%", userSelect: "none", marginTop: "5px" }}>
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution="&copy; OpenStreetMap contributors"
+            />
+            <Marker position={[item.latitude, item.longitude]} />
+          </MapContainer>
         </div>
-        <div className="metadata-row">
-          <span className="metadata-label">Size</span>
-          <span className="metadata-value">{formatBytes(item.size)}</span>
+        <div style={{ padding: "2px 0px", backgroundColor: "#28262d", borderRadius: "0px 0px 10px 10px" }}>
+          {item.latitude}, {item.longitude}
+          {item.altitude != null ? `, ${item.altitude} m` : ''}
         </div>
-        <div className="metadata-row">
-          <span className="metadata-label">Type</span>
-          <span className="metadata-value">{item.file_type}</span>
-        </div>
-        <div className="metadata-row">
-          <span className="metadata-label">Taken</span>
-          <span className="metadata-value">{formatTimestamp(item.create_date)}</span>
-        </div>
-        <div className="metadata-row">
-          <span className="metadata-label">Device</span>
-          <span className="metadata-value">{item.device_model}</span>
-        </div>
-      </div>
+      </span>
+    </div>
+  )}
+
+  {item.country && (
+    <div className="metadata-row">
+      <span className="metadata-label">Country</span>
+      <span className="metadata-value">{itemCountry}</span>
+    </div>
+  )}
+
+  {item.lens_model && (
+    <div className="metadata-row">
+      <span className="metadata-label">Lens</span>
+      <span className="metadata-value" title={item.lens_model}>{item.lens_model}</span>
+    </div>
+  )}
+
+  {item.iso && (
+    <div className="metadata-row">
+      <span className="metadata-label">ISO</span>
+      <span className="metadata-value">{item.iso}</span>
+    </div>
+  )}
+
+  {item.software && (
+    <div className="metadata-row">
+      <span className="metadata-label">Software</span>
+      <span className="metadata-value" title={item.software}>{item.software}</span>
+    </div>
+  )}
+
+  {item.offset_time_original && (
+    <div className="metadata-row">
+      <span className="metadata-label">Offset Time</span>
+      <span className="metadata-value">{item.offset_time_original}</span>
+    </div>
+  )}
+
+  {item.megapixels && (
+    <div className="metadata-row">
+      <span className="metadata-label">Megapixels</span>
+      <span className="metadata-value">{item.megapixels.toFixed(0)}</span>
+    </div>
+  )}
+
+  {item.exposure_time && (
+    <div className="metadata-row">
+      <span className="metadata-label">Exposure</span>
+      <span className="metadata-value">{item.exposure_time} s</span>
+    </div>
+  )}
+
+  {item.color_space && (
+    <div className="metadata-row">
+      <span className="metadata-label">Color Space</span>
+      <span className="metadata-value">{item.color_space}</span>
+    </div>
+  )}
+
+  {item.flash && (
+    <div className="metadata-row">
+      <span className="metadata-label">Flash</span>
+      <span className="metadata-value">{item.flash}</span>
+    </div>
+  )}
+
+  {item.aperture && (
+    <div className="metadata-row">
+      <span className="metadata-label">Aperture</span>
+      <span className="metadata-value"><i>f/</i>{item.aperture}</span>
+    </div>
+  )}
+
+  {item.focal_length && (
+    <div className="metadata-row">
+      <span className="metadata-label">Focal Length</span>
+      <span className="metadata-value">{item.focal_length + ' (' + item.focal_length_35mm + ')'}</span>
+    </div>
+  )}
+
+  {isVideo && duration && (
+    <div className="metadata-row">
+      <span className="metadata-label">Duration</span>
+      <span className="metadata-value">{formatDuration(duration)}</span>
+    </div>
+  )}
+
+  {item.modified && (
+    <div className="metadata-row">
+      <span className="metadata-label">Modified At</span>
+      <span className="metadata-value">{formatTimestamp(item.modified)}</span>
+    </div>
+  )}
+
+  {item.created && (
+    <div className="metadata-row">
+      <span className="metadata-label">Created At</span>
+      <span className="metadata-value">{formatTimestamp(item.created)}</span>
+    </div>
+  )}
+  
+  {item.path && (
+    <div className="metadata-row">
+      <span className="metadata-label">Path</span>
+      <span className="metadata-value" title={item.path}>
+        {item.path}
+      </span>
+    </div>
+  )}
+
+  {item.id && (
+    <div className="metadata-row">
+      <span className="metadata-label">ID</span>
+      <span className="metadata-value">{item.id}</span>
+    </div>
+  )}
+</div>
+
 
       {/* Fullscreen overlay */}
       {isFullscreen && (

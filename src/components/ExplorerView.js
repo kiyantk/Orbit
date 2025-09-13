@@ -11,12 +11,13 @@ const BASE_ROW_HEIGHT = 130;
 const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
 
-const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale }) => {
+const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale, filters }) => {
   const [settings, setSettings] = useState(currentSettings);
   const [totalCount, setTotalCount] = useState(null);
   const [items, setItems] = useState({}); // map index -> item
   const loadingPages = useRef(new Set());
   const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
+  const [selectedItem, setSelectedItem] = useState(null);
 
   // Listen for ctrl+scroll
   useEffect(() => {
@@ -59,6 +60,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
         const res = await window.electron.ipcRenderer.invoke("fetch-files", {
           offset,
           limit: PAGE_SIZE,
+          filters: filters || {},
         });
         loadingPages.current.delete(pageIndex);
 
@@ -78,7 +80,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
         console.error("fetchPage error", err);
       }
     },
-    []
+    [filters]
   );
 
   // is item loaded
@@ -108,6 +110,31 @@ const containerRef = useCallback((node) => {
   if (node) setContainerWidth(node.offsetWidth - 30);
 }, []);
 
+// Add this function
+const fetchTotalCount = useCallback(async () => {
+  try {
+    const count = await window.electron.ipcRenderer.invoke("get-filtered-files-count", { filters });
+    setTotalCount(Number(count || 0));
+  } catch (err) {
+    console.error("fetchTotalCount error", err);
+  }
+}, [filters]);
+
+
+// Add this useEffect inside ExplorerView.jsx
+useEffect(() => {
+  // Reset items and loaded pages
+  setItems({});
+  loadingPages.current.clear();
+  setTotalCount(null);
+
+  // Fetch total count first, then first page
+  fetchTotalCount().then(() => {
+    fetchPageForIndex(0);
+  });
+}, [filters, fetchPageForIndex, fetchTotalCount]);
+
+
   const [containerWidth, setContainerWidth] = useState(1200);
 
   useEffect(() => {
@@ -121,11 +148,93 @@ const containerRef = useCallback((node) => {
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
+  
+  const handleSelect = (item, type) => {
+    onSelect(item, type)
+    setSelectedItem(item)
+  }
+
+  const handleClick = (e, item) => {
+    if (!folderStatuses[item.folder_path]) return;
+
+    if (e.ctrlKey) {
+      // Shift + click -> open in default photo viewer
+      window.electron.ipcRenderer.invoke("open-in-default-viewer", item.path);
+    } else {
+      // Regular single click -> open preview
+      handleSelect(item, "single");
+    }
+  };
 
   const columnWidth = BASE_COLUMN_WIDTH * scale;
   const rowHeight = BASE_ROW_HEIGHT * scale;
   const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + GUTTER)));
   const rowCount = totalCount ? Math.ceil(totalCount / columnCount) : 0;
+
+    useEffect(() => {
+  const handleKeyDown = (e) => {
+    if (!selectedItem) return;
+
+    const currentIndex = Object.keys(items).find(
+      (k) => items[k]?.id === selectedItem.id
+    );
+    if (currentIndex == null) return;
+    const idx = Number(currentIndex);
+
+    let nextIndex = idx;
+    if (e.key === "ArrowRight") {
+      nextIndex = idx + 1;
+    } else if (e.key === "ArrowLeft") {
+      nextIndex = idx - 1;
+    } else if (e.key === "ArrowDown") {
+      nextIndex = idx + columnCount;
+    } else if (e.key === "ArrowUp") {
+      nextIndex = idx - columnCount;
+    } else {
+      return;
+    }
+
+    e.preventDefault();
+    if (nextIndex < 0 || nextIndex >= totalCount) return;
+
+    const nextItem = items[nextIndex];
+    if (nextItem) {
+      setSelectedItem(nextItem);
+      onSelect(nextItem, "single");
+    }
+
+    // ensure it scrolls into view
+    const rowIndex = Math.floor(nextIndex / columnCount);
+    const colIndex = nextIndex % columnCount;
+    gridRef.current?.scrollToItem({
+      rowIndex,
+      columnIndex: colIndex,
+      align: "smart",
+    });
+  };
+
+  window.addEventListener("keydown", handleKeyDown);
+  return () => window.removeEventListener("keydown", handleKeyDown);
+}, [selectedItem, items, columnCount, totalCount, onSelect]);
+
+  function formatTimestamp(timestamp) {
+      if(!timestamp) return ''
+      // Convert seconds to milliseconds
+      const date = new Date(timestamp * 1000);
+
+      // Pad function to add leading zeros
+      const pad = (n) => n.toString().padStart(2, '0');
+
+      const day = pad(date.getDate());
+      const month = pad(date.getMonth() + 1); // Months are 0-indexed
+      const year = date.getFullYear();
+
+      const hours = pad(date.getHours());
+      const minutes = pad(date.getMinutes());
+      const seconds = pad(date.getSeconds());
+
+      return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+  }
 
   // render each cell
   const Cell = ({ columnIndex, rowIndex, style }) => {
@@ -151,10 +260,12 @@ const containerRef = useCallback((node) => {
 
   return (
     <div style={{ ...style, padding: 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
-      onClick={() => folderAvailable && onSelect(item, "single")}
-      onDoubleClick={() => folderAvailable && onSelect(item, "double")}>
+      className={(selectedItem && item.id === selectedItem.id ? 'thumb-selected' : 'thumb-item')}
+      onClick={(e) => folderAvailable && handleClick(e, item)}
+      onDoubleClick={() => folderAvailable && handleSelect(item, "double")}>
       <div
         className="thumb-card"
+        title={`${item.filename}\n${formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
         style={{ width: "100%", height: rowHeight - 36 }} // leave space for filename
       >
         {thumbSrc ? (
@@ -238,6 +349,7 @@ const containerRef = useCallback((node) => {
         >
           {({ onItemsRendered, ref }) => (
             <Grid
+              key={`${filters ? JSON.stringify(filters) : "nofilter"}-${scale}-${totalCount}`}
               ref={(grid) => {
                 ref(grid);
                 gridRef.current = grid;

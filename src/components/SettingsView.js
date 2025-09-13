@@ -5,15 +5,9 @@ import {
   faArrowLeft,
   faArrowRight,
   faArrowUp,
-  faComputerMouse,
-  faDisplay,
   faHardDrive,
-  faImages,
   faKeyboard,
-  faPencil,
-  faPhotoFilm,
   faToolbox,
-  faTriangleExclamation,
   faUser,
 } from "@fortawesome/free-solid-svg-icons";
 import FolderList from "./FolderList";
@@ -50,7 +44,6 @@ const SettingsView = ({
             index: data.dbSize,
             thumbnails: data.thumbSize
           });
-          console.log(data)
         }
       });
   };
@@ -126,6 +119,11 @@ const handleUsernameChange = (event) => {
   }
 
   setSettings((prev) => ({ ...prev, username: newValue }));
+};
+
+const handleBirthDateChange = (event) => {
+  const newValue = event.target.value;
+  setSettings((prev) => ({ ...prev, birthDate: newValue }));
 };
 
 useEffect(() => {
@@ -300,6 +298,16 @@ useEffect(() => {
                     type="text"
                     value={settings.username}
                     onChange={handleUsernameChange}
+                  />
+                </div>
+                <div className="settings-content-item settings-content-item-noalign">
+                  <span>Birth Date:</span>
+                  <input
+                    className="settings-content-input"
+                    type="date"
+                    style={{ colorScheme: "dark" }}
+                    value={settings.birthDate}
+                    onChange={handleBirthDateChange}
                   />
                 </div>
               </div>
