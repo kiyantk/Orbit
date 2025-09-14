@@ -9,6 +9,7 @@ import ExplorerView from "./components/ExplorerView";
 import PreviewPanel from "./components/PreviewPanel";
 import ActionPanel from "./components/ActionPanel";
 import StatsView from "./components/StatsView";
+import MapView from "./components/MapView";
 
 const App = () => {
     const [settings, setSettings] = useState(null);
@@ -154,7 +155,10 @@ const handleActionPanelApply = (data) => {
             />
           )}
           {activeView === "stats" && (
-            <StatsView birthDate={settings.birthDate}/>
+            <StatsView birthDate={settings.birthDate} />
+          )}
+          {activeView === "map" && (
+            <MapView />
           )}
           {activeView === "explore" && (
             <div className="explorer-container">
@@ -174,6 +178,7 @@ const handleActionPanelApply = (data) => {
                     setIsMuted={setIsMuted}
                     forceFullscreen={forceFullscreen}
                     setForceFullscreen={setForceFullscreen}
+                    birthDate={settings.birthDate}
                   />
                 ) : (
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>

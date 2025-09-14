@@ -15,19 +15,33 @@ const { protocol } = require("electron");
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("ffmpeg-static");
 const lookup = require("coordinate_to_country");
+const fsPromises = fs.promises;
+const { setTimeout: delay } = require("timers/promises");
 
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 
 let mainWindow;
+let splash;
 
 // On startup:
 app.whenReady().then(() => {
+  // Splash screen
+  splash = new BrowserWindow({
+    width: 400,
+    height: 400,
+    icon: path.join(__dirname, "./public/logo512.png"),
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+  });
+  splash.loadFile(path.join(__dirname, "public/splash.html"));
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 788,
     minHeight: 708,
     icon: path.join(__dirname, "./public/logo512.png"),
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -36,6 +50,11 @@ app.whenReady().then(() => {
     },
     titleBarStyle: "hidden",
     backgroundColor: "#15131a",
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    splash.close();
+    mainWindow.show();
   });
 
   app.on("browser-window-focus", () => {
@@ -124,11 +143,13 @@ let db;
 const dbPath = path.join(dataDir, "orbit-index.db");
 
 function initDatabase() {
+  if(!db) {
   db = new Database(dbPath);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      media_id INTEGER UNIQUE,
       filename TEXT NOT NULL,
       path TEXT NOT NULL UNIQUE,
       size INTEGER,
@@ -171,7 +192,33 @@ function initDatabase() {
       indexed_at INTEGER DEFAULT (strftime('%s', 'now'))
     )
   `);
+
+      
+  }
 }
+
+ipcMain.handle("fix-media-ids", async () => {
+  try {
+    initDatabase();
+
+    db.transaction(() => {
+      // Get all rows ordered by id (so stable and deterministic)
+      const rows = db.prepare("SELECT id FROM files ORDER BY id ASC").all();
+
+      let counter = 1;
+      for (const row of rows) {
+        db.prepare("UPDATE files SET media_id = ? WHERE id = ?").run(counter, row.id);
+        counter++;
+      }
+    })();
+
+    return { success: true, message: "media_id column fixed successfully." };
+  } catch (err) {
+    console.error("Error fixing media_id:", err);
+    return { success: false, error: err.message };
+  }
+});
+
 
 // Config handlers
 ipcMain.handle("get-settings", async () => {
@@ -233,12 +280,16 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     const params = [];
 
     if (filters.dateFrom) {
+      const d = new Date(filters.dateFrom);
+      d.setHours(0, 0, 0, 0); // midnight local
       whereClauses.push("create_date >= ?");
-      params.push(Math.floor(new Date(filters.dateFrom).getTime() / 1000));
+      params.push(Math.floor(d.getTime() / 1000));
     }
     if (filters.dateTo) {
+      const d = new Date(filters.dateTo);
+      d.setHours(23, 59, 59, 999); // end of day
       whereClauses.push("create_date <= ?");
-      params.push(Math.floor(new Date(filters.dateTo).getTime() / 1000));
+      params.push(Math.floor(d.getTime() / 1000));
     }
     if (filters.device) {
       whereClauses.push("device_model = ?");
@@ -377,43 +428,91 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
 
 
 // Indexing
+// ipcMain.handle("index-files", async (event, folders) => {
+//   try {
+//     initDatabase();
+
+//     for (const folder of folders) {
+//       const existing = db.prepare("SELECT * FROM folders WHERE path = ?").get(folder);
+//       if (!existing) {
+//         db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)").run(folder);
+        
+//         // Count total files for progress tracking
+//         const totalFiles = countTotalFiles(folder);
+//         let processedFiles = 0;
+        
+//         // Send initial progress with total files
+//         if (mainWindow) {
+//           mainWindow.webContents.send("indexing-progress", {
+//             filename: "",
+//             processed: 0,
+//             total: totalFiles,
+//             percentage: 0
+//           });
+//         }
+        
+//         await indexFilesRecursively(folder, folder, totalFiles, (processed) => {
+//           processedFiles = processed;
+//           const percentage = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0;
+          
+//           if (mainWindow) {
+//             mainWindow.webContents.send("indexing-progress", {
+//               filename: "",
+//               processed: processedFiles,
+//               total: totalFiles,
+//               percentage: percentage
+//             });
+//           }
+//         });
+//       }
+//     }
+
+//     return { success: true, message: "Files indexed successfully" };
+//   } catch (err) {
+//     console.error(err);
+//     return { success: false, error: err.message };
+//   }
+// });
+
 ipcMain.handle("index-files", async (event, folders) => {
   try {
     initDatabase();
 
     for (const folder of folders) {
-      const existing = db.prepare("SELECT * FROM folders WHERE path = ?").get(folder);
-      if (!existing) {
+        // Load existing files for this folder
+        const existingPaths = loadIndexedPaths();
+
         db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)").run(folder);
-        
-        // Count total files for progress tracking
-        const totalFiles = countTotalFiles(folder);
+
+        // Count total files once for progress tracking
+        const totalFiles = countTotalFiles(folder, existingPaths);
         let processedFiles = 0;
-        
-        // Send initial progress with total files
+
+        // Send initial progress
         if (mainWindow) {
           mainWindow.webContents.send("indexing-progress", {
             filename: "",
             processed: 0,
             total: totalFiles,
-            percentage: 0
+            percentage: 0,
           });
         }
-        
-        await indexFilesRecursively(folder, folder, totalFiles, (processed) => {
+
+        // New async call style
+        await indexFilesRecursively(folder, existingPaths, (processed) => {
           processedFiles = processed;
-          const percentage = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0;
-          
+          const percentage =
+            totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0;
+
           if (mainWindow) {
             mainWindow.webContents.send("indexing-progress", {
               filename: "",
               processed: processedFiles,
               total: totalFiles,
-              percentage: percentage
+              percentage,
             });
           }
         });
-      }
     }
 
     return { success: true, message: "Files indexed successfully" };
@@ -422,6 +521,7 @@ ipcMain.handle("index-files", async (event, folders) => {
     return { success: false, error: err.message };
   }
 });
+
 
 // Thumbnail generation using sharp
 // async function generateThumbnail(filePath, id) {
@@ -593,112 +693,288 @@ const cpuCount = os.cpus().length;
 const METADATA_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 2));  // 1 task per 2 cores
 const THUMBNAIL_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 3)); // 1 task per 3 cores
 const BATCH_SIZE = 1000;             // insert batch size
+const dbWriteLimit = pLimit(1)
 
 // Count total files for progress tracking
-function countTotalFiles(folderPath) {
+function countTotalFiles(folderPath, existingPaths = new Set()) {
   let total = 0;
   const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-  
+
   for (const entry of entries) {
+    const fullPath = path.join(folderPath, entry.name);
+
     if (entry.isDirectory()) {
-      total += countTotalFiles(path.join(folderPath, entry.name));
+      total += countTotalFiles(fullPath, existingPaths);
     } else if (entry.isFile()) {
-      total++;
+      if (!existingPaths.has(fullPath)) {  // Only count files not yet indexed
+        total++;
+      }
     }
   }
-  
+
   return total;
 }
 
-async function indexFilesRecursively(folderPath, rootFolder, totalFiles, progressCallback) {
-  let processedFiles = 0;
+// async function indexFilesRecursively(folderPath, rootFolder, totalFiles, progressCallback) {
+//   let processedFiles = 0;
   
-  const updateProgress = () => {
-    processedFiles++;
-    if (progressCallback) {
-      progressCallback(processedFiles);
+//   const updateProgress = () => {
+//     processedFiles++;
+//     if (progressCallback) {
+//       progressCallback(processedFiles);
+//     }
+//   };
+//   const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+
+//   // Separate directories and files
+//   const dirs = [];
+//   const files = [];
+//   for (const entry of entries) {
+//     if (entry.isDirectory()) dirs.push(entry.name);
+//     else if (entry.isFile()) files.push(entry.name);
+//   }
+
+//   // Recurse into directories first
+//   for (const dirName of dirs) {
+//     await indexFilesRecursively(path.join(folderPath, dirName), rootFolder, totalFiles, progressCallback);
+//   }
+
+//   const limitMetadata = pLimit(METADATA_CONCURRENCY);
+//   const limitThumb = pLimit(THUMBNAIL_CONCURRENCY);
+
+//   const insertStmt = db.prepare(`
+//     INSERT OR REPLACE INTO files 
+//     (filename, path, size, created, modified, extension, folder_path,
+//      file_type, device_model, camera_make, camera_model, width, height,
+//      orientation, latitude, longitude, altitude, create_date, thumbnail_path,
+//      lens_model, iso, software, offset_time_original, megapixels,
+//      exposure_time, color_space, flash, aperture, focal_length, focal_length_35mm, country)
+//     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+//   `);
+
+//   let batchRows = [];
+
+//     for (const fileName of files) {
+//     const fullPath = path.join(folderPath, fileName);
+//     if (mainWindow) {
+//       mainWindow.webContents.send("indexing-progress", {
+//         filename: fileName,
+//         processed: processedFiles,
+//         total: totalFiles,
+//         percentage: totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0
+//       });
+//     }
+
+//     const stats = fs.statSync(fullPath);
+
+//     // Skip already indexed files
+//     const exists = db.prepare("SELECT id FROM files WHERE path = ?").get(fullPath);
+//     if (exists) continue;
+
+//     // Extract metadata with limited concurrency
+//     const metadata = await limitMetadata(() => extractMetadata(fullPath));
+
+//     batchRows.push({
+//       fileName,
+//       fullPath,
+//       stats,
+//       metadata
+//     });
+
+//     // When batch is full, insert transactionally
+//     if (batchRows.length >= BATCH_SIZE) {
+//       await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
+//       batchRows = [];
+//     }
+    
+//     updateProgress();
+//   }
+
+//   // Insert any remaining files
+//   if (batchRows.length > 0) {
+//     await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
+//     processedFiles += batchRows.length;
+//     updateProgress();
+//   }
+// }
+
+// Async generator for walking directories
+async function* walkDir(dir) {
+  const dirHandle = await fsPromises.opendir(dir);
+  for await (const entry of dirHandle) {
+    const res = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      yield* walkDir(res);
+    } else if (entry.isFile()) {
+      yield res;
     }
-  };
-  const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-
-  // Separate directories and files
-  const dirs = [];
-  const files = [];
-  for (const entry of entries) {
-    if (entry.isDirectory()) dirs.push(entry.name);
-    else if (entry.isFile()) files.push(entry.name);
   }
+}
 
-  // Recurse into directories first
-  for (const dirName of dirs) {
-    await indexFilesRecursively(path.join(folderPath, dirName), rootFolder, totalFiles, progressCallback);
-  }
+// function getNextMediaId() {
+//   const row = db.prepare("SELECT MAX(media_id) as max FROM files").get();
+//   return (row?.max || 0) + 1;
+// }
 
-  const limitMetadata = pLimit(METADATA_CONCURRENCY);
-  const limitThumb = pLimit(THUMBNAIL_CONCURRENCY);
+// ipcMain.handle("add-media-id", async () => {
+//   try {
+//     initDatabase();
 
+//     db.transaction(() => {
+//       // 1. Add column if not exists
+//       db.prepare(`ALTER TABLE files ADD COLUMN media_id INTEGER`).run();
+
+//       // 2. Fill it with sequential IDs without gaps
+//       const rows = db.prepare("SELECT id FROM files ORDER BY id").all();
+
+//       let counter = 1;
+//       for (const row of rows) {
+//         db.prepare("UPDATE files SET media_id = ? WHERE id = ?").run(counter, row.id);
+//         counter++;
+//       }
+
+//       // 3. Add a unique index to keep it clean
+//       db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_files_media_id ON files(media_id)").run();
+//     })();
+
+//     return { success: true, message: "media_id column added and populated successfully." };
+//   } catch (err) {
+//     console.error("Error adding media_id:", err);
+//     return { success: false, error: err.message };
+//   }
+// });
+
+// Preload all existing file paths into a Set
+function loadIndexedPaths() {
+  const rows = db.prepare("SELECT path FROM files").all();
+  return new Set(rows.map(r => r.path));
+}
+
+// Main indexing function
+async function indexFilesRecursively(rootFolder, existingPaths, progressCallback) {
   const insertStmt = db.prepare(`
     INSERT OR REPLACE INTO files 
-    (filename, path, size, created, modified, extension, folder_path,
+    (media_id, filename, path, size, created, modified, extension, folder_path,
      file_type, device_model, camera_make, camera_model, width, height,
      orientation, latitude, longitude, altitude, create_date, thumbnail_path,
      lens_model, iso, software, offset_time_original, megapixels,
      exposure_time, color_space, flash, aperture, focal_length, focal_length_35mm, country)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  let batchRows = [];
+  const limitMetadata = pLimit(METADATA_CONCURRENCY);
+  const limitThumb = pLimit(THUMBNAIL_CONCURRENCY);
 
-    for (const fileName of files) {
-    const fullPath = path.join(folderPath, fileName);
-    if (mainWindow) {
-      mainWindow.webContents.send("indexing-progress", {
-        filename: fileName,
-        processed: processedFiles,
-        total: totalFiles,
-        percentage: totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0
-      });
+  let batchRows = [];
+  let processed = 0;
+  let lastUpdate = Date.now();
+
+  for await (const filePath of walkDir(rootFolder)) {
+    if (existingPaths.has(filePath)) {
+      continue; // already indexed
     }
 
-    const stats = fs.statSync(fullPath);
+    const stats = await fsPromises.stat(filePath);
+    const fileName = path.basename(filePath);
 
-    // Skip already indexed files
-    const exists = db.prepare("SELECT id FROM files WHERE path = ?").get(fullPath);
-    if (exists) continue;
+    const metadata = await limitMetadata(() => extractMetadata(filePath));
 
-    // Extract metadata with limited concurrency
-    const metadata = await limitMetadata(() => extractMetadata(fullPath));
+    batchRows.push({ fileName, fullPath: filePath, stats, metadata });
 
-    batchRows.push({
-      fileName,
-      fullPath,
-      stats,
-      metadata
-    });
-
-    // When batch is full, insert transactionally
     if (batchRows.length >= BATCH_SIZE) {
       await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
       batchRows = [];
     }
-    
-    updateProgress();
+
+    processed++;
+
+    // Throttle IPC progress updates (max 1 every 100ms)
+    const now = Date.now();
+    if (now - lastUpdate > 100) {
+      progressCallback?.(processed);
+      lastUpdate = now;
+    }
   }
 
-  // Insert any remaining files
   if (batchRows.length > 0) {
     await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
-    processedFiles += batchRows.length;
-    updateProgress();
+    // processed += batchRows.length;
+    progressCallback?.(processed);
   }
 }
+
+ipcMain.handle("fetch-options", async () => {
+  try {
+    initDatabase();
+
+    const devices = db.prepare("SELECT DISTINCT device_model FROM files WHERE device_model IS NOT NULL").all().map(r => r.device_model);
+    const folders = db.prepare("SELECT DISTINCT folder_path FROM files WHERE folder_path IS NOT NULL").all().map(r => r.folder_path);
+    const filetypes = db.prepare("SELECT DISTINCT extension FROM files WHERE extension IS NOT NULL").all().map(r => r.extension);
+    const mediaTypes = db.prepare("SELECT DISTINCT file_type FROM files WHERE file_type IS NOT NULL").all().map(r => r.file_type);
+    const countries = db.prepare("SELECT DISTINCT country FROM files WHERE country IS NOT NULL").all().map(r => r.country);
+
+    const dateRange = db.prepare("SELECT MIN(create_date) as min, MAX(create_date) as max FROM files WHERE create_date IS NOT NULL").get();
+
+    let minDate = "";
+    let maxDate = "";
+    let years = [];
+
+    if (dateRange?.min && dateRange?.max) {
+      minDate = new Date(dateRange.min * 1000).toISOString().split("T")[0];
+      maxDate = new Date(dateRange.max * 1000).toISOString().split("T")[0];
+
+      const startYear = new Date(minDate).getFullYear();
+      const endYear = new Date(maxDate).getFullYear();
+      years = Array.from({ length: endYear - startYear + 1 }, (_, i) => endYear - i);
+    }
+
+    return { devices, folders, filetypes, mediaTypes, countries, minDate, maxDate, years };
+  } catch (err) {
+    console.error("fetch-options error", err);
+    return { devices: [], folders: [], filetypes: [], mediaTypes: [], countries: [], minDate: "", maxDate: "", years: [] };
+  }
+});
+
+
+ipcMain.handle("fix-thumbnails", async () => {
+  try {
+    const limitThumb = pLimit(THUMBNAIL_CONCURRENCY);
+
+    // Find all rows without thumbnails
+    const rows = db.prepare("SELECT id, path, folder_path FROM files WHERE thumbnail_path IS NULL").all();
+
+    if (rows.length === 0) {
+      return { success: true, message: "No missing thumbnails found." };
+    }
+
+    for (const row of rows) {
+      try {
+        const thumbPath = await limitThumb(() => generateThumbnail(row.path, row.id));
+
+        if (thumbPath) {
+          db.prepare("UPDATE files SET thumbnail_path = ? WHERE id = ?").run(thumbPath, row.id);
+        }
+      } catch (err) {
+        console.error(`Failed to generate thumbnail for ${row.path}:`, err);
+      }
+    }
+
+    return { success: true, message: `Thumbnails fixed for ${rows.length} files.` };
+  } catch (err) {
+    console.error(err);
+    return { success: false, error: err.message };
+  }
+});
 
 // Helper function for batch insert + thumbnail generation
 async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
   // Transactional insert
+  await dbWriteLimit(async () => {
   const insertMany = db.transaction((batch) => {
+    let nextMediaId = (db.prepare("SELECT MAX(media_id) as max FROM files").get()?.max || 0) + 1;
     for (const row of batch) {
       const info = insertStmt.run(
+        nextMediaId++,
         row.fileName,
         row.fullPath,
         row.stats.size,
@@ -735,20 +1011,35 @@ async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
     }
   });
 
+  // Inserts are serialized
   insertMany(rows);
+});
 
-  // Generate thumbnails in parallel with limited concurrency
-  const thumbPromises = rows
-  .filter(r => ["image", "video"].includes(r.metadata.file_type))
-  .map(r => limitThumb(async () => {
-    const thumbPath = await generateThumbnail(r.fullPath, r.id);
-    if (thumbPath) {
-      db.prepare(`UPDATE files SET thumbnail_path = ? WHERE id = ?`).run(thumbPath, r.id);
-    }
-  }));
+  // Generate thumbnails concurrently
+  const thumbsToUpdate = [];
+  await Promise.all(
+    rows
+      .filter(r => ["image", "video"].includes(r.metadata.file_type))
+      .map(r => limitThumb(async () => {
+        const thumbPath = await generateThumbnail(r.fullPath, r.id);
+        if (thumbPath) {
+          thumbsToUpdate.push({ id: r.id, thumbPath });
+        }
+      }))
+  );
 
-
-  await Promise.all(thumbPromises);
+  if (thumbsToUpdate.length > 0) {
+    // Prepare once, reuse in a single transaction
+    await dbWriteLimit(() => {
+      const updateStmt = db.prepare(`UPDATE files SET thumbnail_path = ? WHERE id = ?`);
+      const updateMany = db.transaction((updates) => {
+        for (const u of updates) {
+          updateStmt.run(u.thumbPath, u.id);
+        }
+      });
+      updateMany(thumbsToUpdate);
+    });
+  }
 }
 
 ipcMain.handle("check-folders", async (event, folders) => {

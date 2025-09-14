@@ -157,7 +157,7 @@ useEffect(() => {
               </button>
               
               {welcomePopupContent.selectedFolders.length > 0 && (
-                <FolderList folders={welcomePopupContent.selectedFolders} onRemoveFolder={removeFolder} />
+                <FolderList folders={welcomePopupContent.selectedFolders} onRemoveFolder={removeFolder} isDisabled={isIndexing} />
               )}
             </div>
           </div>

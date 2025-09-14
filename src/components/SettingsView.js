@@ -186,6 +186,14 @@ const removeFolder = async (folderPath) => {
     window.electron.ipcRenderer.invoke("open-orbit-location");
   };
 
+  const fixThumbnails = () => {
+    window.electron.ipcRenderer.invoke("fix-thumbnails");
+  };
+
+  const fixIDs = () => {
+    window.electron.ipcRenderer.invoke("fix-media-ids");
+  };
+
   // Convert bytes to human-readable
   function formatBytes(a, b = 2) {
     if (!+a) return "0 Bytes";
@@ -222,11 +230,11 @@ const removeFolder = async (folderPath) => {
           const uniqueNewFolders = folders.filter(
             (f) => !existing.includes(normalizePath(f))
           );
-          if (uniqueNewFolders.length === 0) {
-            setIndexingStatus(null);
-            return prev;
-          }
-          startIndex(uniqueNewFolders);
+          // if (uniqueNewFolders.length === 0) {
+          //   setIndexingStatus(null);
+          //   return prev;
+          // }
+          startIndex(folders);
           return {
             ...prev,
             indexedFolders: [...prev.indexedFolders, ...uniqueNewFolders],
@@ -373,6 +381,20 @@ useEffect(() => {
                     disabled={isIndexing || settings.indexedFolders.length === 0}
                   >
                     Check Status
+                  </button>
+                  <button 
+                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                    onClick={fixIDs}
+                    disabled={isIndexing || settings.indexedFolders.length === 0}
+                  >
+                    Fix IDs
+                  </button>
+                  <button 
+                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                    onClick={fixThumbnails}
+                    disabled={isIndexing || settings.indexedFolders.length === 0}
+                  >
+                    Fix Thumbnails
                   </button>
                   {indexingStatus && (
                     <div className="welcome-popup-status">

@@ -10,6 +10,7 @@ const BASE_COLUMN_WIDTH = 130;
 const BASE_ROW_HEIGHT = 130;
 const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
+const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
 const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale, filters }) => {
   const [settings, setSettings] = useState(currentSettings);
@@ -18,6 +19,19 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const loadingPages = useRef(new Set());
   const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
   const [selectedItem, setSelectedItem] = useState(null);
+  const itemsRef = useRef({});
+  const idToIndex = useRef(new Map());
+  const [, forceUpdate] = useState(0); // trigger re-render when itemsRef changes
+
+  // --- Fetch pages into refs ---
+  const addItems = (rows, offset) => {
+    rows.forEach((row, i) => {
+      const idx = offset + i;
+      itemsRef.current[idx] = row;
+      idToIndex.current.set(row.id, idx);
+    });
+    forceUpdate(x => x + 1);
+  };
 
   // Listen for ctrl+scroll
   useEffect(() => {
@@ -49,57 +63,97 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   }, [currentSettings]);
 
   // Helper: fetch a page containing the given index
-  const fetchPageForIndex = useCallback(
-    async (index) => {
-      const pageIndex = Math.floor(index / PAGE_SIZE);
-      if (loadingPages.current.has(pageIndex)) return;
-      loadingPages.current.add(pageIndex);
+  // const fetchPageForIndex = useCallback(
+  //   async (index) => {
+  //     const pageIndex = Math.floor(index / PAGE_SIZE);
+  //     if (loadingPages.current.has(pageIndex)) return;
+  //     loadingPages.current.add(pageIndex);
 
-      const offset = pageIndex * PAGE_SIZE;
-      try {
-        const res = await window.electron.ipcRenderer.invoke("fetch-files", {
-          offset,
-          limit: PAGE_SIZE,
-          filters: filters || {},
-        });
-        loadingPages.current.delete(pageIndex);
+  //     const offset = pageIndex * PAGE_SIZE;
+  //     try {
+  //       const res = await window.electron.ipcRenderer.invoke("fetch-files", {
+  //         offset,
+  //         limit: PAGE_SIZE,
+  //         filters: filters || {},
+  //       });
+  //       loadingPages.current.delete(pageIndex);
 
-        if (!res || !res.success) return;
+  //       if (!res || !res.success) return;
 
-        // Map returned rows into items map
-        setItems((prev) => {
-          const copy = { ...prev };
-          res.rows.forEach((row, i) => {
-            const idx = offset + i;
-            copy[idx] = row;
-          });
-          return copy;
-        });
-      } catch (err) {
-        loadingPages.current.delete(pageIndex);
-        console.error("fetchPage error", err);
-      }
-    },
-    [filters]
-  );
+  //       // Map returned rows into items map
+  //       setItems((prev) => {
+  //         const copy = { ...prev };
+  //         res.rows.forEach((row, i) => {
+  //           const idx = offset + i;
+  //           copy[idx] = row;
+  //         });
+  //         return copy;
+  //       });
+  //     } catch (err) {
+  //       loadingPages.current.delete(pageIndex);
+  //       console.error("fetchPage error", err);
+  //     }
+  //   },
+  //   [filters]
+  // );
+
+    const fetchPageForIndex = useCallback(async (index, isFirst = false) => {
+    const pageIndex = Math.floor(index / PAGE_SIZE);
+    if (loadingPages.current.has(pageIndex)) return;
+    loadingPages.current.add(pageIndex);
+
+    const offset = isFirst ? 0 : pageIndex * PAGE_SIZE;
+    const limit = isFirst ? FIRST_PAGE_SIZE : PAGE_SIZE;
+    try {
+      const res = await window.electron.ipcRenderer.invoke("fetch-files", {
+        offset,
+        limit,
+        filters: filters || {},
+      });
+      loadingPages.current.delete(pageIndex);
+
+      if (!res || !res.success) return;
+      addItems(res.rows, offset);
+    } catch (err) {
+      loadingPages.current.delete(pageIndex);
+      console.error("fetchPage error", err);
+    }
+  }, [filters]);
 
   // is item loaded
-  const isItemLoaded = (index) => !!items[index];
+  const isItemLoaded = (index) => !!itemsRef.current[index];
 
   // react-window-infinite-loader required functions
-  const loadMoreItems = useCallback(
-    (startIndex, stopIndex) => {
-      // fetch all pages that the start..stop range intersects
-      const promises = [];
-      const startPage = Math.floor(startIndex / PAGE_SIZE);
-      const endPage = Math.floor(stopIndex / PAGE_SIZE);
-      for (let p = startPage; p <= endPage; p++) {
-        promises.push(fetchPageForIndex(p * PAGE_SIZE));
-      }
-      return Promise.all(promises);
-    },
-    [fetchPageForIndex]
-  );
+  // const loadMoreItems = useCallback(
+  //   (startIndex, stopIndex) => {
+  //     // fetch all pages that the start..stop range intersects
+  //     const promises = [];
+  //     const startPage = Math.floor(startIndex / PAGE_SIZE);
+  //     const endPage = Math.floor(stopIndex / PAGE_SIZE);
+  //     for (let p = startPage; p <= endPage; p++) {
+  //       promises.push(fetchPageForIndex(p * PAGE_SIZE));
+  //     }
+  //     return Promise.all(promises);
+  //   },
+  //   [fetchPageForIndex]
+  // );
+
+    // Debounced loader to avoid burst calls
+  const loadMoreTimeout = useRef();
+  const loadMoreItems = useCallback((startIndex, stopIndex) => {
+    if (loadMoreTimeout.current) clearTimeout(loadMoreTimeout.current);
+    return new Promise(resolve => {
+      loadMoreTimeout.current = setTimeout(() => {
+        const promises = [];
+        const startPage = Math.floor(startIndex / PAGE_SIZE);
+        const endPage = Math.floor(stopIndex / PAGE_SIZE);
+        for (let p = startPage; p <= endPage; p++) {
+          promises.push(fetchPageForIndex(p * PAGE_SIZE));
+        }
+        Promise.all(promises).then(resolve);
+      }, 50); // small debounce
+    });
+  }, [fetchPageForIndex]);
 
   // compute number of columns based on container width
   const gridRef = useRef(null);
@@ -129,9 +183,11 @@ useEffect(() => {
   setTotalCount(null);
 
   // Fetch total count first, then first page
-  fetchTotalCount().then(() => {
-    fetchPageForIndex(0);
-  });
+  // fetchTotalCount().then(() => {
+  //   fetchPageForIndex(0, true);
+  // });
+  fetchTotalCount();        // updates when ready
+  fetchPageForIndex(0, true); // shows first items ASAP
 }, [filters, fetchPageForIndex, fetchTotalCount]);
 
 
@@ -171,51 +227,36 @@ useEffect(() => {
   const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + GUTTER)));
   const rowCount = totalCount ? Math.ceil(totalCount / columnCount) : 0;
 
-    useEffect(() => {
-  const handleKeyDown = (e) => {
-    if (!selectedItem) return;
+  // --- Keyboard navigation (use idToIndex map) ---
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!selectedItem) return;
+      const idx = idToIndex.current.get(selectedItem.id);
+      if (idx == null) return;
 
-    const currentIndex = Object.keys(items).find(
-      (k) => items[k]?.id === selectedItem.id
-    );
-    if (currentIndex == null) return;
-    const idx = Number(currentIndex);
+      let nextIndex = idx;
+      if (e.key === "ArrowRight") nextIndex = idx + 1;
+      else if (e.key === "ArrowLeft") nextIndex = idx - 1;
+      else if (e.key === "ArrowDown") nextIndex = idx + columnCount;
+      else if (e.key === "ArrowUp") nextIndex = idx - columnCount;
+      else return;
 
-    let nextIndex = idx;
-    if (e.key === "ArrowRight") {
-      nextIndex = idx + 1;
-    } else if (e.key === "ArrowLeft") {
-      nextIndex = idx - 1;
-    } else if (e.key === "ArrowDown") {
-      nextIndex = idx + columnCount;
-    } else if (e.key === "ArrowUp") {
-      nextIndex = idx - columnCount;
-    } else {
-      return;
-    }
+      e.preventDefault();
+      if (nextIndex < 0 || nextIndex >= totalCount) return;
 
-    e.preventDefault();
-    if (nextIndex < 0 || nextIndex >= totalCount) return;
+      const nextItem = itemsRef.current[nextIndex];
+      if (nextItem) {
+        setSelectedItem(nextItem);
+        onSelect(nextItem, "single");
+      }
 
-    const nextItem = items[nextIndex];
-    if (nextItem) {
-      setSelectedItem(nextItem);
-      onSelect(nextItem, "single");
-    }
-
-    // ensure it scrolls into view
-    const rowIndex = Math.floor(nextIndex / columnCount);
-    const colIndex = nextIndex % columnCount;
-    gridRef.current?.scrollToItem({
-      rowIndex,
-      columnIndex: colIndex,
-      align: "smart",
-    });
-  };
-
-  window.addEventListener("keydown", handleKeyDown);
-  return () => window.removeEventListener("keydown", handleKeyDown);
-}, [selectedItem, items, columnCount, totalCount, onSelect]);
+      const rowIndex = Math.floor(nextIndex / columnCount);
+      const colIndex = nextIndex % columnCount;
+      gridRef.current?.scrollToItem({ rowIndex, columnIndex: colIndex, align: "smart" });
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedItem, totalCount, onSelect]);
 
   function formatTimestamp(timestamp) {
       if(!timestamp) return ''
@@ -237,11 +278,11 @@ useEffect(() => {
   }
 
   // render each cell
-  const Cell = ({ columnIndex, rowIndex, style }) => {
+  const Cell = React.memo(({ columnIndex, rowIndex, style }) => {
   const index = rowIndex * columnCount + columnIndex;
   if (!totalCount || index >= totalCount) return null;
 
-  const item = items[index];
+  const item = itemsRef.current[index];
 
   if (!item) {
     return (
@@ -254,7 +295,7 @@ useEffect(() => {
     );
   }
 
-  const folderAvailable = folderStatuses[item.folder_path];
+  const folderAvailable = folderStatuses[item.folder_path] ?? true;
 
   const thumbSrc = item.thumbnail_path ? `orbit://thumbs/${item.id}_thumb.jpg` : null;
 
@@ -311,7 +352,7 @@ useEffect(() => {
       </div>
     </div>
   );
-};
+});
 
 
   // If we know there are no files, show settings hint
@@ -331,7 +372,7 @@ useEffect(() => {
   }
 
   if (totalCount === null) {
-    return <div style={{ padding: 20 }}>Loading…</div>;
+    return <div className="loader"></div>;
   }
 
   // Height of grid: compute available viewport height (or give a fixed height)
@@ -349,7 +390,7 @@ useEffect(() => {
         >
           {({ onItemsRendered, ref }) => (
             <Grid
-              key={`${filters ? JSON.stringify(filters) : "nofilter"}-${scale}-${totalCount}`}
+              key={`${scale}-${filters ? JSON.stringify(filters) : "nofilter"}`}
               ref={(grid) => {
                 ref(grid);
                 gridRef.current = grid;

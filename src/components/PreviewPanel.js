@@ -11,7 +11,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen }) {
+export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate }) {
   
   const videoRefNormal = useRef(null);
   const trackRefNormal = useRef(null);
@@ -226,6 +226,21 @@ const closeFullscreen = () => {
   setIsFullscreen(false);
 };
 
+function calculateAge(birthDate, epochSeconds) {
+    const birth = new Date(birthDate);
+    const date = new Date(epochSeconds * 1000); // convert seconds to milliseconds
+
+    let age = date.getFullYear() - birth.getFullYear();
+    const monthDiff = date.getMonth() - birth.getMonth();
+    const dayDiff = date.getDate() - birth.getDate();
+
+    if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+        age--;
+    }
+
+    return age;
+}
+
   const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
 
   return (
@@ -363,6 +378,13 @@ const closeFullscreen = () => {
     </div>
   )}
 
+  {isVideo && duration && (
+    <div className="metadata-row">
+      <span className="metadata-label">Duration</span>
+      <span className="metadata-value">{formatDuration(duration)}</span>
+    </div>
+  )}
+
   {item.latitude != null && item.longitude != null && (
     <div className="metadata-row">
       <span className="metadata-label">Location</span>
@@ -413,13 +435,6 @@ const closeFullscreen = () => {
     </div>
   )}
 
-  {item.offset_time_original && (
-    <div className="metadata-row">
-      <span className="metadata-label">Offset Time</span>
-      <span className="metadata-value">{item.offset_time_original}</span>
-    </div>
-  )}
-
   {item.megapixels && (
     <div className="metadata-row">
       <span className="metadata-label">Megapixels</span>
@@ -451,7 +466,7 @@ const closeFullscreen = () => {
   {item.aperture && (
     <div className="metadata-row">
       <span className="metadata-label">Aperture</span>
-      <span className="metadata-value"><i>f/</i>{item.aperture}</span>
+      <span className="metadata-value">f/{item.aperture}</span>
     </div>
   )}
 
@@ -459,13 +474,6 @@ const closeFullscreen = () => {
     <div className="metadata-row">
       <span className="metadata-label">Focal Length</span>
       <span className="metadata-value">{item.focal_length + ' (' + item.focal_length_35mm + ')'}</span>
-    </div>
-  )}
-
-  {isVideo && duration && (
-    <div className="metadata-row">
-      <span className="metadata-label">Duration</span>
-      <span className="metadata-value">{formatDuration(duration)}</span>
     </div>
   )}
 
@@ -480,6 +488,28 @@ const closeFullscreen = () => {
     <div className="metadata-row">
       <span className="metadata-label">Created At</span>
       <span className="metadata-value">{formatTimestamp(item.created)}</span>
+    </div>
+  )}
+
+  {item.offset_time_original && (
+    <div className="metadata-row">
+      <span className="metadata-label">Offset Time</span>
+      <span className="metadata-value">{item.offset_time_original}</span>
+    </div>
+  )}
+
+
+  {item.camera_make && (
+    <div className="metadata-row">
+      <span className="metadata-label">Make</span>
+      <span className="metadata-value">{item.camera_make}</span>
+    </div>
+  )}
+
+  {(item.create_date || item.created) && birthDate && (
+    <div className="metadata-row">
+      <span className="metadata-label">Age</span>
+      <span className="metadata-value">{calculateAge(birthDate, item.create_date || item.created)}</span>
     </div>
   )}
   

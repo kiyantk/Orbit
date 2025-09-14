@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
 const ActionPanel = ({ type, onApply }) => {
-  const [sortBy, setSortBy] = useState("create_date");
+  const [sortBy, setSortBy] = useState("id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState({
     dateFrom: "",
@@ -13,6 +13,7 @@ const ActionPanel = ({ type, onApply }) => {
     filetype: "",
     mediaType: "",
     country: "",
+    year: ""
   });
   const [searchBy, setSearchBy] = useState("name");
   const [searchTerm, setSearchTerm] = useState("");
@@ -25,31 +26,23 @@ const ActionPanel = ({ type, onApply }) => {
     mediaTypes: [],
     minDate: "",
     maxDate: "",
-    countries: []
+    countries: [],
+    years: []
   });
 
   // Fetch options from database on mount
-  useEffect(() => {
-    async function fetchOptions() {
-      const { rows } = await window.electron.ipcRenderer.invoke("fetch-files", { offset: 0, limit: 10000 });
-      if (!rows) return;
+useEffect(() => {
+  async function fetchOptions() {
+    const opts = await window.electron.ipcRenderer.invoke("fetch-options");
+    setOptions(opts);
 
-      const devices = [...new Set(rows.map(r => r.device_model).filter(Boolean))];
-      const folders = [...new Set(rows.map(r => r.folder_path).filter(Boolean))];
-      const filetypes = [...new Set(rows.map(r => r.extension).filter(Boolean))];
-      const mediaTypes = [...new Set(rows.map(r => r.file_type).filter(Boolean))];
-      const countries = [...new Set(rows.map(r => r.country).filter(Boolean))];
-
-      const dates = rows.map(r => r.create_date).filter(Boolean);
-      const minDate = dates.length ? new Date(Math.min(...dates) * 1000).toISOString().split("T")[0] : "";
-      const maxDate = dates.length ? new Date(Math.max(...dates) * 1000).toISOString().split("T")[0] : "";
-
-      setOptions({ devices, folders, filetypes, mediaTypes, minDate, maxDate, countries });
-      setFilters(f => ({ ...f, dateFrom: minDate, dateTo: maxDate }));
+    if (opts.minDate && opts.maxDate) {
+      setFilters(f => ({ ...f, dateFrom: opts.minDate, dateTo: opts.maxDate }));
     }
+  }
 
-    fetchOptions();
-  }, []);
+  fetchOptions();
+}, []);
 
   // Auto-apply filters or sort whenever they change
   useEffect(() => {
@@ -71,6 +64,17 @@ const ActionPanel = ({ type, onApply }) => {
     });
   };
 
+  // Handle year change
+const handleYearChange = (year) => {
+  setFilters(prev => {
+    if (!year) return { ...prev, year: "", dateFrom: options.minDate, dateTo: options.maxDate };
+
+    const dateFrom = `${year}-01-01`;
+    const dateTo = `${year}-12-31`;
+    return { ...prev, year, dateFrom, dateTo };
+  });
+};
+
   if (!type) return null;
 
 const resetFilters = () => {
@@ -82,14 +86,19 @@ const resetFilters = () => {
     filetype: "",
     mediaType: "",
     country: "",
+    year: ""
   });
 };
 
 const resetSort = () => {
-  setSortBy("create_date")
+  setSortBy("id")
   setSortOrder("desc")
 }
 
+const resetSearch = () => {
+  setSearchBy("name")
+  setSearchTerm("")
+}
 
   return (
     <div className="action-panel">
@@ -110,6 +119,13 @@ const resetSort = () => {
 
       {type === "filter" && (
         <div className="filter-panel">
+          <div>
+            <label>Year:</label>
+            <select value={filters.year} onChange={e => handleYearChange(e.target.value)}>
+              <option value="">All</option>
+              {options.years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
           <div>
             <label>Date From:</label>
             <input type="date" 
@@ -172,6 +188,7 @@ const resetSort = () => {
             <option value="id">ID</option>
           </select>
           <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." />
+          <div className="action-panel-reset"><button onClick={resetSearch}><FontAwesomeIcon icon={faUndo}/></button></div>
         </div>
       )}
     </div>

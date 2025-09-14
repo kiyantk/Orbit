@@ -19,7 +19,7 @@ const StatsView = ({ birthDate }) => {
     const fetchAllFiles = async () => {
       setLoading(true);
       try {
-        const res = await window.electron.ipcRenderer.invoke("fetch-files", { offset: 0, limit: 1000000 });
+        const res = await window.electron.ipcRenderer.invoke("fetch-files", { offset: 0, limit: 100000000 });
         if (res.success) setFiles(res.rows || []);
       } catch (err) {
         console.error("Failed to fetch files", err);
@@ -92,7 +92,7 @@ const StatsView = ({ birthDate }) => {
     return parseFloat((bytes/k**i).toFixed(2)) + " " + sizes[i];
   };
 
-  if (loading) return <div className="stats-loading">Loading stats…</div>;
+  if (loading) return <div className="stats-loading"><div className="loader"></div></div>;
 
   const renderTable = (title, data, key1, key2) => (
     <div className="stats-card-wrapper">
@@ -126,7 +126,7 @@ const StatsView = ({ birthDate }) => {
           <p>{stats.totalFiles}</p>
         </div>
         <div className="stats-summary-card">
-          <h3>Total Storage</h3>
+          <h3>Total Size</h3>
           <p>{formatBytes(stats.totalStorage)}</p>
         </div>
       </div>

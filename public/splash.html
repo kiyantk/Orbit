@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Splash</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: transparent;
+      user-select: none;
+      pointer-events: none;
+    }
+    img {
+      width: 256px;
+      height: 256px;
+      animation: spin 2s linear infinite;
+    }
+    @keyframes spin {
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <img src="logo512.png" alt="Loading..." />
+</body>
+</html>
