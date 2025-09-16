@@ -12,7 +12,7 @@ const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
 const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
-const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale, filters }) => {
+const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale, filters, filteredCountUpdated }) => {
   const [settings, setSettings] = useState(currentSettings);
   const [totalCount, setTotalCount] = useState(null);
   const [items, setItems] = useState({}); // map index -> item
@@ -169,6 +169,7 @@ const fetchTotalCount = useCallback(async () => {
   try {
     const count = await window.electron.ipcRenderer.invoke("get-filtered-files-count", { filters });
     setTotalCount(Number(count || 0));
+    filteredCountUpdated(Number(count) || null)
   } catch (err) {
     console.error("fetchTotalCount error", err);
   }
@@ -179,6 +180,8 @@ const fetchTotalCount = useCallback(async () => {
 useEffect(() => {
   // Reset items and loaded pages
   setItems({});
+  itemsRef.current = {};       // 🔑 clear old refs
+  idToIndex.current = new Map(); // 🔑 clear index map
   loadingPages.current.clear();
   setTotalCount(null);
 
@@ -372,7 +375,7 @@ useEffect(() => {
   }
 
   if (totalCount === null) {
-    return <div className="loader"></div>;
+    return <div style={{alignSelf: "center"}} className="loader"></div>;
   }
 
   // Height of grid: compute available viewport height (or give a fixed height)

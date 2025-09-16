@@ -36,9 +36,9 @@ useEffect(() => {
     const opts = await window.electron.ipcRenderer.invoke("fetch-options");
     setOptions(opts);
 
-    if (opts.minDate && opts.maxDate) {
-      setFilters(f => ({ ...f, dateFrom: opts.minDate, dateTo: opts.maxDate }));
-    }
+    // if (opts.minDate && opts.maxDate) {
+    //   setFilters(f => ({ ...f, dateFrom: opts.minDate, dateTo: opts.maxDate }));
+    // }
   }
 
   fetchOptions();
@@ -67,7 +67,7 @@ useEffect(() => {
   // Handle year change
 const handleYearChange = (year) => {
   setFilters(prev => {
-    if (!year) return { ...prev, year: "", dateFrom: options.minDate, dateTo: options.maxDate };
+    if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
 
     const dateFrom = `${year}-01-01`;
     const dateTo = `${year}-12-31`;
@@ -79,8 +79,8 @@ const handleYearChange = (year) => {
 
 const resetFilters = () => {
   setFilters({
-    dateFrom: options.minDate || "",
-    dateTo: options.maxDate || "",
+    dateFrom: "",
+    dateTo: "",
     device: "",
     folder: "",
     filetype: "",
@@ -150,7 +150,7 @@ const resetSearch = () => {
             </select>
           </div>
           <div>
-            <label>Folder:</label>
+            <label>Source:</label>
             <select value={filters.folder} onChange={e => setFilters(f => ({ ...f, folder: e.target.value }))}>
               <option value="">All</option>
               {options.folders.map(f => <option key={f} value={f}>{f}</option>)}

@@ -164,7 +164,7 @@ const switchTheme = (themeName) => {
       clusterLayer.current.addLayer(marker);
       allLayer.current.addLayer(marker);
 
-      if (!item.altitude || item.altitude <= 1000) {
+      if (item.altitude && item.altitude <= 1500) {
         if (lastPoint) {
           const dist = haversineDistance(lastPoint, latlng);
           if (dist > 200) {

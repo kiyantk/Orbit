@@ -11,7 +11,7 @@ import {
   faMagnifyingGlass,
 } from "@fortawesome/free-solid-svg-icons";
 
-const BottomBar = ({ explorerScale }) => {
+const BottomBar = ({ explorerScale, filteredCount }) => {
 
   const [photoCount, setPhotoCount] = useState(0);
 // Fetch photo count
@@ -37,7 +37,7 @@ const BottomBar = ({ explorerScale }) => {
   return (
     <div className="bottom-bar">
       <div className="bottom-bar-left">
-        <div className="bottom-bar-media-counter"><FontAwesomeIcon icon={faPhotoFilm} /><span>{photoCount}</span></div>
+        <div className="bottom-bar-media-counter"><FontAwesomeIcon icon={faPhotoFilm} /><span>{photoCount} {filteredCount !== null && filteredCount !== photoCount ? '(' + filteredCount + ')' : ''}</span></div>
       </div>
 
       <div className="bottom-bar-right">

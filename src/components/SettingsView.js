@@ -7,10 +7,13 @@ import {
   faArrowUp,
   faHardDrive,
   faKeyboard,
+  faPhotoFilm,
+  faTableCells,
   faToolbox,
   faUser,
 } from "@fortawesome/free-solid-svg-icons";
 import FolderList from "./FolderList";
+import HeicPopup from "./HeicPopup";
 
 const SettingsView = ({
   currentSettings,
@@ -25,6 +28,9 @@ const SettingsView = ({
   const [indexingStatus, setIndexingStatus] = useState("");
   const [selectedFolders, setSelectedFolders] = useState([]);
   const [currentFile, setCurrentFile] = useState("");
+  const [missingHeicFiles, setMissingHeicFiles] = useState([]);
+  const [showHeicPopup, setShowHeicPopup] = useState(false);
+  const [showChecksPopup, setShowChecksPopup] = useState(false);
 
   const [storageUsage, setStorageUsage] = useState({
     app: 0,
@@ -155,6 +161,30 @@ const removeFolder = async (folderPath) => {
   }
 };
 
+const handleRemoveAll = async () => {
+  const confirmed = window.confirm(
+    "Are you sure you want to remove ALL indexed folders and their data? This cannot be undone."
+  );
+
+  if (!confirmed) return;
+
+  for (const folder of settings.indexedFolders) {
+    try {
+      const response = await window.electron.ipcRenderer.invoke(
+        "remove-folder-data",
+        folder
+      );
+      if (!response.success) {
+        console.error("Failed to remove folder data:", response.error);
+      }
+    } catch (err) {
+      console.error("Error removing folder:", err);
+    }
+  }
+  setSettings((prev) => ({ ...prev, indexedFolders: [] }));
+};
+
+
   // Save settings
   const saveSettings = async () => {
     applySettings(settings); // Apply local changes
@@ -174,8 +204,8 @@ const removeFolder = async (folderPath) => {
   // Define tab icons
   const tabIcons = {
     User: faUser,
-    Media: faHardDrive,
-    // Explorer: faPhotoFilm,
+    Media: faPhotoFilm,
+    Explorer: faTableCells,
     Storage: faHardDrive,
     Controls: faKeyboard,
     App: faToolbox,
@@ -186,13 +216,45 @@ const removeFolder = async (folderPath) => {
     window.electron.ipcRenderer.invoke("open-orbit-location");
   };
 
-  const fixThumbnails = () => {
-    window.electron.ipcRenderer.invoke("fix-thumbnails");
+const fixThumbnails = async () => {
+  setIndexingStatus("Fixing thumbnails...");
+  setIsIndexing(true);
+  const result = await window.electron.ipcRenderer.invoke("fix-thumbnails");
+  
+  if (result.success) {
+    setIndexingStatus(result.message);
+    setTimeout(() => setIndexingStatus(null), 5000); // nullify after 2 seconds
+  } else {
+    setIndexingStatus(`Error: ${result.error}`);
+  }
+
+  setIsIndexing(false);
+};
+
+const fixIDs = async () => {
+  setIndexingStatus("Fixing media IDs...");
+  setIsIndexing(true);
+  const result = await window.electron.ipcRenderer.invoke("fix-media-ids");
+  
+  if (result.success) {
+    setIndexingStatus(result.message);
+    setTimeout(() => setIndexingStatus(null), 5000); // nullify after 2 seconds
+  } else {
+    setIndexingStatus(`Error: ${result.error}`);
+  }
+
+  setIsIndexing(false);
+};
+
+useEffect(() => {
+  const checkHeicThumbnails = async () => {
+    const result = await window.electron.ipcRenderer.invoke("fetch-heic-missing-thumbnails");
+    if (result.success) setMissingHeicFiles(result.files);
   };
 
-  const fixIDs = () => {
-    window.electron.ipcRenderer.invoke("fix-media-ids");
-  };
+  checkHeicThumbnails();
+}, [settings.indexedFolders]);
+
 
   // Convert bytes to human-readable
   function formatBytes(a, b = 2) {
@@ -279,7 +341,7 @@ useEffect(() => {
           <div className="settings-list">
             <h2>Settings</h2>
             <ul>
-              {["User", "Media", "Storage", "Controls", "App"].map(
+              {["User", "Media", "Explorer", "Storage", "Controls", "App"].map(
                 (tab) => (
                   <li
                     key={tab}
@@ -320,22 +382,22 @@ useEffect(() => {
                 </div>
               </div>
             )}
-            {/* {selectedTab === "Explorer" && (
+            {selectedTab === "Explorer" && (
               <div>
                 <div className="settings-content-item">
                   <input
                     type="checkbox"
-                    checked={settings?.hideUnavailableMedia}
-                    onChange={handleCheckboxChange('hideUnavailableMedia')}
+                    checked={settings?.adjustHeicColors}
+                    onChange={handleCheckboxChange('adjustHeicColors')}
                   />
-                  <span>Hide unavailable media</span>
+                  <span>Adjust HEIC Colors</span>
                 </div>
               </div>
-            )} */}
+            )}
             {selectedTab === "Media" && (
               <div>
                 <div>
-                  <h3>Indexed Folders</h3>
+                  <h3>Indexed Sources</h3>
                   <FolderList folders={settings.indexedFolders} onRemoveFolder={removeFolder} folderStatuses={folderStatuses} />
                 </div>
                 <div>
@@ -344,58 +406,30 @@ useEffect(() => {
                     onClick={selectFolders}
                     disabled={isIndexing}
                   >
-                    Add Folders
+                    Add Source
                   </button>
                   <button
                     className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={() => startIndex(settings.indexedFolders)}
-                    disabled={isIndexing || settings.indexedFolders.length === 0}
-                  >
-                    Reindex All
-                  </button>
-                  <button
-                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={async () => {
-                      for (const folder of settings.indexedFolders) {
-                        try {
-                          const response = await window.electron.ipcRenderer.invoke(
-                            "remove-folder-data",
-                            folder
-                          );
-                          if (!response.success) {
-                            console.error("Failed to remove folder data:", response.error);
-                          }
-                        } catch (err) {
-                          console.error("Error removing folder:", err);
-                        }
-                      }
-                      setSettings((prev) => ({ ...prev, indexedFolders: [] }));
-                    }}
+                    onClick={handleRemoveAll}
                     disabled={isIndexing || settings.indexedFolders.length === 0}
                   >
                     Remove All
                   </button>
-                  <button 
+                  <button
                     className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={checkStatusses}
+                    onClick={() => setShowChecksPopup(true)}
                     disabled={isIndexing || settings.indexedFolders.length === 0}
                   >
-                    Check Status
+                    Tools
                   </button>
-                  <button 
-                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={fixIDs}
-                    disabled={isIndexing || settings.indexedFolders.length === 0}
-                  >
-                    Fix IDs
-                  </button>
-                  <button 
-                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={fixThumbnails}
-                    disabled={isIndexing || settings.indexedFolders.length === 0}
-                  >
-                    Fix Thumbnails
-                  </button>
+                  {missingHeicFiles.length > 0 && (
+                    <button
+                      className="welcome-popup-select-folders-btn"
+                      onClick={() => setShowHeicPopup(true)}
+                    >
+                      Generate HEIC Thumbnails
+                    </button>
+                  )}
                   {indexingStatus && (
                     <div className="welcome-popup-status">
                       <span>{indexingStatus}</span><br></br><span>Don't close the app</span>
@@ -490,6 +524,33 @@ useEffect(() => {
             )}
           </div>
         </div>
+        {showHeicPopup && (
+          <HeicPopup
+            missingFiles={missingHeicFiles}
+            onClose={() => setShowHeicPopup(false)}
+          />
+        )}
+        {showChecksPopup && (
+          <div className="welcome-popup-overlay">
+            <div className="welcome-popup">
+              <h2>Maintenance Actions</h2>
+              <p>Select which maintenance task to run:</p>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center" }}>
+                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" 
+                  onClick={() => startIndex(settings.indexedFolders)}>Reindex All</button>
+                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" 
+                  onClick={checkStatusses}>Check Status</button>
+                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                  onClick={fixIDs}>Fix IDs</button>
+                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                  onClick={fixThumbnails}>Fix Thumbnails</button>
+              </div>
+              <div className="settings-bottom-bar" style={{ height: "70px"}}>
+                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" onClick={() => setShowChecksPopup(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
   );
 };

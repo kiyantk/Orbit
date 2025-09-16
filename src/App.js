@@ -23,6 +23,7 @@ const App = () => {
     const [explorerScale, setExplorerScale] = useState(1);
     const [actionPanelType, setActionPanelType] = useState(null);
     const [filters, setFilters] = useState(null);
+    const [filteredCount, setFilteredCount] = useState(null)
 
 const handleActionPanelApply = (data) => {
   // setActionPanelType(null); // Close panel
@@ -169,6 +170,7 @@ const handleActionPanelApply = (data) => {
                 onSelect={handleExplorerSelect}
                 onScale={handleExplorerScale}
                 filters={filters}
+                filteredCountUpdated={setFilteredCount}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (
@@ -179,6 +181,7 @@ const handleActionPanelApply = (data) => {
                     forceFullscreen={forceFullscreen}
                     setForceFullscreen={setForceFullscreen}
                     birthDate={settings.birthDate}
+                    currentSettings={settings}
                   />
                 ) : (
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>
@@ -197,6 +200,7 @@ const handleActionPanelApply = (data) => {
         </div>
         <BottomBar
           explorerScale={explorerScale}
+          filteredCount={filteredCount}
         />
       </div>
     </div>

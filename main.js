@@ -17,6 +17,8 @@ const ffmpegPath = require("ffmpeg-static");
 const lookup = require("coordinate_to_country");
 const fsPromises = fs.promises;
 const { setTimeout: delay } = require("timers/promises");
+const heicConvert = require("heic-convert");
+
 
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -107,14 +109,34 @@ app.whenReady().then(() => {
   const serverPort = 3001;
 
   // Serve files from any path on disk
-  appServer.get("/files/*", (req, res) => {
+  appServer.get("/files/*", async (req, res) => {
     const filePath = decodeURIComponent(req.path.replace("/files/", ""));
+
     if (!fs.existsSync(filePath)) {
       console.error("File not found:", filePath);
-      res.status(404).send("Not found");
-      return;
+      return res.status(404).send("Not found");
     }
-    res.sendFile(filePath);
+
+    // If not HEIC, serve directly
+    if (!filePath.toLowerCase().endsWith(".heic")) {
+      return res.sendFile(filePath);
+    }
+
+    try {
+      const inputBuffer = fs.readFileSync(filePath);
+
+      const outputBuffer = await heicConvert({
+        buffer: inputBuffer,
+        format: "JPEG", // "JPEG" or "PNG"
+        quality: 0.8,   // 0-1
+      });
+
+      res.set("Content-Type", "image/jpeg");
+      res.send(outputBuffer);
+    } catch (err) {
+      console.error("HEIC convert failed:", err);
+      res.status(500).send("Failed to convert HEIC");
+    }
   });
 
   appServer.listen(serverPort, () => {
@@ -136,6 +158,7 @@ const defaultConfig = {
   username: null,
   indexedFolders: [],
   birthDate: null,
+  adjustHeicColors: true,
 };
 
 // Database
@@ -375,12 +398,16 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
 
     if (filters) {
       if (filters.dateFrom) {
+        const d = new Date(filters.dateFrom);
+        d.setHours(0, 0, 0, 0); // midnight local
         conditions.push("create_date >= ?");
-        params.push(Math.floor(new Date(filters.dateFrom).getTime() / 1000));
+        params.push(Math.floor(d.getTime() / 1000));
       }
       if (filters.dateTo) {
+        const d = new Date(filters.dateTo);
+        d.setHours(23, 59, 59, 999); // end of day
         conditions.push("create_date <= ?");
-        params.push(Math.floor(new Date(filters.dateTo).getTime() / 1000));
+        params.push(Math.floor(d.getTime() / 1000));
       }
       if (filters.device) {
         conditions.push("device_model = ?");
@@ -552,7 +579,7 @@ ipcMain.handle("index-files", async (event, folders) => {
 
 async function generateThumbnail(filePath, id) {
   const ext = path.extname(filePath).toLowerCase();
-  const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".heic", ".webp"];
+  const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"];
   const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv"];
 
   const thumbnailsDir = path.join(dataDir, "thumbnails");
@@ -594,6 +621,106 @@ async function generateThumbnail(filePath, id) {
     return null;
   }
 }
+
+ipcMain.handle("fetch-heic-missing-thumbnails", async () => {
+  initDatabase();
+  const rows = db.prepare(`
+    SELECT id, path FROM files WHERE extension = '.heic' AND thumbnail_path IS NULL
+  `).all();
+  return { success: true, files: rows };
+});
+
+ipcMain.handle("cleanup-heic-temp", async () => {
+  try {
+    const thumbsPath = path.join(dataDir, "thumbs");
+    const jsonPath = path.join(dataDir, "heic_missing.json");
+    const scriptPath = path.join(dataDir, "generate_heic_thumbs.py");
+
+    if (fs.existsSync(thumbsPath)) {
+      fs.rmSync(thumbsPath, { recursive: true, force: true });
+    }
+    if (fs.existsSync(jsonPath)) {
+      fs.unlinkSync(jsonPath);
+    }
+    if (fs.existsSync(scriptPath)) {
+      fs.unlinkSync(scriptPath);
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("Failed cleanup:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("generate-heic-script", async (event, files) => {
+    const thumbsPath = path.join(dataDir, "thumbs");
+    const tempJsonPath = path.join(dataDir, "heic_missing.json");
+    const tempScriptPath = path.join(dataDir, "generate_heic_thumbs.py");
+
+    // 🧹 cleanup old files first
+    [thumbsPath, tempJsonPath, tempScriptPath].forEach((p) => {
+      if (fs.existsSync(p)) {
+        fs.rmSync(p, { recursive: true, force: true });
+      }
+    });
+  const jsonPath = path.join(dataDir, "heic_missing.json");
+  fs.writeFileSync(jsonPath, JSON.stringify(files, null, 2));
+
+  const pythonScriptPath = path.join(dataDir, "generate_heic_thumbs.py");
+fs.writeFileSync(pythonScriptPath, `
+import json
+import os
+from PIL import Image
+import pillow_heif
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+# Register HEIC plugin
+pillow_heif.register_heif_opener()
+
+def generate_thumbnail(entry, thumbs_dir):
+    file_id = entry["id"]
+    file_path = entry["path"]
+    try:
+        img = Image.open(file_path)  # Pillow handles HEIC directly
+        img.thumbnail((200, 200))
+        out_path = os.path.join(thumbs_dir, f"{file_id}_thumb.jpg")
+        img.save(out_path, "JPEG", quality=80)
+        return f"Generated thumbnail for {file_path}"
+    except Exception as e:
+        return f"Failed: {file_path} -> {e}"
+
+def main():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    json_file = os.path.join(script_dir, "heic_missing.json")
+    with open(json_file, "r") as f:
+        data = json.load(f)
+
+    thumbs_dir = os.path.join(os.getcwd(), "thumbs")
+    os.makedirs(thumbs_dir, exist_ok=True)
+
+    # Use half the available cores by default (but at least 1)
+    cpu_count = os.cpu_count() or 4
+    max_workers = max(1, cpu_count // 2)
+    print(f"Using {max_workers} parallel workers...")
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(generate_thumbnail, entry, thumbs_dir) for entry in data]
+        for future in as_completed(futures):
+            print(future.result())
+
+    print("Done!")
+
+if __name__ == "__main__":
+    main()
+`);
+
+
+  shell.showItemInFolder(pythonScriptPath); // highlight file in Explorer
+  shell.showItemInFolder(jsonPath);
+
+  return { success: true, message: "Python script and JSON ready!" };
+});
 
 
 // Metadata extraction using exiftool
@@ -973,41 +1100,53 @@ async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
   const insertMany = db.transaction((batch) => {
     let nextMediaId = (db.prepare("SELECT MAX(media_id) as max FROM files").get()?.max || 0) + 1;
     for (const row of batch) {
-      const info = insertStmt.run(
-        nextMediaId++,
-        row.fileName,
-        row.fullPath,
-        row.stats.size,
-        Math.floor(row.stats.birthtimeMs / 1000),
-        Math.floor(row.stats.mtimeMs / 1000),
-        path.extname(row.fileName).toLowerCase(),
-        rootFolder,
-        row.metadata.file_type,
-        row.metadata.device_model,
-        row.metadata.camera_make,
-        row.metadata.camera_model,
-        row.metadata.width,
-        row.metadata.height,
-        row.metadata.orientation,
-        row.metadata.latitude,
-        row.metadata.longitude,
-        row.metadata.altitude,
-        row.metadata.create_date,
-        null, // thumbnail path updated later
-        row.metadata.lens_model,
-        row.metadata.iso,
-        row.metadata.software,
-        row.metadata.offset_time_original,
-        row.metadata.megapixels,
-        row.metadata.exposure_time,
-        row.metadata.color_space,
-        row.metadata.flash,
-        row.metadata.aperture,
-        row.metadata.focal_length,
-        row.metadata.focal_length_35mm,
-        row.metadata.country
-      );
-      row.id = info.lastInsertRowid;
+      try {
+        row.metadata.country = Array.isArray(row.metadata.country)
+          ? row.metadata.country.join(", ")
+          : row.metadata.country ?? null;
+
+        const info = insertStmt.run(
+          nextMediaId++,
+          row.fileName,
+          row.fullPath,
+          row.stats.size,
+          Math.floor(row.stats.birthtimeMs / 1000),
+          Math.floor(row.stats.mtimeMs / 1000),
+          path.extname(row.fileName).toLowerCase(),
+          rootFolder,
+          row.metadata.file_type,
+          row.metadata.device_model,
+          row.metadata.camera_make,
+          row.metadata.camera_model,
+          row.metadata.width,
+          row.metadata.height,
+          row.metadata.orientation,
+          row.metadata.latitude,
+          row.metadata.longitude,
+          row.metadata.altitude,
+          row.metadata.create_date,
+          null, // thumbnail path updated later
+          row.metadata.lens_model,
+          row.metadata.iso,
+          row.metadata.software,
+          row.metadata.offset_time_original,
+          row.metadata.megapixels,
+          row.metadata.exposure_time,
+          row.metadata.color_space,
+          row.metadata.flash,
+          row.metadata.aperture,
+          row.metadata.focal_length,
+          row.metadata.focal_length_35mm,
+          row.metadata.country
+        );
+        row.id = info.lastInsertRowid;
+      } catch (err) {
+          console.error("Error inserting row:", {
+            row: row,
+            error: err.message
+          });
+          throw err; // rethrow so transaction fails
+        }
     }
   });
 
@@ -1083,6 +1222,29 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
     return { success: true };
   } catch (err) {
     console.error("Error removing folder data:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("apply-heic-thumbnails", async (event, heicFiles) => {
+  try {
+    const thumbnailsDir = path.join(dataDir, "thumbnails"); // folder where user will copy thumbnails
+    const stmt = db.prepare("UPDATE files SET thumbnail_path = ? WHERE id = ?");
+    for (const file of heicFiles) {
+      // Construct the expected thumbnail filename
+      const thumbnailFileName = `${file.id}_thumb.jpg`;
+      const thumbnailFullPath = path.join(thumbnailsDir, thumbnailFileName);
+
+      // Only update DB if the thumbnail exists
+      if (!fs.existsSync(thumbnailFullPath)) continue;
+
+      // Update database
+      stmt.run(thumbnailFullPath, file.id);
+    }
+
+    return { success: true, message: "Database updated with thumbnail paths." };
+  } catch (err) {
+    console.error("Error updating thumbnail paths:", err);
     return { success: false, error: err.message };
   }
 });

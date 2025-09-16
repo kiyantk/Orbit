@@ -11,7 +11,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate }) {
+export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings }) {
   
   const videoRefNormal = useRef(null);
   const trackRefNormal = useRef(null);
@@ -65,7 +65,7 @@ useEffect(() => {
 
   const handleEsc = (e) => {
     if (e.key === "Escape") {
-      setIsFullscreen(false);
+      closeFullscreen();
     }
   };
 
@@ -328,7 +328,7 @@ function calculateAge(birthDate, epochSeconds) {
           <img
             src={fileUrl}
             alt={item.filename}
-            className={`max-h-[500px] object-contain rounded-lg bg-gray-200 ${isLoading ? "hidden" : ""}`}
+            className={`max-h-[500px] object-contain rounded-lg bg-gray-200 ${isLoading ? "hidden" : ""} ${currentSettings.adjustHeicColors && item.extension === ".heic" ? "heic-color-adjust" : ""}`}
             onClick={openFullscreen}
             onLoad={() => setIsLoading(false)}
           />
@@ -401,7 +401,7 @@ function calculateAge(birthDate, epochSeconds) {
         </div>
         <div style={{ padding: "2px 0px", backgroundColor: "#28262d", borderRadius: "0px 0px 10px 10px" }}>
           {item.latitude}, {item.longitude}
-          {item.altitude != null ? `, ${item.altitude} m` : ''}
+          {item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : ''}
         </div>
       </span>
     </div>
@@ -477,23 +477,9 @@ function calculateAge(birthDate, epochSeconds) {
     </div>
   )}
 
-  {item.modified && (
-    <div className="metadata-row">
-      <span className="metadata-label">Modified At</span>
-      <span className="metadata-value">{formatTimestamp(item.modified)}</span>
-    </div>
-  )}
-
-  {item.created && (
-    <div className="metadata-row">
-      <span className="metadata-label">Created At</span>
-      <span className="metadata-value">{formatTimestamp(item.created)}</span>
-    </div>
-  )}
-
   {item.offset_time_original && (
     <div className="metadata-row">
-      <span className="metadata-label">Offset Time</span>
+      <span className="metadata-label">Time Offset</span>
       <span className="metadata-value">{item.offset_time_original}</span>
     </div>
   )}
@@ -513,6 +499,20 @@ function calculateAge(birthDate, epochSeconds) {
     </div>
   )}
   
+  {item.modified && (
+    <div className="metadata-row">
+      <span className="metadata-label">Modified At</span>
+      <span className="metadata-value">{formatTimestamp(item.modified)}</span>
+    </div>
+  )}
+
+  {item.created && (
+    <div className="metadata-row">
+      <span className="metadata-label">Created At</span>
+      <span className="metadata-value">{formatTimestamp(item.created)}</span>
+    </div>
+  )}
+  
   {item.path && (
     <div className="metadata-row">
       <span className="metadata-label">Path</span>
@@ -525,7 +525,7 @@ function calculateAge(birthDate, epochSeconds) {
   {item.id && (
     <div className="metadata-row">
       <span className="metadata-label">ID</span>
-      <span className="metadata-value">{item.id}</span>
+      <span className="metadata-value">{item.media_id}</span>
     </div>
   )}
 </div>
@@ -587,7 +587,7 @@ function calculateAge(birthDate, epochSeconds) {
                   )}
               </div>
             ) : (
-              <img src={fileUrl} alt={item.filename} className="fullscreen-image" />
+              <img src={fileUrl} alt={item.filename} className={`fullscreen-image ${currentSettings.adjustHeicColors && item.extension === ".heic" ? "heic-color-adjust" : ""}`} />
             )}
           </div>
         </div>

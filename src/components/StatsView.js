@@ -94,29 +94,41 @@ const StatsView = ({ birthDate }) => {
 
   if (loading) return <div className="stats-loading"><div className="loader"></div></div>;
 
-  const renderTable = (title, data, key1, key2) => (
+const renderTable = (title, data, key1, key2) => {
+  // Sort "Unknown" entries to the bottom
+  const sortedData = [...data].sort((a, b) => {
+    if (a[key1] === "Unknown" && b[key1] !== "Unknown") return 1;
+    if (b[key1] === "Unknown" && a[key1] !== "Unknown") return -1;
+    return 0; // Keep the original order otherwise
+  });
+
+  return (
     <div className="stats-card-wrapper">
-        <div className="stats-card">
-          <h3>{title}</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>{capitalizeFirstLetter(key1)}</th>
-                <th>{capitalizeFirstLetter(key2)}</th>
+      <div className="stats-card">
+        <h3>{title}</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>{capitalizeFirstLetter(key1)}</th>
+              <th>{capitalizeFirstLetter(key2)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedData.map((item, idx) => (
+              <tr
+                key={idx}
+                className={item[key1] === "Unknown" ? "unknown-row" : ""}
+              >
+                <td>{item[key1]}</td>
+                <td>{item[key2]}</td>
               </tr>
-            </thead>
-            <tbody>
-              {data.map((item, idx) => (
-                <tr key={idx}>
-                  <td>{item[key1]}</td>
-                  <td>{item[key2]}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
+};
 
   return (
     <div className="stats-view">

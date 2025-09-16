@@ -115,6 +115,9 @@ body {
   /* grid-template-columns: auto auto auto auto auto auto auto; */
   gap: 20px;
   height: calc(100% - 95px - 23px - 26px);
+  overflow-x: auto;
+  max-width: 100%;
+  padding-bottom: 20px;
 }
 
 .stats-card-wrapper {
@@ -122,6 +125,7 @@ body {
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  min-width: 270px;
 }
 
 .stats-card {
@@ -369,6 +373,17 @@ body {
   box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
 }
 
+.heic-popup {
+  position: relative;
+  background-color: #15131a;
+  padding: 0px;
+  border-radius: 8px;
+  width: 60%;
+  padding-top: 2px;
+  height: 60%;
+  box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
+}
+
 .welcome-popup h2 {
   /* border-bottom: 1px solid #2c2c2c; */
   padding-bottom: 5px;
@@ -386,6 +401,10 @@ body {
   border: none;
   padding: 10px;
   color: white;
+}
+
+.heic-color-adjust {
+  filter: saturate(1.2);
 }
 
 .editnote-titleinput {
@@ -915,6 +934,7 @@ body {
 /* width */
 ::-webkit-scrollbar {
   width: 5px;
+  height: 5px;
 }
 
 /* Track */
@@ -1174,6 +1194,16 @@ body {
   margin-top: 10px;
 }
 
+.unknown-row {
+  color: #888; /* slightly gray */
+}
+
+.heic-popup-content {
+  width: 90%;
+  justify-self: center;
+  margin-top: 10px;
+}
+
 .notistack-custom-default {
   background: rgb(31, 31, 31) !important;
   user-select: none;
@@ -1234,6 +1264,8 @@ body {
 .stats-view {
   margin: 15px;
   width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
     .fab-container {
