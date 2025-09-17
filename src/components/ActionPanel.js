@@ -6,6 +6,7 @@ const ActionPanel = ({ type, onApply }) => {
   const [sortBy, setSortBy] = useState("id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState({
+    dateExact: "",
     dateFrom: "",
     dateTo: "",
     device: "",
@@ -55,6 +56,22 @@ useEffect(() => {
   const handleDateChange = (field, value) => {
     setFilters(prev => {
       let newFilters = { ...prev, [field]: value };
+
+      if (field === "dateExact") {
+        newFilters.dateExact = value;
+        // Clear the from/to dates if exact date is set
+        if (value) {
+          newFilters.dateFrom = "";
+          newFilters.dateTo = "";
+        }
+      } else if (field === "dateFrom" || field === "dateTo") {
+        newFilters[field] = value;
+        // Clear exact date if from/to is set
+        if (value) {
+          newFilters.dateExact = "";
+        }
+      }
+    
       if (field === "dateFrom" && newFilters.dateTo && value > newFilters.dateTo) {
         newFilters.dateTo = value;
       } else if (field === "dateTo" && newFilters.dateFrom && value < newFilters.dateFrom) {
@@ -81,6 +98,7 @@ const resetFilters = () => {
   setFilters({
     dateFrom: "",
     dateTo: "",
+    dateExact: "",
     device: "",
     folder: "",
     filetype: "",
@@ -106,10 +124,12 @@ const resetSearch = () => {
         <div className="sort-panel">
           <label>Sort by:</label>
           <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
+            <option value="id">ID</option>
             <option value="name">Name</option>
             <option value="create_date">Date Taken</option>
             <option value="created">Date Created</option>
-            <option value="id">ID</option>
+            <option value="size">File Size</option>
+            <option value="random">Random</option>
           </select>
           <button onClick={() => setSortOrder("asc")} className={sortOrder === "asc" ? "active" : ""}>Asc</button>
           <button onClick={() => setSortOrder("desc")} className={sortOrder === "desc" ? "active" : ""}>Desc</button>
@@ -120,61 +140,72 @@ const resetSearch = () => {
       {type === "filter" && (
         <div className="filter-panel">
           <div>
-            <label>Year:</label>
+            <label>Year</label>
             <select value={filters.year} onChange={e => handleYearChange(e.target.value)}>
               <option value="">All</option>
               {options.years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
           <div>
-            <label>Date From:</label>
+            <label>Date</label>
+            <input type="date" 
+                   value={filters.dateExact} 
+                   min={options.minDate} 
+                   max={options.maxDate}
+                   disabled={!!filters.dateFrom || !!filters.dateTo}
+                   onChange={e => handleDateChange("dateExact", e.target.value)}/>
+          </div>
+          <div>
+            <label>Date From</label>
             <input type="date" 
                    value={filters.dateFrom} 
                    min={options.minDate} 
-                   max={options.maxDate} 
+                   max={options.maxDate}
+                   disabled={!!filters.dateExact} 
                    onChange={e => handleDateChange("dateFrom", e.target.value)}/>
           </div>
           <div>
-            <label>Date To:</label>
+            <label>Date To</label>
             <input type="date" 
                    value={filters.dateTo} 
                    min={options.minDate} 
-                   max={options.maxDate} 
+                   max={options.maxDate}
+                   disabled={!!filters.dateExact}
                    onChange={e => handleDateChange("dateTo", e.target.value)}/>
           </div>
           <div>
-            <label>Device:</label>
+            <label>Device</label>
             <select value={filters.device} onChange={e => setFilters(f => ({ ...f, device: e.target.value }))}>
               <option value="">All</option>
               {options.devices.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div>
-            <label>Source:</label>
+            <label>Source</label>
             <select value={filters.folder} onChange={e => setFilters(f => ({ ...f, folder: e.target.value }))}>
               <option value="">All</option>
               {options.folders.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
           </div>
           <div>
-            <label>Filetype:</label>
+            <label>Filetype</label>
             <select value={filters.filetype} onChange={e => setFilters(f => ({ ...f, filetype: e.target.value }))}>
               <option value="">All</option>
               {options.filetypes.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
           </div>
           <div>
-            <label>Media Type:</label>
+            <label>Media Type</label>
             <select value={filters.mediaType} onChange={e => setFilters(f => ({ ...f, mediaType: e.target.value }))}>
               <option value="">All</option>
               {options.mediaTypes.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           <div>
-            <label>Country:</label>
+            <label>Country</label>
             <select value={filters.country} onChange={e => setFilters(f => ({ ...f, country: e.target.value }))}>
               <option value="">All</option>
-              {options.countries.map(c => <option key={c} value={c}>{c}</option>)}
+              {options.countries.map(c => c !== "" ? <option key={c} value={c}>{c}</option> : "")}
             </select>
           </div>
           <div className="action-panel-reset"><button onClick={resetFilters}><FontAwesomeIcon icon={faUndo}/></button></div>

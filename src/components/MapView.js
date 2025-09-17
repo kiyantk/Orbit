@@ -218,9 +218,9 @@ const switchTheme = (themeName) => {
 
   return (
     <>
-      <div ref={mapRef} style={{ height: "calc(100% - 23px)", width: "100%" }}></div>
+      <div ref={mapRef} style={{ height: "calc(100% - 23px)", width: "100%", display: !loading ? "block" : "none" }}></div>
       {/* Floating Buttons */}
-            {countriesMenuVisible && (
+      {countriesMenuVisible && (
         <div
           id="countriesMenu"
           style={{
@@ -330,6 +330,9 @@ const switchTheme = (themeName) => {
           </button>
         </div>
       </div>
+      {loading && (
+      <div className="map-loading stats-loading"><div className="loader"></div></div>
+      )}
     </>
   );
 };

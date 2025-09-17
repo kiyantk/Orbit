@@ -314,6 +314,14 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
       whereClauses.push("create_date <= ?");
       params.push(Math.floor(d.getTime() / 1000));
     }
+    if (filters.dateExact) {
+      const start = new Date(filters.dateExact);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(filters.dateExact);
+      end.setHours(23, 59, 59, 999);
+      whereClauses.push("create_date >= ? AND create_date <= ?");
+      params.push(Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000));
+    }
     if (filters.device) {
       whereClauses.push("device_model = ?");
       params.push(filters.device);
@@ -347,23 +355,29 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     }
 
     // --- sorting ---
-    const validSorts = ["id", "filename", "create_date", "date_created"];
-    const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : "id";
-    const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC"
+    let orderSQL = "";
+    if (filters.sortBy === "random") {
+      orderSQL = "ORDER BY RANDOM()";
+    } else {
+      const validSorts = ["id", "filename", "create_date", "date_created", "size"];
+      const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : "id";
+      const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC";
+      orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
+    }
 
     const whereSQL = whereClauses.length ? "WHERE " + whereClauses.join(" AND ") : "";
 
     const countStmt = db.prepare(`SELECT COUNT(*) as count FROM files ${whereSQL}`);
     const totalCount = countStmt.get(...params).count;
-
+    
     const stmt = db.prepare(`
       SELECT *
       FROM files
       ${whereSQL}
-      ORDER BY ${safeSortBy} ${safeSortOrder}
+      ${orderSQL}
       LIMIT ? OFFSET ?
     `);
-
+    
     const rows = stmt.all(...params, limit, offset);
 
     return { success: true, rows, totalCount };
@@ -408,6 +422,14 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
         d.setHours(23, 59, 59, 999); // end of day
         conditions.push("create_date <= ?");
         params.push(Math.floor(d.getTime() / 1000));
+      }
+      if (filters.dateExact) {
+        const start = new Date(filters.dateExact);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(filters.dateExact);
+        end.setHours(23, 59, 59, 999);
+        conditions.push("create_date >= ? AND create_date <= ?");
+        params.push(Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000));
       }
       if (filters.device) {
         conditions.push("device_model = ?");

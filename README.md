@@ -9,7 +9,7 @@ Orbit is a feature-rich desktop photo viewer built with Electron and React. It p
 ## Features
 - 🖼️ A unified grid of your content
 - 👀 Fast previews and full-size media viewing
-- 💾 View metadata
+- 💾 View file properties
 - ⚡ Lightning-fast performance, even with millions of files
 - 🗺️ View photo locations on a map
 - 📊 View statistics about your collection

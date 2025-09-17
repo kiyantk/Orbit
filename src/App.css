@@ -185,18 +185,21 @@ body {
 
 .action-panel {
   position: fixed;
-    bottom: 30px;
-    left: 80px;
-    height: fit-content;
-    width: fit-content;
-    background: #15131a;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    border-radius: 15px;
-    overflow: hidden;
-    border: 1px solid #484050;
+  bottom: 30px;
+  left: 80px;
+  height: fit-content;
+  width: fit-content;
+  background: #15131a;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  border-radius: 15px;
+  overflow: hidden;
+  border: 1px solid #484050;
+  max-width: 70%;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 
 .action-panel input, .action-panel select {
@@ -262,6 +265,12 @@ body {
 .filter-panel div {
   display: grid;
 }
+
+.filter-panel label {
+  margin-bottom: 5px;
+  line-height: 1;
+}
+
 
 
 .side-bar-active {
@@ -403,12 +412,28 @@ body {
   color: white;
 }
 
+input:disabled,
+select:disabled {
+  background-color: #484050; /* light gray */
+  color: #999;               /* text gray */
+  cursor: not-allowed;       /* show forbidden cursor */
+  opacity: 0.7;              /* slightly faded */
+}
+
 .heic-color-adjust {
   filter: saturate(1.2);
 }
 
 .editnote-titleinput {
   margin-top: 5px;
+}
+
+.map-loading {
+  position: relative;
+  z-index: 1000;
+  background-color: #15131a;
+  height: calc(100% - 23px);
+  width: 100%;
 }
 
 .noteColor-editcontainer {
