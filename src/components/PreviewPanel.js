@@ -29,9 +29,9 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   const [isLoading, setIsLoading] = useState(true);
   const [itemCountry, setItemCountry] = useState(null)
   const [zoom, setZoom] = useState(1);
-const [offset, setOffset] = useState({ x: 0, y: 0 });
-const imgRef = useRef(null);
-const lastMousePos = useRef(null);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const imgRef = useRef(null);
+  const lastMousePos = useRef(null);
 
 
   const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
@@ -293,7 +293,7 @@ function calculateAge(birthDate, epochSeconds) {
               <div className="loader"></div>
             </div>
           )}
-{isVideo ? (
+  {isVideo ? (
   <div
     className="video-wrapper"
     onMouseEnter={() => !isSeeking && setIsHovered(true)}
@@ -324,23 +324,21 @@ function calculateAge(birthDate, epochSeconds) {
 
         {/* Bottom controls: track + mute always visible */}
         <div className="video-controls-bottom">
-<div
-  className="video-track-wrapper"
-  ref={trackRefNormal} onMouseDown={handleSeekStart}
->
-  {/* Filled progress */}
-  <div
-    className="video-track-filled"
-    style={{ width: `${progress * 100}%` }}
-  ></div>
+          <div
+            className="video-track-wrapper"
+            ref={trackRefNormal} onMouseDown={handleSeekStart}
+          >
+            {/* Filled progress */}
+            <div
+              className="video-track-filled"
+              style={{ width: `${progress * 100}%` }}
+            ></div>
 
-  {/* Clickable track overlay */}
-  <div
-    className="video-track-overlay"
-  ></div>
-</div>
-
-
+            {/* Clickable track overlay */}
+            <div
+              className="video-track-overlay"
+            ></div>
+          </div>
 
           {/* Mute/Unmute */}
           <button
@@ -630,18 +628,17 @@ function calculateAge(birthDate, epochSeconds) {
               </div>
             ) : (
               <img
-              
-  ref={imgRef} 
+                ref={imgRef} 
                 src={fileUrl} 
                 alt={item.filename} 
                 className={`fullscreen-image ${currentSettings.adjustHeicColors && item.extension === ".heic" ? "heic-color-adjust" : ""}`} 
-                  style={{
-    transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`,
-    cursor: zoom > 1 ? "grab" : "auto",
-    transition: lastMousePos.current ? "none" : "transform 0.1s ease-out"
-  }}
-  onWheel={handleWheel}
-  onMouseDown={zoom > 1 ? handleMouseDown : undefined}
+                style={{
+                  transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`,
+                  cursor: zoom > 1 ? "grab" : "auto",
+                  transition: lastMousePos.current ? "none" : "transform 0.1s ease-out"
+                }}
+                onWheel={handleWheel}
+                onMouseDown={zoom > 1 ? handleMouseDown : undefined}
               />
             )}
           </div>

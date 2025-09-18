@@ -44,34 +44,34 @@ const MapView = () => {
   }, []);
 
   // Inside the component, but outside useEffect
-const switchTheme = (themeName) => {
-  const map = mapRef.current.leafletMap;
-  if (!map) return;
-
-  const themes = {
-    default: {
-      url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>',
-    },
-    light: {
-      url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      attribution:
-        '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>, © <a href="https://carto.com/">CARTO</a>',
-    },
-    dark: {
-      url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      attribution:
-        '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>, © <a href="https://carto.com/">CARTO</a>',
-    },
+  const switchTheme = (themeName) => {
+    const map = mapRef.current.leafletMap;
+    if (!map) return;
+  
+    const themes = {
+      default: {
+        url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>',
+      },
+      light: {
+        url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        attribution:
+          '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>, © <a href="https://carto.com/">CARTO</a>',
+      },
+      dark: {
+        url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        attribution:
+          '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>, © <a href="https://carto.com/">CARTO</a>',
+      },
+    };
+  
+    if (!themes[themeName]) return;
+    if (currentTileLayer.current) map.removeLayer(currentTileLayer.current);
+    currentTileLayer.current = L.tileLayer(themes[themeName].url, {
+      attribution: themes[themeName].attribution,
+      maxZoom: 20,
+    }).addTo(map);
   };
-
-  if (!themes[themeName]) return;
-  if (currentTileLayer.current) map.removeLayer(currentTileLayer.current);
-  currentTileLayer.current = L.tileLayer(themes[themeName].url, {
-    attribution: themes[themeName].attribution,
-    maxZoom: 20,
-  }).addTo(map);
-};
 
 
   // Initialize map

@@ -8,7 +8,6 @@ const WelcomePopup = ({ submitWelcomePopup }) => {
   });
   const [indexingStatus, setIndexingStatus] = useState("");
   const [isIndexing, setIsIndexing] = useState(false);
-  const [currentFile, setCurrentFile] = useState("");
 
   // Select folders
   const selectFolders = async () => {
@@ -93,43 +92,30 @@ const WelcomePopup = ({ submitWelcomePopup }) => {
     }
   };
 
-useEffect(() => {
-  const handleProgress = (data) => {
-    if (typeof data === 'object' && data !== null) {
-      // New format with progress data
-      const { filename, processed, total, percentage } = data;
-      setCurrentFile(filename || "");
-      
-      if (total > 0) {
-        setIndexingStatus(`Indexing: ${processed}/${total} files (${percentage}%)`);
+  useEffect(() => {
+    const handleProgress = (data) => {
+      if (typeof data === 'object' && data !== null) {
+        // New format with progress data
+        const { filename, processed, total, percentage } = data;
+
+        if (total > 0) {
+          setIndexingStatus(`Indexing: ${processed}/${total} files (${percentage}%)`);
+        } else {
+          setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
+        }
       } else {
+        // Old format - just filename string
+        const filename = data || "";
         setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
       }
-    } else {
-      // Old format - just filename string
-      const filename = data || "";
-      setCurrentFile(filename);
-      setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
-    }
-  };
+    };
 
-  window.electron.ipcRenderer.on("indexing-progress", handleProgress);
+    window.electron.ipcRenderer.on("indexing-progress", handleProgress);
 
-  return () => {
-    window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
-  };
-}, []);
-
-
-
-
-  // Update stored edit version due to username change
-  const handleUsernameInputChange = (event) => {
-    setWelcomePopupContent(prev => ({
-      ...prev,
-      username: event.target.value
-    }));
-  };
+    return () => {
+      window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
+    };
+  }, []);
 
   return (
     <div className="welcome-popup-overlay">
@@ -163,10 +149,10 @@ useEffect(() => {
           </div>
           
           {indexingStatus && (
-  <div className="welcome-popup-status">
-    <span>{indexingStatus}</span><br></br><span>Don't close the app</span>
-  </div>
-)}
+            <div className="welcome-popup-status">
+              <span>{indexingStatus}</span><br></br><span>Don't close the app</span>
+            </div>
+          )}
 
         </div>
         <div className="settings-bottom-bar">

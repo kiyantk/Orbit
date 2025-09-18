@@ -21,7 +21,7 @@ Orbit is a feature-rich desktop photo viewer built with Electron and React. It p
 3. You can now launch Orbit from the Start Menu or by opening `Orbit.exe`.
 
 ## Why Orbit?
-Many media viewers are limited in their functionality or simply don't scale. Orbit offers a unified grid based on as many folders as you want, unbeatable performance 
+Many media viewers are limited in their functionality or simply don't scale well. Orbit offers a unified grid based on as many folders as you want, unbeatable performance 
 
 ## Screenshots
 WIP

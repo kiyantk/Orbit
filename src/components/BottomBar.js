@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faRotate,
-  faToggleOn,
-  faCheck,
-  faToggleOff,
-  faQuestion,
-  faStarOfLife,
   faPhotoFilm,
   faMagnifyingGlass,
 } from "@fortawesome/free-solid-svg-icons";

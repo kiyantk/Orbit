@@ -13,9 +13,7 @@ const PAGE_SIZE = 200; // fetch 200 items per page
 const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
 const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale, filters, filteredCountUpdated }) => {
-  const [settings, setSettings] = useState(currentSettings);
   const [totalCount, setTotalCount] = useState(null);
-  const [items, setItems] = useState({}); // map index -> item
   const loadingPages = useRef(new Set());
   const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
   const [selectedItem, setSelectedItem] = useState(null);
@@ -52,9 +50,9 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
 
   useEffect(() => {
     // Load settings on mount (you already do this elsewhere but keep for safety)
-    window.electron.ipcRenderer.invoke("get-settings").then((loadedSettings) => {
-      if (loadedSettings) setSettings(loadedSettings);
-    });
+    // window.electron.ipcRenderer.invoke("get-settings").then((loadedSettings) => {
+    //   if (loadedSettings) setSettings(loadedSettings);
+    // });
 
     // Get total count
     window.electron.ipcRenderer.invoke("get-indexed-files-count").then((count) => {
@@ -179,7 +177,6 @@ const fetchTotalCount = useCallback(async () => {
 // Add this useEffect inside ExplorerView.jsx
 useEffect(() => {
   // Reset items and loaded pages
-  setItems({});
   itemsRef.current = {};       // 🔑 clear old refs
   idToIndex.current = new Map(); // 🔑 clear index map
   loadingPages.current.clear();

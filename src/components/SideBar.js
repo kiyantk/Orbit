@@ -11,7 +11,6 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 
 const SideBar = ({
-  onSettingsChange,
   activeView,
   activeViewChanged,
   openActionPanel,

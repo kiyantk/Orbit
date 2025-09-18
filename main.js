@@ -644,6 +644,11 @@ async function generateThumbnail(filePath, id) {
   }
 }
 
+ipcMain.handle("minimize-app", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  win.minimize();
+});
+
 ipcMain.handle("fetch-heic-missing-thumbnails", async () => {
   initDatabase();
   const rows = db.prepare(`

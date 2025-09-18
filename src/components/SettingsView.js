@@ -26,8 +26,6 @@ const SettingsView = ({
   const [settings, setSettings] = useState(currentSettings);
   const [isIndexing, setIsIndexing] = useState(false);
   const [indexingStatus, setIndexingStatus] = useState("");
-  const [selectedFolders, setSelectedFolders] = useState([]);
-  const [currentFile, setCurrentFile] = useState("");
   const [missingHeicFiles, setMissingHeicFiles] = useState([]);
   const [showHeicPopup, setShowHeicPopup] = useState(false);
   const [showChecksPopup, setShowChecksPopup] = useState(false);
@@ -308,32 +306,30 @@ useEffect(() => {
     }
   };
 
-useEffect(() => {
-  const handleProgress = (data) => {
-    if (typeof data === 'object' && data !== null) {
-      // New format with progress data
-      const { filename, processed, total, percentage } = data;
-      setCurrentFile(filename || "");
-      
-      if (total > 0) {
-        setIndexingStatus(`Indexing: ${processed}/${total} files (${percentage}%)`);
+  useEffect(() => {
+    const handleProgress = (data) => {
+      if (typeof data === 'object' && data !== null) {
+        // New format with progress data
+        const { filename, processed, total, percentage } = data;
+
+        if (total > 0) {
+          setIndexingStatus(`Indexing: ${processed}/${total} files (${percentage}%)`);
+        } else {
+          setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
+        }
       } else {
+        // Old format - just filename string
+        const filename = data || "";
         setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
       }
-    } else {
-      // Old format - just filename string
-      const filename = data || "";
-      setCurrentFile(filename);
-      setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
-    }
-  };
+    };
 
-  window.electron.ipcRenderer.on("indexing-progress", handleProgress);
+    window.electron.ipcRenderer.on("indexing-progress", handleProgress);
 
-  return () => {
-    window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
-  };
-}, []);
+    return () => {
+      window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
+    };
+  }, []);
 
   return (
       <div className="settings-view">

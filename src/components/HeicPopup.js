@@ -53,24 +53,24 @@ const HeicPopup = ({ missingFiles, onClose }) => {
         </div>
         <div className="heic-popup-content" style={{ placeItems: "center"}}>
           <p>
-  Orbit can help you generate thumbnails for <strong>HEIC</strong> images.  
-  Creating them directly inside Orbit would be too slow, so we provide a small Python script you can run locally to generate them much faster.  
-  <br /><br />
-  <strong>Before you start:</strong> Make sure you have <strong>Python 3</strong> installed, then run this command in a terminal to install the required libraries:
-  <br />
-  <code>pip install Pillow pillow-heif</code>
-  <br /><br />
-  <strong>Steps:</strong>
-</p>
-<ol style={{ textAlign: "left", margin: "0 auto", maxWidth: "500px" }}>
-  <li>Click <em>Get Script & JSON</em> to generate a helper script and a JSON file listing the missing HEIC files.</li>
-  <li>Run the script with Python — it will create thumbnails and place them in a <code>/thumbs</code> folder.</li>
-  <li>Copy the generated thumbnails from <code>/thumbs</code> into your Orbit <code>/thumbnails</code> folder.</li>
-  <li>Back in Orbit, click <em>Apply to database</em> to link the new thumbnails.</li>
-</ol><br />
-<p>
-  <em>Note:</em> Your original HEIC files are never modified — only small JPEG thumbnails are created.
-</p>
+            Orbit can help you generate thumbnails for <strong>HEIC</strong> images.  
+            Creating them directly inside Orbit would be too slow, so we provide a small Python script you can run locally to generate them much faster.  
+            <br /><br />
+            <strong>Before you start:</strong> Make sure you have <strong>Python 3</strong> installed, then run this command in a terminal to install the required libraries:
+            <br />
+            <code>pip install Pillow pillow-heif</code>
+            <br /><br />
+            <strong>Steps:</strong>
+          </p>
+          <ol style={{ textAlign: "left", margin: "0 auto", maxWidth: "500px" }}>
+            <li>Click <em>Get Script & JSON</em> to generate a helper script and a JSON file listing the missing HEIC files.</li>
+            <li>Run the script with Python — it will create thumbnails and place them in a <code>/thumbs</code> folder.</li>
+            <li>Copy the generated thumbnails from <code>/thumbs</code> into your Orbit <code>/thumbnails</code> folder.</li>
+            <li>Back in Orbit, click <em>Apply to database</em> to link the new thumbnails.</li>
+          </ol><br />
+          <p>
+            <em>Note:</em> Your original HEIC files are never modified — only small JPEG thumbnails are created.
+          </p>
 
           <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
             <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" onClick={handleGetScript}>

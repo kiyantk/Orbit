@@ -12,25 +12,25 @@ import StatsView from "./components/StatsView";
 import MapView from "./components/MapView";
 
 const App = () => {
-    const [settings, setSettings] = useState(null);
-    const [showWelcomePopup, setShowWelcomePopup] = useState(false);
-    const [activeView, setActiveView] = useState(null);
-    const [folderStatuses, setFolderStatuses] = useState({}); // { "C:/path": true/false }
-    const [selectedSettingsTab, setSelectedSettingsTab] = useState(null);
-    const [selectedItem, setSelectedItem] = useState(null);
-    const [isMuted, setIsMuted] = useState(true); // session-wide mute state
-    const [forceFullscreen, setForceFullscreen] = useState(false);
-    const [explorerScale, setExplorerScale] = useState(1);
-    const [actionPanelType, setActionPanelType] = useState(null);
-    const [filters, setFilters] = useState(null);
-    const [filteredCount, setFilteredCount] = useState(null)
+  const [settings, setSettings] = useState(null);
+  const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+  const [activeView, setActiveView] = useState(null);
+  const [folderStatuses, setFolderStatuses] = useState({}); // { "C:/path": true/false }
+  const [selectedSettingsTab, setSelectedSettingsTab] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [isMuted, setIsMuted] = useState(true); // session-wide mute state
+  const [forceFullscreen, setForceFullscreen] = useState(false);
+  const [explorerScale, setExplorerScale] = useState(1);
+  const [actionPanelType, setActionPanelType] = useState(null);
+  const [filters, setFilters] = useState(null);
+  const [filteredCount, setFilteredCount] = useState(null)
 
-const handleActionPanelApply = (data) => {
-  // setActionPanelType(null); // Close panel
-  setFilters(data);
-};
+  const handleActionPanelApply = (data) => {
+    // setActionPanelType(null); // Close panel
+    setFilters(data);
+  };
 
-    useEffect(() => {
+  useEffect(() => {
     // Load settings from Electron (preload.js)
     window.electron.ipcRenderer
       .invoke("get-settings")
