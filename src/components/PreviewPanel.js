@@ -94,13 +94,17 @@ useEffect(() => {
   setIsPlaying(true);
   setIsLoading(true);
   convertItemCountry();
+  if(isFullscreen && item.file_type === "video") {
+    wasNormalPlayingRef.current = !videoRefNormal.current.paused;
+    videoRefNormal.current.pause();
+  }
 }, [item]);
 
 
   if (!item) return null;
 
   // Normalize to forward slashes
-  const fileUrl = `http://localhost:3001/files/${encodeURIComponent(item.path)}`;
+  const fileUrl = `http://localhost:54055/files/${encodeURIComponent(item.path)}`;
   const isVideo = item.file_type?.startsWith("video");
 
   const safePlay = (video) => {
@@ -181,9 +185,11 @@ const updateCurrentTime = (e) => {
     setIsPlaying(!isPlaying);
   };
 
-  // Click handlers for fullscreen
-  const openFullscreen = () => {
+// Click handlers for fullscreen
+const openFullscreen = () => {
   setIsFullscreen(true);
+  setZoom(1);
+  setOffset({ x: 0, y: 0 });
   if(item.file_type === "video") {
     wasNormalPlayingRef.current = !videoRefNormal.current.paused;
     videoRefNormal.current.pause();
@@ -633,12 +639,16 @@ function calculateAge(birthDate, epochSeconds) {
                 alt={item.filename} 
                 className={`fullscreen-image ${currentSettings.adjustHeicColors && item.extension === ".heic" ? "heic-color-adjust" : ""}`} 
                 style={{
-                  transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`,
+                  transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
                   cursor: zoom > 1 ? "grab" : "auto",
                   transition: lastMousePos.current ? "none" : "transform 0.1s ease-out"
                 }}
                 onWheel={handleWheel}
                 onMouseDown={zoom > 1 ? handleMouseDown : undefined}
+                onDoubleClick={() => {
+                  setZoom(1);
+                  setOffset({ x: 0, y: 0 });
+                }}
               />
             )}
           </div>

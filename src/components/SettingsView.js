@@ -98,79 +98,62 @@ const SettingsView = ({
   }, [newTab]);
 
   // Set local settings
-const handleCheckboxChange = (key) => (event) => {
-  setSettings((prev) => ({
-    ...prev,
-    [key]: event.target.checked,
-  }));
-};
+  const handleCheckboxChange = (key) => (event) => {
+    setSettings((prev) => ({
+      ...prev,
+      [key]: event.target.checked,
+    }));
+  };
 
-
-const handleUsernameChange = (event) => {
-  const newValue = event.target.value;
-  if (newValue === "") {
-    setSettings((prev) => ({ ...prev, username: "" }));
-    return;
-  }
-
-  if (
-    newValue.length > 32 ||
-    /\s{2,}/.test(newValue) ||
-    !/^[a-zA-Z0-9 _-]+$/.test(newValue) ||
-    /^\s|\s$/.test(newValue)
-  ) {
-    return;
-  }
-
-  setSettings((prev) => ({ ...prev, username: newValue }));
-};
-
-const handleBirthDateChange = (event) => {
-  const newValue = event.target.value;
-  setSettings((prev) => ({ ...prev, birthDate: newValue }));
-};
-
-useEffect(() => {
-  saveSettings(settings);
-}, [settings]);
-
-useEffect(() => {
-  saveSettings(settings);
-}, [settings.indexedFolders]);
-
-const removeFolder = async (folderPath) => {
-  // 1. Update state + config
-  setSettings((prev) => ({
-    ...prev,
-    indexedFolders: prev.indexedFolders.filter((folder) => folder !== folderPath),
-  }));
-
-  try {
-    // 2. Tell Electron to clean DB + thumbnails
-    const response = await window.electron.ipcRenderer.invoke(
-      "remove-folder-data",
-      folderPath
-    );
-    if (!response.success) {
-      console.error("Failed to remove folder data:", response.error);
+  const handleUsernameChange = (event) => {
+    const newValue = event.target.value;
+    if (newValue === "") {
+      setSettings((prev) => ({ ...prev, username: "" }));
+      return;
     }
-  } catch (err) {
-    console.error("Error removing folder:", err);
-  }
-};
 
-const handleRemoveAll = async () => {
-  const confirmed = window.confirm(
-    "Are you sure you want to remove ALL indexed folders and their data? This cannot be undone."
-  );
+    if (
+      newValue.length > 32 ||
+      /\s{2,}/.test(newValue) ||
+      !/^[a-zA-Z0-9 _-]+$/.test(newValue) ||
+      /^\s|\s$/.test(newValue)
+    ) {
+      return;
+    }
 
-  if (!confirmed) return;
+    setSettings((prev) => ({ ...prev, username: newValue }));
+  };
 
-  for (const folder of settings.indexedFolders) {
+  const handleBirthDateChange = (event) => {
+    const newValue = event.target.value;
+    setSettings((prev) => ({ ...prev, birthDate: newValue }));
+  };
+
+  const handleDefaultSortChange = (event) => {
+    const newValue = event.target.value;
+    setSettings((prev) => ({ ...prev, defaultSort: newValue }));
+  };
+
+  useEffect(() => {
+    saveSettings(settings);
+  }, [settings]);
+
+  useEffect(() => {
+    saveSettings(settings);
+  }, [settings.indexedFolders]);
+
+  const removeFolder = async (folderPath) => {
+    // 1. Update state + config
+    setSettings((prev) => ({
+      ...prev,
+      indexedFolders: prev.indexedFolders.filter((folder) => folder !== folderPath),
+    }));
+
     try {
+      // 2. Tell Electron to clean DB + thumbnails
       const response = await window.electron.ipcRenderer.invoke(
         "remove-folder-data",
-        folder
+        folderPath
       );
       if (!response.success) {
         console.error("Failed to remove folder data:", response.error);
@@ -178,9 +161,30 @@ const handleRemoveAll = async () => {
     } catch (err) {
       console.error("Error removing folder:", err);
     }
-  }
-  setSettings((prev) => ({ ...prev, indexedFolders: [] }));
-};
+  };
+
+  const handleRemoveAll = async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to remove ALL indexed folders and their data? This cannot be undone."
+    );
+
+    if (!confirmed) return;
+
+    for (const folder of settings.indexedFolders) {
+      try {
+        const response = await window.electron.ipcRenderer.invoke(
+          "remove-folder-data",
+          folder
+        );
+        if (!response.success) {
+          console.error("Failed to remove folder data:", response.error);
+        }
+      } catch (err) {
+        console.error("Error removing folder:", err);
+      }
+    }
+    setSettings((prev) => ({ ...prev, indexedFolders: [] }));
+  };
 
 
   // Save settings
@@ -387,6 +391,21 @@ useEffect(() => {
                     onChange={handleCheckboxChange('adjustHeicColors')}
                   />
                   <span>Adjust HEIC Colors</span>
+                </div>
+                <div className="settings-content-item">
+                  <span>Default Sort:</span>
+                  <select
+                    value={settings?.defaultSort}
+                    onChange={(e) => handleDefaultSortChange(e)}
+                    className="settings-itemstyle-select"
+                  >
+                    <option value="id">ID (Default)</option>
+                    <option value="name">Name</option>
+                    <option value="create_date">Date Taken</option>
+                    <option value="created">Date Created</option>
+                    <option value="size">File Size</option>
+                    <option value="random">Random</option>
+                  </select>
                 </div>
               </div>
             )}

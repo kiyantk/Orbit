@@ -1077,7 +1077,7 @@ select:focus {
   padding: 2px 8px;
 }
 
-.settings-content-input {
+.settings-content-input, .settings-itemstyle-select {
   background-color: #484050;
   padding: 5px;
   color: white;

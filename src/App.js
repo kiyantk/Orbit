@@ -187,7 +187,7 @@ const App = () => {
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>
                 )}
               </div>
-              <ActionPanel type={actionPanelType} onApply={handleActionPanelApply}/>
+              <ActionPanel settings={settings} type={actionPanelType} onApply={handleActionPanelApply}/>
             </div>
           )}
         </div>

@@ -106,38 +106,61 @@ app.whenReady().then(() => {
 
   const express = require("express");
   const appServer = express();
-  const serverPort = 3001;
+  const serverPort = 54055;
 
   // Serve files from any path on disk
-  appServer.get("/files/*", async (req, res) => {
-    const filePath = decodeURIComponent(req.path.replace("/files/", ""));
+appServer.get("/files/*", async (req, res) => {
+  const filePath = decodeURIComponent(req.path.replace("/files/", ""));
 
-    if (!fs.existsSync(filePath)) {
-      console.error("File not found:", filePath);
-      return res.status(404).send("Not found");
-    }
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send("Not found");
+  }
 
-    // If not HEIC, serve directly
-    if (!filePath.toLowerCase().endsWith(".heic")) {
-      return res.sendFile(filePath);
-    }
+  const ext = path.extname(filePath).toLowerCase();
 
-    try {
+  try {
+    if (ext === ".heic") {
       const inputBuffer = fs.readFileSync(filePath);
-
       const outputBuffer = await heicConvert({
         buffer: inputBuffer,
-        format: "JPEG", // "JPEG" or "PNG"
-        quality: 0.8,   // 0-1
+        format: "JPEG",
+        quality: 0.8,
       });
+      res.type("jpeg").send(outputBuffer);
 
-      res.set("Content-Type", "image/jpeg");
-      res.send(outputBuffer);
-    } catch (err) {
-      console.error("HEIC convert failed:", err);
-      res.status(500).send("Failed to convert HEIC");
+    } else if (ext === ".tif" || ext === ".tiff") {
+      const outputBuffer = await sharp(filePath)
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      res.type("jpeg").send(outputBuffer);
+
+    } else if (ext === ".avi" || ext === ".wmv") {
+      res.type("mp4");
+
+      ffmpeg(filePath)
+        .outputFormat("mp4")
+        .videoCodec("libx264")
+        .audioCodec("aac")
+        .outputOptions([
+          "-preset ultrafast",
+          "-crf 28",
+          "-movflags frag_keyframe+empty_moov" // makes streamable MP4
+        ])
+        .on("error", err => {
+          console.error("ffmpeg error:", err);
+          if (!res.headersSent) res.status(500).send("Video conversion failed");
+          else res.end();
+        })
+        .pipe(res, { end: true });
+    } else {
+      // Default: just serve file
+      res.sendFile(filePath);
     }
-  });
+  } catch (err) {
+    console.error(`Failed to convert ${ext} file:`, err);
+    res.status(500).send("Conversion failed");
+  }
+});
 
   appServer.listen(serverPort, () => {
     console.log(`Local file server running on http://localhost:${serverPort}`);
@@ -159,6 +182,7 @@ const defaultConfig = {
   indexedFolders: [],
   birthDate: null,
   adjustHeicColors: true,
+  defaultSort: "id"
 };
 
 // Database
@@ -216,7 +240,12 @@ function initDatabase() {
     )
   `);
 
-      
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_files_create_date ON files(create_date);
+    CREATE INDEX IF NOT EXISTS idx_files_filename ON files(filename);
+    CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
+    CREATE INDEX IF NOT EXISTS idx_files_created ON files(created);
+  `);      
   }
 }
 
@@ -295,7 +324,7 @@ ipcMain.handle("select-folders", async () => {
 // Fetch paginated files for the UI
 // Args: { offset: number, limit: number }
 // Returns: array of rows [{ id, filename, thumbnail_path, path, width, height, file_type }]
-ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters = {} }) => {
+ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters = {}, settings = {} }) => {
   try {
     initDatabase();
 
@@ -359,8 +388,8 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     if (filters.sortBy === "random") {
       orderSQL = "ORDER BY RANDOM()";
     } else {
-      const validSorts = ["id", "filename", "create_date", "date_created", "size"];
-      const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : "id";
+      const validSorts = ["id", "filename", "create_date", "created", "size"];
+      const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : (settings && settings.defaultSort ? settings.defaultSort : "id");
       const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC";
       orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
     }

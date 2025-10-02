@@ -2,7 +2,7 @@ import { faUndo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
-const ActionPanel = ({ type, onApply }) => {
+const ActionPanel = ({ settings, type, onApply }) => {
   const [sortBy, setSortBy] = useState("id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState({
@@ -32,18 +32,25 @@ const ActionPanel = ({ type, onApply }) => {
   });
 
   // Fetch options from database on mount
-useEffect(() => {
-  async function fetchOptions() {
-    const opts = await window.electron.ipcRenderer.invoke("fetch-options");
-    setOptions(opts);
-
-    // if (opts.minDate && opts.maxDate) {
-    //   setFilters(f => ({ ...f, dateFrom: opts.minDate, dateTo: opts.maxDate }));
-    // }
-  }
-
-  fetchOptions();
-}, []);
+  useEffect(() => {
+    async function fetchOptions() {
+      const opts = await window.electron.ipcRenderer.invoke("fetch-options");
+      setOptions(opts);
+    
+      // if (opts.minDate && opts.maxDate) {
+      //   setFilters(f => ({ ...f, dateFrom: opts.minDate, dateTo: opts.maxDate }));
+      // }
+    }
+  
+    fetchOptions();
+  }, []);
+  
+    // Fetch options from database on mount
+  useEffect(() => {
+    if(settings && settings.defaultSort) {
+      setSortBy(settings.defaultSort)
+    }
+  }, [settings]);
 
   // Auto-apply filters or sort whenever they change
   useEffect(() => {
@@ -109,7 +116,7 @@ const resetFilters = () => {
 };
 
 const resetSort = () => {
-  setSortBy("id")
+  setSortBy(settings.defaultSort || "id")
   setSortOrder("desc")
 }
 

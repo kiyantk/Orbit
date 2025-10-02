@@ -95,7 +95,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   //   [filters]
   // );
 
-    const fetchPageForIndex = useCallback(async (index, isFirst = false) => {
+  const fetchPageForIndex = useCallback(async (index, isFirst = false) => {
     const pageIndex = Math.floor(index / PAGE_SIZE);
     if (loadingPages.current.has(pageIndex)) return;
     loadingPages.current.add(pageIndex);
@@ -107,6 +107,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
         offset,
         limit,
         filters: filters || {},
+        settings: currentSettings || {}
       });
       loadingPages.current.delete(pageIndex);
 
@@ -116,7 +117,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
       loadingPages.current.delete(pageIndex);
       console.error("fetchPage error", err);
     }
-  }, [filters]);
+  }, [filters, currentSettings]);
 
   // is item loaded
   const isItemLoaded = (index) => !!itemsRef.current[index];

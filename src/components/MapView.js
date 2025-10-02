@@ -135,7 +135,7 @@ const MapView = () => {
       const latlng = [item.latitude, item.longitude];
       allCoordsTemp.push(latlng);
 
-      if (!item.altitude || item.altitude <= 1000) {
+      if (item.altitude && item.altitude <= 1500) {
         if (item.country) {
           if (!countryBoundsTemp[item.country]) countryBoundsTemp[item.country] = [];
           countryBoundsTemp[item.country].push(latlng);
@@ -227,7 +227,7 @@ const MapView = () => {
             position: "absolute",
             top: 40,
             right: 20,
-            width: 250,
+            minWidth: 250,
             maxHeight: 400,
             overflowY: "auto",
             background: "rgba(44,44,44,0.95)",
