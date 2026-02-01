@@ -122,7 +122,7 @@ const WelcomePopup = ({ submitWelcomePopup }) => {
       <div className="welcome-popup">
         <div className="welcome-popup-top">
           <div className="welcome-popup-inline">
-            <img className="welcome-popup-icon" src={process.env.PUBLIC_URL + "/logo-v1-orbit-bright-white-shadow-small.png"} alt="Logo" />
+            <img className="welcome-popup-icon" src={process.env.PUBLIC_URL + "/logo-v2-orbit-bright-white-shadow-small.png"} alt="Logo" />
             <h2>Orbit</h2>
           </div>
         </div>

@@ -515,16 +515,21 @@ useEffect(() => {
                 </div>
                 <div className="settings-content-item">
                   <span>
-                    Scale Grid:</span>{" "}
+                    Scale grid:</span>{" "}
                     <span className="settings-shortcut-key">CTRL</span> + <span className="settings-shortcut-key">SCROLL</span>
+                </div>
+                <div className="settings-content-item">
+                  <span>
+                    Assign last used tag to selected item:</span>{" "}
+                    <span className="settings-shortcut-key">T</span>
                 </div>
               </div>
             )}
             {selectedTab === "App" && (
               <div>
                 <div className="settings-content-item">
-                  <img width="50" src={process.env.PUBLIC_URL + "/logo-v1-orbit-bright-white-shadow-small.png"} />
-                  <span>Orbit 1.0.0</span>
+                  <img width="50" src={process.env.PUBLIC_URL + "/logo-v2-orbit-bright-white-shadow-small.png"} />
+                  <span>Orbit 1.1.0</span>
                 </div>
                 <div className="settings-content-item">
                   <span>App Location:</span>

@@ -16,8 +16,7 @@ const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("ffmpeg-static");
 const lookup = require("coordinate_to_country");
 const fsPromises = fs.promises;
-const { setTimeout: delay } = require("timers/promises");
-const heicConvert = require("heic-convert");
+const heicDecode = require("heic-decode");
 
 
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
@@ -120,14 +119,25 @@ appServer.get("/files/*", async (req, res) => {
 
   try {
     if (ext === ".heic") {
+      // 1. Read the HEIC file into a buffer
       const inputBuffer = fs.readFileSync(filePath);
-      const outputBuffer = await heicConvert({
-        buffer: inputBuffer,
-        format: "JPEG",
-        quality: 0.8,
-      });
+    
+      // 2. Decode HEIC into raw RGBA pixels
+      const heicImage = await heicDecode({ buffer: inputBuffer });
+    
+      // 3. Convert raw RGBA to JPEG using sharp
+      const outputBuffer = await sharp(heicImage.data, {
+        raw: {
+          width: heicImage.width,
+          height: heicImage.height,
+          channels: 4, // RGBA
+        },
+      })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+    
+      // 4. Send the JPEG response
       res.type("jpeg").send(outputBuffer);
-
     } else if (ext === ".tif" || ext === ".tiff") {
       const outputBuffer = await sharp(filePath)
         .jpeg({ quality: 80 })
@@ -241,6 +251,17 @@ function initDatabase() {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      color TEXT,
+      media_ids TEXT DEFAULT '[]',
+      last_used INTEGER
+    )
+  `);
+
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_files_create_date ON files(create_date);
     CREATE INDEX IF NOT EXISTS idx_files_filename ON files(filename);
     CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
@@ -269,6 +290,49 @@ ipcMain.handle("fix-media-ids", async () => {
     console.error("Error fixing media_id:", err);
     return { success: false, error: err.message };
   }
+});
+
+ipcMain.handle("tags:get-all", async () => {
+  try {
+    initDatabase();
+
+    const rows = db
+      .prepare("SELECT * FROM tags ORDER BY last_used DESC")
+      .all();
+
+    return rows.map((row) => ({
+      ...row,
+      media_ids: JSON.parse(row.media_ids || "[]"),
+    }));
+  } catch (err) {
+    console.error("tags:get-all error:", err);
+    return [];
+  }
+});
+
+ipcMain.handle("tags:save", async (event, tag) => {
+  initDatabase();
+
+  if (tag.id) {
+    db.prepare(`
+      UPDATE tags SET name = ?, description = ?, color = ?, media_ids = ?
+      WHERE id = ?
+    `).run(tag.name, tag.description, tag.color, JSON.stringify(tag.media_ids || []), tag.id);
+
+    return { success: true, updated: true };
+  } else {
+    const info = db.prepare(`
+      INSERT INTO tags (name, description, color, media_ids)
+      VALUES (?, ?, ?, ?)
+    `).run(tag.name, tag.description, tag.color, JSON.stringify(tag.media_ids || []));
+    return { success: true, id: info.lastInsertRowid };
+  }
+});
+
+ipcMain.handle("tags:delete", async (event, id) => {
+  initDatabase();
+  db.prepare("DELETE FROM tags WHERE id = ?").run(id);
+  return { success: true };
 });
 
 
@@ -371,6 +435,18 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
       whereClauses.push("country = ?");
       params.push(filters.country);
     }
+    if (filters.tag && !filters.addMode) {
+      // Join files with tags where media_ids contains the file's media_id
+      whereClauses.push(`
+        id IN (
+          SELECT value
+          FROM tags, json_each(tags.media_ids)
+          WHERE tags.name = ?
+        )
+      `);
+      params.push(filters.tag);
+    }
+
 
     // --- search ---
     if (filters.searchBy && filters.searchTerm) {
@@ -480,6 +556,16 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
         conditions.push("country = ?");
         params.push(filters.country);
       }
+      if (filters.tag && !filters.addMode) {
+        conditions.push(`
+          id IN (
+            SELECT value
+            FROM tags, json_each(tags.media_ids)
+            WHERE tags.name = ?
+          )
+        `);
+        params.push(filters.tag);
+      }
       if (filters.searchBy && filters.searchTerm) {
         if (filters.searchBy === "id") {
           conditions.push("id = ?");
@@ -504,6 +590,80 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
   }
 });
 
+ipcMain.handle("tag-selected-items", async (event, { tagId, mediaIds }) => {
+  try {
+    initDatabase();
+
+    if (!tagId || !Array.isArray(mediaIds)) {
+      throw new Error("Invalid parameters: tagId and mediaIds are required.");
+    }
+
+    // Fetch the existing media_ids for the tag
+    const tagRow = db.prepare("SELECT media_ids FROM tags WHERE id = ?").get(tagId);
+    if (!tagRow) throw new Error(`Tag with id ${tagId} not found`);
+
+    let existingIds = [];
+    try {
+      existingIds = JSON.parse(tagRow.media_ids || "[]");
+    } catch {
+      existingIds = [];
+    }
+
+    // Merge and deduplicate IDs
+    const updatedIds = Array.from(new Set([...existingIds, ...mediaIds]));
+
+    // Update the tag + set last_used timestamp
+    const now = Date.now();
+    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
+      .run(JSON.stringify(updatedIds), now, tagId);
+
+    return { success: true, updatedIds };
+  } catch (err) {
+    console.error("save-selected-items error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("tag:add-item", async (event, { tagId, mediaId }) => {
+  try {
+    initDatabase();
+
+    const tagRow = db.prepare("SELECT media_ids FROM tags WHERE id = ?").get(tagId);
+    if (!tagRow) throw new Error(`Tag ${tagId} not found`);
+
+    const ids = JSON.parse(tagRow.media_ids || "[]");
+    if (!ids.includes(mediaId)) ids.push(mediaId);
+
+    const now = Date.now();
+    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
+      .run(JSON.stringify(ids), now, tagId);
+
+    return { success: true, ids };
+  } catch (err) {
+    console.error("tag:add-item error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("tag:remove-item", async (event, { tagId, mediaId }) => {
+  try {
+    initDatabase();
+
+    const tagRow = db.prepare("SELECT media_ids FROM tags WHERE id = ?").get(tagId);
+    if (!tagRow) throw new Error(`Tag ${tagId} not found`);
+
+    const ids = JSON.parse(tagRow.media_ids || "[]").filter((id) => id !== mediaId);
+
+    const now = Date.now();
+    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
+      .run(JSON.stringify(ids), now, tagId);
+
+    return { success: true, ids };
+  } catch (err) {
+    console.error("tag:remove-item error:", err);
+    return { success: false, error: err.message };
+  }
+});
 
 // Indexing
 // ipcMain.handle("index-files", async (event, folders) => {
@@ -1095,6 +1255,11 @@ ipcMain.handle("fetch-options", async () => {
     const filetypes = db.prepare("SELECT DISTINCT extension FROM files WHERE extension IS NOT NULL").all().map(r => r.extension);
     const mediaTypes = db.prepare("SELECT DISTINCT file_type FROM files WHERE file_type IS NOT NULL").all().map(r => r.file_type);
     const countries = db.prepare("SELECT DISTINCT country FROM files WHERE country IS NOT NULL").all().map(r => r.country);
+    const tags = db.prepare(`
+      SELECT *
+      FROM tags 
+      WHERE media_ids IS NOT NULL
+    `).all().map(r => r.name);
 
     const dateRange = db.prepare("SELECT MIN(create_date) as min, MAX(create_date) as max FROM files WHERE create_date IS NOT NULL").get();
 
@@ -1111,10 +1276,10 @@ ipcMain.handle("fetch-options", async () => {
       years = Array.from({ length: endYear - startYear + 1 }, (_, i) => endYear - i);
     }
 
-    return { devices, folders, filetypes, mediaTypes, countries, minDate, maxDate, years };
+    return { devices, folders, filetypes, mediaTypes, countries, minDate, maxDate, years, tags };
   } catch (err) {
     console.error("fetch-options error", err);
-    return { devices: [], folders: [], filetypes: [], mediaTypes: [], countries: [], minDate: "", maxDate: "", years: [] };
+    return { devices: [], folders: [], filetypes: [], mediaTypes: [], countries: [], minDate: "", maxDate: "", years: [], tags: [] };
   }
 });
 
