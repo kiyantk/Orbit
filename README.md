@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://cdn.kiy.li/img/kiyantk/orbit-logo192.png" width="100" alt="Orbit Logo"/>
+  <img src="https://cdn.kiy.li/img/kiyantk/orbit-logo192-2.png" width="100" alt="Orbit Logo"/>
 </p>
 
 # Orbit
