@@ -1,0 +1,150 @@
+.tags-view {
+  padding: 16px;
+}
+
+.tags-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.tags-title {
+  font-size: 1.55rem;
+  font-weight: bold;
+}
+
+.tags-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #15131a;
+  border: none;
+}
+
+.tags-table th,
+.tags-table td {
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  text-align: left;
+}
+
+.tags-table th {
+  background: #15131a;
+}
+
+.no-tags {
+  text-align: center !important;
+  padding: 12px;
+  color: #777;
+}
+
+.tag-label {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: white;
+}
+
+.actions .btn {
+    font-size: 16px;
+    width: 40px;
+    margin-right: 5px;
+}
+
+/* Buttons */
+.btn {
+  padding: 6px;
+  font-size: 0.85rem;
+  border-radius: 4px;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background: #484050;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #50475a;
+}
+
+.btn-gray {
+  background: #71647d;
+  color: white;
+}
+
+.btn-gray:hover {
+  background: #9282a1;
+}
+
+.btn-warning {
+  background: #facc15;
+}
+
+.btn-warning:hover {
+  background: #eab308;
+}
+
+.btn-danger {
+  background: #484050;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #50475a;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: #15131a;
+  padding: 20px;
+  border-radius: 8px;
+  width: 380px;
+  max-width: 95%;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+.modal-title {
+  font-size: 1.1rem;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.input, .textarea {
+  width: 100%;
+  padding: 6px;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  background-color: #484050;
+}
+
+.textarea {
+  min-height: 60px;
+}
+
+.color-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}

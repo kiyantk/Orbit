@@ -10,6 +10,8 @@ import PreviewPanel from "./components/PreviewPanel";
 import ActionPanel from "./components/ActionPanel";
 import StatsView from "./components/StatsView";
 import MapView from "./components/MapView";
+import TagsView from "./components/TagsView";
+import ShuffleView from "./components/ShuffleView";
 
 const App = () => {
   const [settings, setSettings] = useState(null);
@@ -24,10 +26,19 @@ const App = () => {
   const [actionPanelType, setActionPanelType] = useState(null);
   const [filters, setFilters] = useState(null);
   const [filteredCount, setFilteredCount] = useState(null)
+  const [shuffleFilters, setShuffleFilters] = useState({});
+  const [shuffleSettings, setShuffleSettings] = useState({ shuffleInterval: 8 });
+  const [explorerScroll, setExplorerScroll] = useState(0);
+  const [previewPanelKey, setPreviewPanelKey] = useState(0);
 
   const handleActionPanelApply = (data) => {
-    // setActionPanelType(null); // Close panel
-    setFilters(data);
+    if (actionPanelType === "filter" || actionPanelType === "sort" || actionPanelType === "search") {
+      setFilters(data);
+    } else if (actionPanelType === "shuffle-filter") {
+      setShuffleFilters(data);
+    } else if (actionPanelType === "shuffle-settings") {
+      setShuffleSettings(prev => ({ ...prev, ...data }));
+    }
   };
 
   useEffect(() => {
@@ -71,6 +82,10 @@ const App = () => {
       checkFolderStatuses();
     }
   }, [activeView, settings, checkFolderStatuses]);
+
+  useEffect(() => {
+    setActionPanelType(null)
+  }, [activeView]);
 
     // Check if user has seen Welcome Popup on mount & check username
     useEffect(() => {
@@ -127,6 +142,10 @@ const App = () => {
       }
     };
 
+    const handleTagAssign = () => {
+      setPreviewPanelKey(previewPanelKey + 1)
+    }
+
     const handleExplorerScale = (newScale) => {
       setExplorerScale(newScale)
     }
@@ -137,6 +156,10 @@ const App = () => {
       } else {
         setActionPanelType(null)
       }
+    }
+
+    const disableAddMode = () => {
+      setFilters({});
     }
 
   return (
@@ -161,6 +184,21 @@ const App = () => {
           {activeView === "map" && (
             <MapView />
           )}
+          {activeView === "tags" && (
+            <TagsView
+              onViewTag={(tag) => {
+                setFilters({ tag: tag.name });
+                setActiveView("explore");
+              }}
+              onAddMedia={(tag) => {
+                setFilters({ tagId: tag.id, addMode: true });
+                setActiveView("explore");
+              }} 
+            />
+          )}
+          {activeView === "shuffle" && (
+            <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} />
+          )}
           {activeView === "explore" && (
             <div className="explorer-container">
               <ExplorerView
@@ -168,9 +206,14 @@ const App = () => {
                 folderStatuses={folderStatuses}
                 openSettings={openMediaSettings}
                 onSelect={handleExplorerSelect}
+                onTagAssign={handleTagAssign}
                 onScale={handleExplorerScale}
                 filters={filters}
                 filteredCountUpdated={setFilteredCount}
+                disableAddMode={disableAddMode}
+                scrollPosition={explorerScroll}
+                setScrollPosition={setExplorerScroll}
+                actionPanelType={actionPanelType}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (
@@ -182,15 +225,18 @@ const App = () => {
                     setForceFullscreen={setForceFullscreen}
                     birthDate={settings.birthDate}
                     currentSettings={settings}
+                    panelKey={previewPanelKey}
                   />
                 ) : (
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>
                 )}
               </div>
-              <ActionPanel settings={settings} type={actionPanelType} onApply={handleActionPanelApply}/>
             </div>
           )}
         </div>
+        {(activeView === "explore" || activeView === "shuffle") && (
+          <ActionPanel settings={settings} type={actionPanelType} onApply={handleActionPanelApply}/>
+        )}
         <div>
           {showWelcomePopup && (
             <WelcomePopup

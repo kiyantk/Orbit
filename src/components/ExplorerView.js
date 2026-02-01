@@ -4,7 +4,9 @@ import { FixedSizeGrid as Grid } from "react-window";
 import InfiniteLoader from "react-window-infinite-loader";
 import "./ExplorerView.css"; // optional, add styles you like
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faArrowRight, faVideo } from "@fortawesome/free-solid-svg-icons";
+import { faArrowRight, faVideo, faXmark } from "@fortawesome/free-solid-svg-icons";
+import ContextMenu from "./ContextMenu";
+import { SnackbarProvider, closeSnackbar, enqueueSnackbar } from "notistack";
 
 const BASE_COLUMN_WIDTH = 130; 
 const BASE_ROW_HEIGHT = 130;
@@ -12,7 +14,7 @@ const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
 const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
-const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onScale, filters, filteredCountUpdated }) => {
+const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated, disableAddMode, scrollPosition, setScrollPosition, actionPanelType }) => {
   const [totalCount, setTotalCount] = useState(null);
   const loadingPages = useRef(new Set());
   const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
@@ -20,6 +22,10 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const itemsRef = useRef({});
   const idToIndex = useRef(new Map());
   const [, forceUpdate] = useState(0); // trigger re-render when itemsRef changes
+  const [addModeSelected, setAddModeSelected] = useState(new Set());
+  const [addMode, setAddMode]  = useState(filters?.addMode === true);
+  const [contextMenu, setContextMenu] = useState(null);
+  const [tags, setTags] = useState([]);
 
   // --- Fetch pages into refs ---
   const addItems = (rows, offset) => {
@@ -30,6 +36,19 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
     });
     forceUpdate(x => x + 1);
   };
+
+  const handleAddModeClick = (item) => {
+  setAddModeSelected((prev) => {
+    const newSet = new Set(prev);
+    if (newSet.has(item.id)) {
+      newSet.delete(item.id);
+    } else {
+      newSet.add(item.id);
+    }
+    return newSet;
+  });
+};
+
 
   // Listen for ctrl+scroll
   useEffect(() => {
@@ -174,7 +193,6 @@ const fetchTotalCount = useCallback(async () => {
   }
 }, [filters]);
 
-
 // Add this useEffect inside ExplorerView.jsx
 useEffect(() => {
   // Reset items and loaded pages
@@ -223,6 +241,42 @@ useEffect(() => {
     }
   };
 
+const getTags = async () => {
+  const res = await window.electron.ipcRenderer.invoke("tags:get-all");
+  const freshTags = res || [];
+  setTags(freshTags);
+  return freshTags; // <-- return the data so callers can use it immediately
+};
+
+const tagCurrentlySelected = async (item) => {
+  const freshTags = await getTags(); // Make getTags return tags
+  const tag = freshTags?.[0];
+  if (!tag) return;
+
+  const isTagged = Array.isArray(tag.media_ids)
+    ? tag.media_ids.includes(item.id)
+    : false;
+
+  if (isTagged) {
+    await window.electron.ipcRenderer.invoke("tag:remove-item", {
+      tagId: tag.id,
+      mediaId: item.id,
+    });
+    enqueueSnackbar(`Removed tag '${tag.name}' from selected item`);
+  } else {
+    await window.electron.ipcRenderer.invoke("tag:add-item", {
+      tagId: tag.id,
+      mediaId: item.id,
+    });
+    enqueueSnackbar(`Added tag '${tag.name}' to selected item`);
+  }
+
+  // Refresh after mutation
+  await getTags();
+
+  onTagAssign(item);
+};
+
   const columnWidth = BASE_COLUMN_WIDTH * scale;
   const rowHeight = BASE_ROW_HEIGHT * scale;
   const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + GUTTER)));
@@ -231,9 +285,13 @@ useEffect(() => {
   // --- Keyboard navigation (use idToIndex map) ---
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (actionPanelType) return;
       if (!selectedItem) return;
       const idx = idToIndex.current.get(selectedItem.id);
       if (idx == null) return;
+      if(e.key === "T" || e.key === "t") {
+        tagCurrentlySelected(itemsRef.current[idx])
+      }
 
       let nextIndex = idx;
       if (e.key === "ArrowRight") nextIndex = idx + 1;
@@ -278,6 +336,23 @@ useEffect(() => {
       return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
 
+  // Restore scroll when mounting
+useEffect(() => {
+  setTimeout(() => {
+    scrollToLatest()
+  }, 100);
+}, []);
+
+const scrollToLatest = () => {
+  if (gridRef.current && scrollPosition) {
+    gridRef.current.scrollTo({ scrollTop: scrollPosition });
+  }
+}
+
+const handleScroll = (ev) => {
+  if(ev.scrollTop !== 0) setScrollPosition(ev.scrollTop);
+};
+
   // render each cell
   const Cell = React.memo(({ columnIndex, rowIndex, style }) => {
   const index = rowIndex * columnCount + columnIndex;
@@ -302,8 +377,30 @@ useEffect(() => {
 
   return (
     <div style={{ ...style, padding: 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
-      className={(selectedItem && item.id === selectedItem.id ? 'thumb-selected' : 'thumb-item')}
-      onClick={(e) => folderAvailable && handleClick(e, item)}
+      className={
+  addMode && addModeSelected.has(item.id)
+    ? "thumb-selected-addmode"
+    : selectedItem && item.id === selectedItem.id
+    ? "thumb-selected"
+    : "thumb-item"
+}
+
+      onClick={(e) => {
+  if (!folderAvailable) return;
+
+  if (addMode) {
+    handleAddModeClick(item);
+  } else {
+    handleClick(e, item);
+  }
+}}
+
+onContextMenu={(e) => {
+  e.preventDefault();
+  setContextMenu({ x: e.clientX, y: e.clientY, item });
+}}
+
+
       onDoubleClick={() => folderAvailable && handleSelect(item, "double")}>
       <div
         className="thumb-card"
@@ -339,7 +436,7 @@ useEffect(() => {
       </div>
       {/* Filename under the thumbnail */}
       <div
-        className="thumb-filename"
+        className={`thumb-filename ${!folderAvailable ? 'thumb-filename-unavailable' : ''}`}
         title={item.filename}
         style={{
           marginTop: 4,
@@ -402,6 +499,7 @@ useEffect(() => {
               rowCount={rowCount}
               rowHeight={rowHeight}
               width={containerWidth}
+              onScroll={handleScroll}
               onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex, visibleColumnStartIndex, visibleColumnStopIndex }) => {
                 // translate Grid visible indices into linear indices for InfiniteLoader
                 const startIndex = visibleRowStartIndex * columnCount + visibleColumnStartIndex;
@@ -414,6 +512,82 @@ useEffect(() => {
           )}
         </InfiniteLoader>
       </div>
+{addMode && (
+  <div
+    style={{
+      position: "fixed",
+      bottom: 40,
+      right: 20,
+      padding: "10px 20px",
+      backgroundColor: "#15131a",
+      color: "white",
+      border: "1px solid #484050",
+      borderRadius: 6,
+      zIndex: 1000,
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+    }}
+  >
+    {/* Tagging Mode Text */}
+    <span>Tagging Mode Enabled</span>
+
+    {/* Attach Tag Button */}
+    <button
+      style={{
+        padding: "6px 12px",
+        backgroundColor: "#484050",
+        border: "none",
+        color: "white",
+        borderRadius: 4,
+        cursor: "pointer",
+      }}
+      onClick={() => {
+        setAddMode(false)
+        window.electron.ipcRenderer.invoke("tag-selected-items", {
+          tagId: filters.tagId,
+          mediaIds: Array.from(addModeSelected),
+        });
+      }}
+    >
+      Attach Tag ({addModeSelected.size})
+    </button>
+
+    {/* Close Button */}
+    <button
+      style={{
+        padding: "6px 12px",
+        backgroundColor: "#484050",
+        border: "none",
+        color: "white",
+        borderRadius: 4,
+        cursor: "pointer",
+        fontWeight: "bold",
+      }}
+      onClick={() => {
+        // Close tagging mode
+        setAddMode(false)
+        disableAddMode()
+      }}
+    >
+      <FontAwesomeIcon icon={faXmark} />
+    </button>
+  </div>
+)}
+
+{contextMenu && (
+  <ContextMenu
+    x={contextMenu.x}
+    y={contextMenu.y}
+    item={contextMenu.item}
+    onClose={() => setContextMenu(null)}
+  />
+)}
+
+<SnackbarProvider />
+
+
     </div>
   );
 };

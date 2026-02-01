@@ -11,7 +11,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings }) {
+export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey }) {
   
   const videoRefNormal = useRef(null);
   const trackRefNormal = useRef(null);
@@ -32,10 +32,23 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const imgRef = useRef(null);
   const lastMousePos = useRef(null);
+  const [tags, setTags] = useState([]);
 
 
   const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
   const currentTrackRef = isFullscreen ? trackRefFullscreen : trackRefNormal;
+
+  const getContrastColor = (hex) => {
+  if (!hex) return "#000";
+  const c = hex.substring(1); // remove #
+  const rgb = parseInt(c, 16); 
+  const r = (rgb >> 16) & 0xff;
+  const g = (rgb >> 8) & 0xff;
+  const b = rgb & 0xff;
+  // Luminance formula
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+  return luminance > 150 ? "#000" : "#fff"; // light bg = black text, dark bg = white text
+};
 
   // Sync fullscreen with parent trigger
   useEffect(() => {
@@ -66,17 +79,19 @@ useEffect(() => {
 }, [item, isSeeking, isFullscreen]);
 
 useEffect(() => {
-  if (!isFullscreen) return;
-
   const handleEsc = (e) => {
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && isFullscreen) {
       closeFullscreen();
+    }
+    if (e.key === " " || e.code === "Space") {
+      e.preventDefault();
+      togglePlay();
     }
   };
 
   document.addEventListener("keydown", handleEsc);
   return () => document.removeEventListener("keydown", handleEsc);
-}, [isFullscreen]);
+}, [isFullscreen, isPlaying]);
 
   const convertItemCountry = useCallback(async () => {
     if (!item.country) return;
@@ -99,6 +114,23 @@ useEffect(() => {
     videoRefNormal.current.pause();
   }
 }, [item]);
+
+  useEffect(() => {
+    if (!item?.id) return;
+
+    const fetchTags = async () => {
+      try {
+        const allTags = await window.electron.ipcRenderer.invoke("tags:get-all");
+        const itemTags = allTags.filter(tag => tag.media_ids.includes(item.id));
+        setTags(itemTags);
+      } catch (err) {
+        console.error("Failed to fetch tags:", err);
+      }
+    };
+
+    fetchTags();
+  }, [item, panelKey]);
+
 
 
   if (!item) return null;
@@ -381,53 +413,53 @@ function calculateAge(birthDate, epochSeconds) {
         )}
       </div>
 
-<div className="metadata-panel">
+<div className="metadata-panel" key={panelKey}>
   {item.filename && (
     <div className="metadata-row">
       <span className="metadata-label">Filename</span>
-      <span className="metadata-value">{item.filename}</span>
+      <span className="metadata-value" title={item.filename}>{item.filename}</span>
     </div>
   )}
 
   {item.size != null && (
     <div className="metadata-row">
       <span className="metadata-label">Size</span>
-      <span className="metadata-value">{formatBytes(item.size)}</span>
+      <span className="metadata-value" title={formatBytes(item.size)}>{formatBytes(item.size)}</span>
     </div>
   )}
 
   {(item.extension || item.file_type) && (
     <div className="metadata-row">
       <span className="metadata-label">Type</span>
-      <span className="metadata-value">{item.extension + (item.file_type ? ` (${item.file_type})` : '')}</span>
+      <span className="metadata-value" title={item.extension + (item.file_type ? ` (${item.file_type})` : '')}>{item.extension + (item.file_type ? ` (${item.file_type})` : '')}</span>
     </div>
   )}
 
   {item.create_date && (
     <div className="metadata-row">
       <span className="metadata-label">Taken</span>
-      <span className="metadata-value">{formatTimestamp(item.create_date)}</span>
+      <span className="metadata-value" title={formatTimestamp(item.create_date)}>{formatTimestamp(item.create_date)}</span>
     </div>
   )}
 
   {item.device_model && (
     <div className="metadata-row">
       <span className="metadata-label">Device</span>
-      <span className="metadata-value">{item.device_model}</span>
+      <span className="metadata-value" title={item.device_model}>{item.device_model}</span>
     </div>
   )}
 
   {item.width && item.height && (
     <div className="metadata-row">
       <span className="metadata-label">Resolution</span>
-      <span className="metadata-value">{item.width + 'x' + item.height}</span>
+      <span className="metadata-value" title={item.width + 'x' + item.height}>{item.width + 'x' + item.height}</span>
     </div>
   )}
 
   {isVideo && duration && (
     <div className="metadata-row">
       <span className="metadata-label">Duration</span>
-      <span className="metadata-value">{formatDuration(duration)}</span>
+      <span className="metadata-value" title={formatDuration(duration)}>{formatDuration(duration)}</span>
     </div>
   )}
 
@@ -445,7 +477,7 @@ function calculateAge(birthDate, epochSeconds) {
             <Marker position={[item.latitude, item.longitude]} />
           </MapContainer>
         </div>
-        <div style={{ padding: "2px 0px", backgroundColor: "#28262d", borderRadius: "0px 0px 10px 10px" }}>
+        <div title={item.latitude + ',' + item.longitude + (item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : '')} style={{ padding: "2px 0px", backgroundColor: "#28262d", borderRadius: "0px 0px 10px 10px" }}>
           {item.latitude}, {item.longitude}
           {item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : ''}
         </div>
@@ -456,7 +488,7 @@ function calculateAge(birthDate, epochSeconds) {
   {item.country && (
     <div className="metadata-row">
       <span className="metadata-label">Country</span>
-      <span className="metadata-value">{itemCountry}</span>
+      <span className="metadata-value" title={itemCountry}>{itemCountry}</span>
     </div>
   )}
 
@@ -470,7 +502,7 @@ function calculateAge(birthDate, epochSeconds) {
   {item.iso && (
     <div className="metadata-row">
       <span className="metadata-label">ISO</span>
-      <span className="metadata-value">{item.iso}</span>
+      <span className="metadata-value" title={item.iso}>{item.iso}</span>
     </div>
   )}
 
@@ -484,49 +516,49 @@ function calculateAge(birthDate, epochSeconds) {
   {item.megapixels && (
     <div className="metadata-row">
       <span className="metadata-label">Megapixels</span>
-      <span className="metadata-value">{item.megapixels.toFixed(0)}</span>
+      <span className="metadata-value" title={item.megapixels.toFixed(0)}>{item.megapixels.toFixed(0)}</span>
     </div>
   )}
 
   {item.exposure_time && (
     <div className="metadata-row">
       <span className="metadata-label">Exposure</span>
-      <span className="metadata-value">{item.exposure_time} s</span>
+      <span className="metadata-value" title={item.exposure_time}>{item.exposure_time} s</span>
     </div>
   )}
 
   {item.color_space && (
     <div className="metadata-row">
       <span className="metadata-label">Color Space</span>
-      <span className="metadata-value">{item.color_space}</span>
+      <span className="metadata-value" title={item.color_space}>{item.color_space}</span>
     </div>
   )}
 
   {item.flash && (
     <div className="metadata-row">
       <span className="metadata-label">Flash</span>
-      <span className="metadata-value">{item.flash}</span>
+      <span className="metadata-value" title={item.flash}>{item.flash}</span>
     </div>
   )}
 
   {item.aperture && (
     <div className="metadata-row">
       <span className="metadata-label">Aperture</span>
-      <span className="metadata-value">f/{item.aperture}</span>
+      <span className="metadata-value" title={'f/' + item.aperture}>f/{item.aperture}</span>
     </div>
   )}
 
   {item.focal_length && (
     <div className="metadata-row">
       <span className="metadata-label">Focal Length</span>
-      <span className="metadata-value">{item.focal_length + ' (' + item.focal_length_35mm + ')'}</span>
+      <span className="metadata-value" title={item.focal_length + ' (' + item.focal_length_35mm + ')'}>{item.focal_length + ' (' + item.focal_length_35mm + ')'}</span>
     </div>
   )}
 
   {item.offset_time_original && (
     <div className="metadata-row">
       <span className="metadata-label">Time Offset</span>
-      <span className="metadata-value">{item.offset_time_original}</span>
+      <span className="metadata-value" title={item.offset_time_original}>{item.offset_time_original}</span>
     </div>
   )}
 
@@ -534,28 +566,28 @@ function calculateAge(birthDate, epochSeconds) {
   {item.camera_make && (
     <div className="metadata-row">
       <span className="metadata-label">Make</span>
-      <span className="metadata-value">{item.camera_make}</span>
+      <span className="metadata-value" title={item.camera_make}>{item.camera_make}</span>
     </div>
   )}
 
   {(item.create_date || item.created) && birthDate && (
     <div className="metadata-row">
       <span className="metadata-label">Age</span>
-      <span className="metadata-value">{calculateAge(birthDate, item.create_date || item.created)}</span>
+      <span className="metadata-value" title={calculateAge(birthDate, item.create_date || item.created)}>{calculateAge(birthDate, item.create_date || item.created)}</span>
     </div>
   )}
   
   {item.modified && (
     <div className="metadata-row">
       <span className="metadata-label">Modified At</span>
-      <span className="metadata-value">{formatTimestamp(item.modified)}</span>
+      <span className="metadata-value" title={formatTimestamp(item.modified)}>{formatTimestamp(item.modified)}</span>
     </div>
   )}
 
   {item.created && (
     <div className="metadata-row">
       <span className="metadata-label">Created At</span>
-      <span className="metadata-value">{formatTimestamp(item.created)}</span>
+      <span className="metadata-value" title={formatTimestamp(item.created)}>{formatTimestamp(item.created)}</span>
     </div>
   )}
   
@@ -571,9 +603,27 @@ function calculateAge(birthDate, epochSeconds) {
   {item.id && (
     <div className="metadata-row">
       <span className="metadata-label">ID</span>
-      <span className="metadata-value">{item.media_id}</span>
+      <span className="metadata-value" title={item.media_id}>{item.media_id}</span>
     </div>
   )}
+
+  {tags.length > 0 && (
+        <div className="metadata-row">
+          <span className="metadata-label">Tags</span>
+          <span className="metadata-value">
+            {tags.length > 0 && tags.map(tag => (
+              <span
+                key={tag.id}
+                className="tag-pill"
+                style={{ backgroundColor: tag.color || "#555", color: getContrastColor(tag.color), marginRight: 4, padding: "2px 6px", borderRadius: 4 }}
+                title={tag.description || ""}
+              >
+                {tag.name}
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
 </div>
 
 
