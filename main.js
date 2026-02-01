@@ -275,12 +275,26 @@ ipcMain.handle("fix-media-ids", async () => {
     initDatabase();
 
     db.transaction(() => {
-      // Get all rows ordered by id (so stable and deterministic)
-      const rows = db.prepare("SELECT id FROM files ORDER BY id ASC").all();
+      // Step 1: move existing media_id out of the way
+      db.prepare(`
+        UPDATE files
+        SET media_id = -id
+      `).run();
+
+      // Step 2: reassign correctly ordered media_ids
+      const rows = db.prepare(`
+        SELECT id
+        FROM files
+        ORDER BY
+          COALESCE(create_date, created) ASC,
+          id ASC
+      `).all();
 
       let counter = 1;
       for (const row of rows) {
-        db.prepare("UPDATE files SET media_id = ? WHERE id = ?").run(counter, row.id);
+        db.prepare(
+          "UPDATE files SET media_id = ? WHERE id = ?"
+        ).run(counter, row.id);
         counter++;
       }
     })();
