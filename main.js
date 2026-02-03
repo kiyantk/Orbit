@@ -286,7 +286,7 @@ ipcMain.handle("fix-media-ids", async () => {
         SELECT id
         FROM files
         ORDER BY
-          COALESCE(create_date, created) ASC,
+          COALESCE(create_date, MIN(created, modified)) ASC,
           id ASC
       `).all();
 
@@ -464,8 +464,8 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
 
     // --- search ---
     if (filters.searchBy && filters.searchTerm) {
-      if (filters.searchBy === "id") {
-        whereClauses.push("id = ?");
+      if (filters.searchBy === "media_id") {
+        whereClauses.push("media_id = ?");
         params.push(filters.searchTerm);
       } else if (filters.searchBy === "name") {
         whereClauses.push("filename LIKE ?");
@@ -478,7 +478,7 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     if (filters.sortBy === "random") {
       orderSQL = "ORDER BY RANDOM()";
     } else {
-      const validSorts = ["id", "filename", "create_date", "created", "size"];
+      const validSorts = ["media_id", "filename", "create_date", "created", "size"];
       const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : (settings && settings.defaultSort ? settings.defaultSort : "id");
       const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC";
       orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
@@ -581,8 +581,8 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
         params.push(filters.tag);
       }
       if (filters.searchBy && filters.searchTerm) {
-        if (filters.searchBy === "id") {
-          conditions.push("id = ?");
+        if (filters.searchBy === "media_id") {
+          conditions.push("media_id = ?");
           params.push(filters.searchTerm);
         } else if (filters.searchBy === "name") {
           conditions.push("filename LIKE ?");
@@ -1260,7 +1260,7 @@ async function indexFilesRecursively(rootFolder, existingPaths, progressCallback
   }
 }
 
-ipcMain.handle("fetch-options", async () => {
+ipcMain.handle("fetch-options", async (event, {birthDate = null}) => {
   try {
     initDatabase();
 
@@ -1290,12 +1290,36 @@ ipcMain.handle("fetch-options", async () => {
       years = Array.from({ length: endYear - startYear + 1 }, (_, i) => endYear - i);
     }
 
-    return { devices, folders, filetypes, mediaTypes, countries, minDate, maxDate, years, tags };
+    let ages = [];
+
+    if (dateRange?.min && dateRange?.max && birthDate) {
+      const minAge = ageOnDate(birthDate, dateRange.min);
+      const maxAge = ageOnDate(birthDate, dateRange.max);
+    
+      ages = Array.from(
+        { length: maxAge - minAge + 1 },
+        (_, i) => minAge + i
+      );
+    }
+
+    return { devices, folders, filetypes, mediaTypes, countries, minDate, maxDate, years, tags, ages };
   } catch (err) {
     console.error("fetch-options error", err);
     return { devices: [], folders: [], filetypes: [], mediaTypes: [], countries: [], minDate: "", maxDate: "", years: [], tags: [] };
   }
 });
+
+function ageOnDate(birthDate, epochSeconds) {
+  const birth = new Date(birthDate);
+  const date = new Date(epochSeconds * 1000);
+
+  let age = date.getFullYear() - birth.getFullYear();
+  const m = date.getMonth() - birth.getMonth();
+  const d = date.getDate() - birth.getDate();
+
+  if (m < 0 || (m === 0 && d < 0)) age--;
+  return age;
+}
 
 
 ipcMain.handle("fix-thumbnails", async () => {

@@ -12,43 +12,42 @@ L.Icon.Default.mergeOptions({
 });
 
 export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey }) {
-  
-  const videoRefNormal = useRef(null);
-  const trackRefNormal = useRef(null);
+    const videoRefNormal = useRef(null);
+    const trackRefNormal = useRef(null);
 
-  const videoRefFullscreen = useRef(null);
-  const trackRefFullscreen = useRef(null);
-  const wasNormalPlayingRef = useRef(false);
+    const videoRefFullscreen = useRef(null);
+    const trackRefFullscreen = useRef(null);
+    const wasNormalPlayingRef = useRef(false);
 
-  const [isPlaying, setIsPlaying] = useState(true); // autoplay starts
-  const [isHovered, setIsHovered] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [isSeeking, setIsSeeking] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [itemCountry, setItemCountry] = useState(null)
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const imgRef = useRef(null);
-  const lastMousePos = useRef(null);
-  const [tags, setTags] = useState([]);
+    const [isPlaying, setIsPlaying] = useState(true); // autoplay starts
+    const [isHovered, setIsHovered] = useState(false);
+    const [duration, setDuration] = useState(0);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [isSeeking, setIsSeeking] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [itemCountry, setItemCountry] = useState(null)
+    const [zoom, setZoom] = useState(1);
+    const [offset, setOffset] = useState({ x: 0, y: 0 });
+    const imgRef = useRef(null);
+    const lastMousePos = useRef(null);
+    const [tags, setTags] = useState([]);
 
 
-  const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
-  const currentTrackRef = isFullscreen ? trackRefFullscreen : trackRefNormal;
+    const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
+    const currentTrackRef = isFullscreen ? trackRefFullscreen : trackRefNormal;
 
-  const getContrastColor = (hex) => {
-  if (!hex) return "#000";
-  const c = hex.substring(1); // remove #
-  const rgb = parseInt(c, 16); 
-  const r = (rgb >> 16) & 0xff;
-  const g = (rgb >> 8) & 0xff;
-  const b = rgb & 0xff;
-  // Luminance formula
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
-  return luminance > 150 ? "#000" : "#fff"; // light bg = black text, dark bg = white text
-};
+    const getContrastColor = (hex) => {
+    if (!hex) return "#000";
+    const c = hex.substring(1); // remove #
+    const rgb = parseInt(c, 16); 
+    const r = (rgb >> 16) & 0xff;
+    const g = (rgb >> 8) & 0xff;
+    const b = rgb & 0xff;
+    // Luminance formula
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
+    return luminance > 150 ? "#000" : "#fff"; // light bg = black text, dark bg = white text
+  };
 
   // Sync fullscreen with parent trigger
   useEffect(() => {
@@ -58,44 +57,44 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     }
   }, [forceFullscreen, setForceFullscreen]);
 
-useEffect(() => {
-  const video = currentVideoRef.current;
-  if (!video) return;
-
-  const handleLoadedMetadata = () => {
-    if (isFinite(video.duration)) setDuration(video.duration);
-  };
-  const handleTimeUpdate = () => {
-    if (!isSeeking) setCurrentTime(video.currentTime);
-  };
-
-  video.addEventListener("loadedmetadata", handleLoadedMetadata);
-  video.addEventListener("timeupdate", handleTimeUpdate);
-
-  return () => {
-    video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-    video.removeEventListener("timeupdate", handleTimeUpdate);
-  };
-}, [item, isSeeking, isFullscreen]);
-
-useEffect(() => {
-  const handleEsc = (e) => {
-    if (e.key === "Escape" && isFullscreen) {
-      closeFullscreen();
-    }
-    if (e.key === " " || e.code === "Space") {
-      e.preventDefault();
-      togglePlay();
-    }
-  };
-
-  document.addEventListener("keydown", handleEsc);
-  return () => document.removeEventListener("keydown", handleEsc);
-}, [isFullscreen, isPlaying]);
-
+  useEffect(() => {
+    const video = currentVideoRef.current;
+    if (!video) return;
+  
+    const handleLoadedMetadata = () => {
+      if (isFinite(video.duration)) setDuration(video.duration);
+    };
+    const handleTimeUpdate = () => {
+      if (!isSeeking) setCurrentTime(video.currentTime);
+    };
+  
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    video.addEventListener("timeupdate", handleTimeUpdate);
+  
+    return () => {
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      video.removeEventListener("timeupdate", handleTimeUpdate);
+    };
+  }, [item, isSeeking, isFullscreen]);
+  
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === "Escape" && isFullscreen) {
+        closeFullscreen();
+      }
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+      }
+    };
+  
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [isFullscreen, isPlaying]);
+  
   const convertItemCountry = useCallback(async () => {
     if (!item.country) return;
-
+  
     try {
       const country = await window.electron.ipcRenderer.invoke('get-country-name', item.country);
       setItemCountry(country);
@@ -103,21 +102,21 @@ useEffect(() => {
       console.error("Error converting item country:", error);
     }
   }, [item]);
-
-useEffect(() => {
-  setCurrentTime(0);
-  setIsPlaying(true);
-  setIsLoading(true);
-  convertItemCountry();
-  if(isFullscreen && item.file_type === "video") {
-    wasNormalPlayingRef.current = !videoRefNormal.current.paused;
-    videoRefNormal.current.pause();
-  }
-}, [item]);
-
+  
+  useEffect(() => {
+    setCurrentTime(0);
+    setIsPlaying(true);
+    setIsLoading(true);
+    convertItemCountry();
+    if(isFullscreen && item.file_type === "video") {
+      wasNormalPlayingRef.current = !videoRefNormal.current.paused;
+      videoRefNormal.current.pause();
+    }
+  }, [item]);
+  
   useEffect(() => {
     if (!item?.id) return;
-
+  
     const fetchTags = async () => {
       try {
         const allTags = await window.electron.ipcRenderer.invoke("tags:get-all");
@@ -127,56 +126,53 @@ useEffect(() => {
         console.error("Failed to fetch tags:", err);
       }
     };
-
+  
     fetchTags();
   }, [item, panelKey]);
-
-
 
   if (!item) return null;
 
   // Normalize to forward slashes
   const fileUrl = `http://localhost:54055/files/${encodeURIComponent(item.path)}`;
   const isVideo = item.file_type?.startsWith("video");
-
+  
   const safePlay = (video) => {
-  if (!video) return;
-  const playPromise = video.play();
-  if (playPromise !== undefined) {
-    playPromise.catch((err) => {
-      // Ignore "media removed" errors
-      if (!err.message.includes("media was removed from the document")) {
-        console.error(err);
-      }
-    });
-  }
-};
-
-
-const handleSeekStart = (e) => {
-  setIsSeeking(true);
-  updateCurrentTime(e); // set time immediately
-
-  // Listen to mousemove & mouseup globally
-  const handleMouseMove = (eMove) => updateCurrentTime(eMove);
-  const handleMouseUp = () => {
-    setIsSeeking(false);
-    document.removeEventListener("mousemove", handleMouseMove);
-    document.removeEventListener("mouseup", handleMouseUp);
+    if (!video) return;
+    const playPromise = video.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        // Ignore "media removed" errors
+        if (!err.message.includes("media was removed from the document")) {
+          console.error(err);
+        }
+      });
+    }
   };
-
-  document.addEventListener("mousemove", handleMouseMove);
-  document.addEventListener("mouseup", handleMouseUp);
-};
-
-const updateCurrentTime = (e) => {
-  if (!currentVideoRef.current) return;
-  const rect = currentTrackRef.current.getBoundingClientRect();
-  const pos = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-  const newTime = (pos / rect.width) * duration;
-  setCurrentTime(newTime);
-  currentVideoRef.current.currentTime = newTime;
-};
+  
+  const handleSeekStart = (e) => {
+    setIsSeeking(true);
+    updateCurrentTime(e); // set time immediately
+  
+    // Listen to mousemove & mouseup globally
+    const handleMouseMove = (eMove) => updateCurrentTime(eMove);
+    const handleMouseUp = () => {
+      setIsSeeking(false);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+  
+  const updateCurrentTime = (e) => {
+    if (!currentVideoRef.current) return;
+    const rect = currentTrackRef.current.getBoundingClientRect();
+    const pos = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const newTime = (pos / rect.width) * duration;
+    setCurrentTime(newTime);
+    currentVideoRef.current.currentTime = newTime;
+  };
 
   // Convert bytes to human-readable (KB, MB, GB etc.)
   function formatBytes(a, b = 2) {
@@ -217,109 +213,109 @@ const updateCurrentTime = (e) => {
     setIsPlaying(!isPlaying);
   };
 
-// Click handlers for fullscreen
-const openFullscreen = () => {
-  setIsFullscreen(true);
-  setZoom(1);
-  setOffset({ x: 0, y: 0 });
-  if(item.file_type === "video") {
-    wasNormalPlayingRef.current = !videoRefNormal.current.paused;
-    videoRefNormal.current.pause();
+  // Click handlers for fullscreen
+  const openFullscreen = () => {
+    setIsFullscreen(true);
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+    if(item.file_type === "video") {
+      wasNormalPlayingRef.current = !videoRefNormal.current.paused;
+      videoRefNormal.current.pause();
+    }
+
+    // small delay so ref exists
+    setTimeout(() => {
+      if (videoRefNormal.current && videoRefFullscreen.current) {
+        videoRefFullscreen.current.currentTime = videoRefNormal.current.currentTime;
+        if (isPlaying) {
+          safePlay(videoRefFullscreen.current);
+        } else {
+          videoRefFullscreen.current.pause();
+        }
+      }
+    }, 0);
+  };
+
+  function formatDuration(seconds) {
+    // Round down to nearest whole second
+    const totalSeconds = Math.floor(seconds);
+
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+
+    // Pad with leading zeros if needed
+    const formatted = [
+      hrs.toString().padStart(2, '0'),
+      mins.toString().padStart(2, '0'),
+      secs.toString().padStart(2, '0')
+    ].join(':');
+
+    return formatted;
   }
-  
-  // small delay so ref exists
-  setTimeout(() => {
+
+  const closeFullscreen = () => {
     if (videoRefNormal.current && videoRefFullscreen.current) {
-      videoRefFullscreen.current.currentTime = videoRefNormal.current.currentTime;
+      videoRefNormal.current.currentTime = videoRefFullscreen.current.currentTime;
       if (isPlaying) {
-        safePlay(videoRefFullscreen.current);
-      } else {
-        videoRefFullscreen.current.pause();
+        safePlay(videoRefNormal.current);
+        setIsPlaying(true);
       }
     }
-  }, 0);
-};
-
-function formatDuration(seconds) {
-  // Round down to nearest whole second
-  const totalSeconds = Math.floor(seconds);
-
-  const hrs = Math.floor(totalSeconds / 3600);
-  const mins = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
-
-  // Pad with leading zeros if needed
-  const formatted = [
-    hrs.toString().padStart(2, '0'),
-    mins.toString().padStart(2, '0'),
-    secs.toString().padStart(2, '0')
-  ].join(':');
-
-  return formatted;
-}
-
-const closeFullscreen = () => {
-  if (videoRefNormal.current && videoRefFullscreen.current) {
-    videoRefNormal.current.currentTime = videoRefFullscreen.current.currentTime;
-    if (isPlaying) {
-      safePlay(videoRefNormal.current);
-      setIsPlaying(true);
-    }
-  }
-  setIsFullscreen(false);
-};
-
-const handleMouseDown = (e) => {
-  e.preventDefault();
-  lastMousePos.current = { x: e.clientX, y: e.clientY };
-
-  const handleMouseMove = (eMove) => {
-    if (!lastMousePos.current) return;
-    const dx = eMove.clientX - lastMousePos.current.x;
-    const dy = eMove.clientY - lastMousePos.current.y;
-
-    setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-    lastMousePos.current = { x: eMove.clientX, y: eMove.clientY };
+    setIsFullscreen(false);
   };
 
-  const handleMouseUp = () => {
-    lastMousePos.current = null;
-    document.removeEventListener("mousemove", handleMouseMove);
-    document.removeEventListener("mouseup", handleMouseUp);
+  const handleMouseDown = (e) => {
+    e.preventDefault();
+    lastMousePos.current = { x: e.clientX, y: e.clientY };
+
+    const handleMouseMove = (eMove) => {
+      if (!lastMousePos.current) return;
+      const dx = eMove.clientX - lastMousePos.current.x;
+      const dy = eMove.clientY - lastMousePos.current.y;
+
+      setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+      lastMousePos.current = { x: eMove.clientX, y: eMove.clientY };
+    };
+
+    const handleMouseUp = () => {
+      lastMousePos.current = null;
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
   };
 
-  document.addEventListener("mousemove", handleMouseMove);
-  document.addEventListener("mouseup", handleMouseUp);
-};
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const scaleFactor = 0.1;
+    let newZoom = zoom + (e.deltaY < 0 ? scaleFactor : -scaleFactor);
+    newZoom = Math.min(Math.max(newZoom, 1), 5); // clamp 1x - 5x
 
-const handleWheel = (e) => {
-  e.preventDefault();
-  const scaleFactor = 0.1;
-  let newZoom = zoom + (e.deltaY < 0 ? scaleFactor : -scaleFactor);
-  newZoom = Math.min(Math.max(newZoom, 1), 5); // clamp 1x - 5x
-
-  setZoom(newZoom);
-    // Reset position if zoom returns to 1
-  if (newZoom === 1) {
-    setOffset({ x: 0, y: 0 });
-  }
-};
-
-
-function calculateAge(birthDate, epochSeconds) {
-    const birth = new Date(birthDate);
-    const date = new Date(epochSeconds * 1000); // convert seconds to milliseconds
-
-    let age = date.getFullYear() - birth.getFullYear();
-    const monthDiff = date.getMonth() - birth.getMonth();
-    const dayDiff = date.getDate() - birth.getDate();
-
-    if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
-        age--;
+    setZoom(newZoom);
+      // Reset position if zoom returns to 1
+    if (newZoom === 1) {
+      setOffset({ x: 0, y: 0 });
     }
+  };
 
-    return age;
-}
+
+  function calculateAge(birthDate, epochSeconds) {
+      const birth = new Date(birthDate);
+      const date = new Date(epochSeconds * 1000); // convert seconds to milliseconds
+
+      let age = date.getFullYear() - birth.getFullYear();
+      const monthDiff = date.getMonth() - birth.getMonth();
+      const dayDiff = date.getDate() - birth.getDate();
+
+      if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+          age--;
+      }
+
+      return age;
+  }
 
   const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
 

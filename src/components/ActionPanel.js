@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
 const ActionPanel = ({ settings, type, onApply }) => {
-  const [sortBy, setSortBy] = useState("id");
+  const [sortBy, setSortBy] = useState("media_id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState({
     dateExact: "",
@@ -16,6 +16,7 @@ const ActionPanel = ({ settings, type, onApply }) => {
     country: "",
     year: "",
     tag: null,
+    age: ""
   });
   const [searchBy, setSearchBy] = useState("name");
   const [searchTerm, setSearchTerm] = useState("");
@@ -30,7 +31,8 @@ const ActionPanel = ({ settings, type, onApply }) => {
     maxDate: "",
     countries: [],
     years: [],
-    tags: []
+    tags: [],
+    ages: []
   });
 
   const [shuffleSettings, setShuffleSettings] = useState({
@@ -48,12 +50,13 @@ const ActionPanel = ({ settings, type, onApply }) => {
     country: "",
     year: "",
     tag: null,
+    age: ""
   });
 
   // Fetch options from database on mount
   useEffect(() => {
     async function fetchOptions() {
-      const opts = await window.electron.ipcRenderer.invoke("fetch-options");
+      const opts = await window.electron.ipcRenderer.invoke("fetch-options", {birthDate: settings && settings.birthDate ? settings.birthDate : null});
       setOptions(opts);
     
       // if (opts.minDate && opts.maxDate) {
@@ -97,6 +100,9 @@ const ActionPanel = ({ settings, type, onApply }) => {
         // Clear exact date if from/to is set
         if (value) {
           newFilters.dateExact = "";
+          // Reset year and age filters when manually changing date range
+          newFilters.year = "";
+          newFilters.age = "";
         }
       }
     
@@ -139,68 +145,132 @@ const ActionPanel = ({ settings, type, onApply }) => {
   };
 
   // Handle year change
-const handleYearChange = (year) => {
-  setFilters(prev => {
-    if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
+  const handleYearChange = (year) => {
+    setFilters(prev => {
+      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
 
-    const dateFrom = `${year}-01-01`;
-    const dateTo = `${year}-12-31`;
-    return { ...prev, year, dateFrom, dateTo };
-  });
-};
+      const dateFrom = `${year}-01-01`;
+      const dateTo = `${year}-12-31`;
+      return { ...prev, year, dateFrom, dateTo };
+    });
+  };
 
-  // Handle year change
-const handleYearShuffleChange = (year) => {
-  setShuffleFilters(prev => {
-    if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
+    // Handle year change
+  const handleYearShuffleChange = (year) => {
+    setShuffleFilters(prev => {
+      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
 
-    const dateFrom = `${year}-01-01`;
-    const dateTo = `${year}-12-31`;
-    return { ...prev, year, dateFrom, dateTo };
-  });
-};
+      const dateFrom = `${year}-01-01`;
+      const dateTo = `${year}-12-31`;
+      return { ...prev, year, dateFrom, dateTo };
+    });
+  };
+
+  const resetFilters = () => {
+    setFilters({
+      dateFrom: "",
+      dateTo: "",
+      dateExact: "",
+      device: "",
+      folder: "",
+      filetype: "",
+      mediaType: "",
+      country: "",
+      year: "",
+      tag: "",
+      age: "",
+    });
+  };
+
+  const resetShuffleFilters = () => {
+    setShuffleFilters({
+      dateFrom: "",
+      dateTo: "",
+      dateExact: "",
+      device: "",
+      folder: "",
+      filetype: "",
+      mediaType: "",
+      country: "",
+      year: "",
+      tag: "",
+      age: "",
+    });
+  }
+
+  const resetSort = () => {
+    setSortBy(settings.defaultSort || "media_id")
+    setSortOrder("desc")
+  }
+
+  const resetSearch = () => {
+    setSearchBy("name")
+    setSearchTerm("")
+  }
+
+  const handleAgeChange = (age) => {
+    setFilters(prev => {
+      if (!age || !settings.birthDate) {
+        return {
+          ...prev,
+          age: "",
+          dateFrom: "",
+          dateTo: ""
+        };
+      }
+
+      const birth = new Date(settings.birthDate);
+
+      const dateFrom = new Date(birth);
+      dateFrom.setFullYear(birth.getFullYear() + Number(age));
+
+      const dateTo = new Date(birth);
+      dateTo.setFullYear(birth.getFullYear() + Number(age) + 1);
+      dateTo.setDate(dateTo.getDate() - 1);
+
+      return {
+        ...prev,
+        age,
+        year: "",
+        dateExact: "",
+        dateFrom: dateFrom.toISOString().slice(0, 10),
+        dateTo: dateTo.toISOString().slice(0, 10)
+      };
+    });
+  };
+
+  const handleShuffleAgeChange = (age) => {
+    setShuffleFilters(prev => {
+      if (!age || !settings.birthDate) {
+        return {
+          ...prev,
+          age: "",
+          dateFrom: "",
+          dateTo: ""
+        };
+      }
+
+      const birth = new Date(settings.birthDate);
+
+      const dateFrom = new Date(birth);
+      dateFrom.setFullYear(birth.getFullYear() + Number(age));
+
+      const dateTo = new Date(birth);
+      dateTo.setFullYear(birth.getFullYear() + Number(age) + 1);
+      dateTo.setDate(dateTo.getDate() - 1);
+
+      return {
+        ...prev,
+        age,
+        year: "",
+        dateExact: "",
+        dateFrom: dateFrom.toISOString().slice(0, 10),
+        dateTo: dateTo.toISOString().slice(0, 10)
+      };
+    });
+  };
 
   if (!type) return null;
-
-const resetFilters = () => {
-  setFilters({
-    dateFrom: "",
-    dateTo: "",
-    dateExact: "",
-    device: "",
-    folder: "",
-    filetype: "",
-    mediaType: "",
-    country: "",
-    year: "",
-    tag: "",
-  });
-};
-
-const resetShuffleFilters = () => {
-  setShuffleFilters({
-    dateFrom: "",
-    dateTo: "",
-    dateExact: "",
-    device: "",
-    folder: "",
-    filetype: "",
-    mediaType: "",
-    country: "",
-    year: "",
-    tag: "",
-  });
-}
-
-const resetSort = () => {
-  setSortBy(settings.defaultSort || "id")
-  setSortOrder("desc")
-}
-
-const resetSearch = () => {
-  setSearchBy("name")
-  setSearchTerm("")
-}
 
   return (
     <div className="action-panel">
@@ -208,7 +278,7 @@ const resetSearch = () => {
         <div className="sort-panel">
           <label>Sort by:</label>
           <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
-            <option value="id">ID</option>
+            <option value="media_id">ID</option>
             <option value="name">Name</option>
             <option value="create_date">Date Taken</option>
             <option value="created">Date Created</option>
@@ -299,6 +369,15 @@ const resetSearch = () => {
               {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
+          {settings && settings.birthDate && (
+            <div>
+              <label>Age</label>
+              <select value={filters.age} onChange={e => handleAgeChange(e.target.value)}>
+                <option value="">All</option>
+                {options.ages.map(d => <option key={d} value={d}>{d}</option>).reverse()}
+              </select>
+            </div>
+          )}
           <div className="action-panel-reset"><button onClick={resetFilters}><FontAwesomeIcon icon={faUndo}/></button></div>
         </div>
       )}
@@ -307,7 +386,7 @@ const resetSearch = () => {
         <div className="search-panel">
           <select value={searchBy} onChange={e => setSearchBy(e.target.value)}>
             <option value="name">Name</option>
-            <option value="id">ID</option>
+            <option value="media_id">ID</option>
           </select>
           <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." />
           <div className="action-panel-reset"><button onClick={resetSearch}><FontAwesomeIcon icon={faUndo}/></button></div>
@@ -316,7 +395,7 @@ const resetSearch = () => {
 
       {type === "shuffle-filter" && (
         <div className="filter-panel">
-                    <div>
+          <div>
             <label>Year</label>
             <select value={shuffleFilters.year} onChange={e => handleYearShuffleChange(e.target.value)}>
               <option value="">All</option>
@@ -392,6 +471,15 @@ const resetSearch = () => {
               {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
+          {settings && settings.birthDate && (
+            <div>
+              <label>Age</label>
+              <select value={shuffleFilters.age} onChange={e => handleShuffleAgeChange(e.target.value)}>
+                <option value="">All</option>
+                {options.ages.map(d => <option key={d} value={d}>{d}</option>).reverse()}
+              </select>
+            </div>
+          )}
           <div className="action-panel-reset" onClick={resetShuffleFilters}>
             <button><FontAwesomeIcon icon={faUndo}/></button>
           </div>
