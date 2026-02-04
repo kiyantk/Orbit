@@ -30,6 +30,7 @@ const App = () => {
   const [shuffleSettings, setShuffleSettings] = useState({ shuffleInterval: 8 });
   const [explorerScroll, setExplorerScroll] = useState(0);
   const [previewPanelKey, setPreviewPanelKey] = useState(0);
+  const [actionPanelKey, setActionPanelKey] = useState(0);
 
   const handleActionPanelApply = (data) => {
     if (actionPanelType === "filter" || actionPanelType === "sort" || actionPanelType === "search") {
@@ -162,6 +163,11 @@ const App = () => {
       setFilters({});
     }
 
+    const resetFilters = () => {
+      setFilters({});
+      setActionPanelKey(actionPanelKey + 1)
+    }
+
   return (
     <div className="App">
       <div className="App-main">
@@ -214,6 +220,7 @@ const App = () => {
                 scrollPosition={explorerScroll}
                 setScrollPosition={setExplorerScroll}
                 actionPanelType={actionPanelType}
+                resetFilters={resetFilters}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (
@@ -235,7 +242,7 @@ const App = () => {
           )}
         </div>
         {(activeView === "explore" || activeView === "shuffle") && (
-          <ActionPanel settings={settings} type={actionPanelType} onApply={handleActionPanelApply}/>
+          <ActionPanel settings={settings} type={actionPanelType} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
         )}
         <div>
           {showWelcomePopup && (

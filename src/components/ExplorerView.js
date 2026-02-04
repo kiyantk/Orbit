@@ -14,7 +14,7 @@ const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
 const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
-const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated, disableAddMode, scrollPosition, setScrollPosition, actionPanelType }) => {
+const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated, disableAddMode, scrollPosition, setScrollPosition, actionPanelType, resetFilters }) => {
   const [totalCount, setTotalCount] = useState(null);
   const loadingPages = useRef(new Set());
   const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
@@ -26,6 +26,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const [addMode, setAddMode]  = useState(filters?.addMode === true);
   const [contextMenu, setContextMenu] = useState(null);
   const [tags, setTags] = useState([]);
+  const [itemToReveal, setItemToReveal] = useState(null);
 
   // --- Fetch pages into refs ---
   const addItems = (rows, offset) => {
@@ -452,9 +453,70 @@ onContextMenu={(e) => {
   );
 });
 
+  const revealFromContextMenu = async (item) => {
+    // 1️⃣ Reset filters to "All"
+    resetFilters();
+    setItemToReveal(item);
+  };
+  
+  useEffect(() => {
+    if (!itemToReveal) return;
+  
+    let cancelled = false;
+  
+    const revealItem = async (item) => {
+      // Get the item's index
+      const itemIndex = await window.electron.ipcRenderer.invoke("get-index-of-item", { itemId: item.media_id });
+      if (itemIndex == null || cancelled) return;
+    
+      // Fetch page containing the item
+      const pageIndex = Math.floor(itemIndex / PAGE_SIZE);
+      const offset = pageIndex * PAGE_SIZE;
+    
+      const res = await window.electron.ipcRenderer.invoke("fetch-files", {
+        offset,
+        limit: PAGE_SIZE,
+        filters: { sortBy: "media_id", sortOrder: "desc" },
+        settings: currentSettings,
+      });
+      if (!res?.success || cancelled) return;
+    
+      addItems(res.rows, offset);
+    
+      // Wait for gridRef to exist (non-blocking)
+      for (let i = 0; i < 20; i++) {
+        if (cancelled) return;
+        if (gridRef.current) break;
+        await new Promise(r => setTimeout(r, 50));
+      }
+      if (!gridRef.current || cancelled) return;
+    
+      // Compute columnCount locally
+      const columnWidth = BASE_COLUMN_WIDTH * scale;
+      const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + GUTTER)));
+    
+      const rowIndex = Math.floor(itemIndex / columnCount);
+      const columnIndex = itemIndex % columnCount;
+    
+      gridRef.current.scrollToItem({ rowIndex, columnIndex, align: "center" });
+    
+      // Select the item
+      const revealedItem = itemsRef.current[itemIndex];
+      if (revealedItem && !cancelled) {
+        setSelectedItem(revealedItem);
+        onSelect(revealedItem, "single");
+        setItemToReveal(null)
+      }
+    };
+  
+    revealItem(itemToReveal);
+  
+    return () => { cancelled = true; };
+  }, [itemToReveal, containerWidth, scale, currentSettings]);
+
 
   // If we know there are no files, show settings hint
-  if (totalCount === 0) {
+  if (totalCount === 0 && filters.length === 0) {
     return (
       <div className="explorer-view empty" style={{ padding: 40 }}>
         <h2>No indexed files</h2>
@@ -465,6 +527,20 @@ onContextMenu={(e) => {
         </p>
         <br></br>
         <button className="welcome-popup-select-folders-btn" onClick={openSettings}>Open Settings</button>
+      </div>
+    );
+  }
+
+  const hasActiveFilters = filters ? Object.values(filters).some(
+    value => value !== "" && value != null
+  ) : false;
+
+  if (totalCount === 0 && hasActiveFilters) {
+    return (
+      <div className="explorer-view empty" style={{ padding: 40 }}>
+        <h2>No results</h2>
+        <br />
+        <p>Try adjusting your filters or search terms.</p>
       </div>
     );
   }
@@ -582,6 +658,7 @@ onContextMenu={(e) => {
     y={contextMenu.y}
     item={contextMenu.item}
     onClose={() => setContextMenu(null)}
+    revealFromContextMenu={revealFromContextMenu}
   />
 )}
 

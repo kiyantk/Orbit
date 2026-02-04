@@ -2,7 +2,7 @@ import { faUndo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
-const ActionPanel = ({ settings, type, onApply }) => {
+const ActionPanel = ({ settings, type, onApply, actionPanelKey }) => {
   const [sortBy, setSortBy] = useState("media_id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState({
@@ -113,6 +113,8 @@ const ActionPanel = ({ settings, type, onApply }) => {
       }
       return newFilters;
     });
+    resetSort();
+    resetSearch();
   };
 
     // Handle date linking
@@ -153,6 +155,8 @@ const ActionPanel = ({ settings, type, onApply }) => {
       const dateTo = `${year}-12-31`;
       return { ...prev, year, dateFrom, dateTo };
     });
+    resetSort();
+    resetSearch();
   };
 
     // Handle year change
@@ -237,6 +241,8 @@ const ActionPanel = ({ settings, type, onApply }) => {
         dateTo: dateTo.toISOString().slice(0, 10)
       };
     });
+    resetSort();
+    resetSearch();
   };
 
   const handleShuffleAgeChange = (age) => {
@@ -270,6 +276,33 @@ const ActionPanel = ({ settings, type, onApply }) => {
     });
   };
 
+  const applyFilterChange = updater => {
+    resetSearch();
+    resetSort();
+    setFilters(prev => updater(prev));
+  };
+
+  const applySearchChange = (by, term) => {
+    resetFilters();
+    resetSort();
+    setSearchBy(by);
+    setSearchTerm(term);
+  };
+
+  const applySortChange = (by, order = sortOrder) => {
+    resetFilters();
+    resetSearch();
+    setSortBy(by);
+    setSortOrder(order);
+  };
+
+  useEffect(() => {
+    resetFilters();
+    resetSearch();
+    setSortBy("media_id");
+    setSortOrder("desc");
+  }, [actionPanelKey]);
+
   if (!type) return null;
 
   return (
@@ -277,7 +310,7 @@ const ActionPanel = ({ settings, type, onApply }) => {
       {type === "sort" && (
         <div className="sort-panel">
           <label>Sort by:</label>
-          <select value={sortBy} onChange={e => setSortBy(e.target.value)}>
+          <select value={sortBy} onChange={e => applySortChange(e.target.value)}>
             <option value="media_id">ID</option>
             <option value="name">Name</option>
             <option value="create_date">Date Taken</option>
@@ -285,8 +318,8 @@ const ActionPanel = ({ settings, type, onApply }) => {
             <option value="size">File Size</option>
             <option value="random">Random</option>
           </select>
-          <button onClick={() => setSortOrder("asc")} className={sortOrder === "asc" ? "active" : ""}>Asc</button>
-          <button onClick={() => setSortOrder("desc")} className={sortOrder === "desc" ? "active" : ""}>Desc</button>
+          <button  onClick={() => applySortChange(sortBy, "asc")} className={sortOrder === "asc" ? "active" : ""}>Asc</button>
+          <button  onClick={() => applySortChange(sortBy, "desc")} className={sortOrder === "desc" ? "active" : ""}>Desc</button>
           <div className="action-panel-reset"><button onClick={resetSort}><FontAwesomeIcon icon={faUndo}/></button></div>
         </div>
       )}
@@ -329,42 +362,42 @@ const ActionPanel = ({ settings, type, onApply }) => {
           </div>
           <div>
             <label>Device</label>
-            <select value={filters.device} onChange={e => setFilters(f => ({ ...f, device: e.target.value }))}>
+            <select value={filters.device} onChange={e => applyFilterChange(prev => ({...prev, device: e.target.value}))}>
               <option value="">All</option>
               {options.devices.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div>
             <label>Source</label>
-            <select value={filters.folder} onChange={e => setFilters(f => ({ ...f, folder: e.target.value }))}>
+            <select value={filters.folder} onChange={e => applyFilterChange(prev => ({...prev, folder: e.target.value}))}>
               <option value="">All</option>
               {options.folders.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
           </div>
           <div>
             <label>Filetype</label>
-            <select value={filters.filetype} onChange={e => setFilters(f => ({ ...f, filetype: e.target.value }))}>
+            <select value={filters.filetype} onChange={e => applyFilterChange(prev => ({...prev, filetype: e.target.value}))}>
               <option value="">All</option>
               {options.filetypes.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
           </div>
           <div>
             <label>Media Type</label>
-            <select value={filters.mediaType} onChange={e => setFilters(f => ({ ...f, mediaType: e.target.value }))}>
+            <select value={filters.mediaType} onChange={e => applyFilterChange(prev => ({...prev, mediaType: e.target.value}))}>
               <option value="">All</option>
               {options.mediaTypes.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           <div>
             <label>Country</label>
-            <select value={filters.country} onChange={e => setFilters(f => ({ ...f, country: e.target.value }))}>
+            <select value={filters.country} onChange={e => applyFilterChange(prev => ({...prev, country: e.target.value}))}>
               <option value="">All</option>
               {options.countries.map(c => c !== "" ? <option key={c} value={c}>{c}</option> : "")}
             </select>
           </div>
           <div>
             <label>Tag</label>
-            <select value={filters.tag} onChange={e => setFilters(f => ({ ...f, tag: e.target.value }))}>
+            <select value={filters.tag}onChange={e => applyFilterChange(prev => ({...prev, tag: e.target.value}))}>
               <option value="">All</option>
               {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
@@ -384,11 +417,11 @@ const ActionPanel = ({ settings, type, onApply }) => {
 
       {type === "search" && (
         <div className="search-panel">
-          <select value={searchBy} onChange={e => setSearchBy(e.target.value)}>
+          <select value={searchBy} onChange={e => applySearchChange(e.target.value, searchTerm)}>
             <option value="name">Name</option>
             <option value="media_id">ID</option>
           </select>
-          <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." />
+          <input type="text" value={searchTerm} onChange={e => applySearchChange(searchBy, e.target.value)} placeholder="Search..." />
           <div className="action-panel-reset"><button onClick={resetSearch}><FontAwesomeIcon icon={faUndo}/></button></div>
         </div>
       )}

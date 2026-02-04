@@ -1575,6 +1575,27 @@ ipcMain.handle("generate-thumbnails", async () => {
   }
 });
 
+ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
+  try {
+    if (!db) return null;
+
+    // Use media_id for a stable, deterministic descending sort (newest first)
+    const stmt = db.prepare(`
+      SELECT COUNT(*) as idx
+      FROM files
+      WHERE media_id > ?
+    `);
+
+    const row = stmt.get(itemId);
+    if (!row) return null;
+
+    return row.idx; // 0-based index
+  } catch (err) {
+    console.error('get-index-of-item error:', err);
+    return null;
+  }
+});
+
 // Properly shut down exiftool on exit
 app.on("before-quit", async () => {
   await exiftool.end();

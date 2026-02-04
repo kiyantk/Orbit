@@ -1330,3 +1330,17 @@ select:focus {
   gap: 20px;
   align-items: baseline;
 }
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+}
+
+.context-menu-item svg {
+  position: absolute;
+  left: 122px;
+}
+
+.context-menu-item:hover {
+  background-color: #2d2a35;
+}

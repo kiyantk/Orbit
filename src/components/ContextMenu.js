@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowRight } from "@fortawesome/free-solid-svg-icons";
 
-const ContextMenu = ({ x, y, item, onClose }) => {
+const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu }) => {
   const menuRef = useRef(null);
   const [showTags, setShowTags] = useState(false);
   const [tags, setTags] = useState([]);
@@ -72,6 +72,11 @@ const ContextMenu = ({ x, y, item, onClose }) => {
     }
   };
 
+  const revealFromCtx = () => {
+    revealFromContextMenu(item);
+    onClose();
+  }
+
   return (
     <div
       ref={menuRef}
@@ -79,7 +84,7 @@ const ContextMenu = ({ x, y, item, onClose }) => {
         position: "fixed",
         top: y,
         left: x,
-        height: "200px",
+        height: "fit-content",
         backgroundColor: "#1c1a22",
         color: "white",
         border: "1px solid #3a3645",
@@ -89,12 +94,13 @@ const ContextMenu = ({ x, y, item, onClose }) => {
         display: "flex",
         userSelect: "none",
       }}
+      onMouseLeave={() => setShowTags(false)}
     >
       {/* Main context menu */}
       <div
         style={{
           minWidth: 150,
-          padding: "6px 0",
+          padding: "6px 0px 24px 0px",
           display: "flex",
           flexDirection: "column",
         }}
@@ -104,12 +110,28 @@ const ContextMenu = ({ x, y, item, onClose }) => {
             padding: "6px 12px",
             cursor: "pointer",
             whiteSpace: "nowrap",
+            textAlign: "left",
+          }}
+          className="context-menu-item"
+          onMouseEnter={() => setShowTags(false)}
+          onClick={() => revealFromCtx()}
+        >
+          Reveal in all <FontAwesomeIcon style={{ float: "right",  }} icon={faArrowRight} />
+        </div>
+        <div
+          style={{
+            padding: "6px 12px",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            textAlign: "left",
             backgroundColor: showTags ? "#2d2a35" : "transparent",
           }}
+          className="context-menu-item"
           onMouseEnter={() => setShowTags(true)}
         >
-          Add Tag <FontAwesomeIcon icon={faArrowRight} />
+          Add Tag <FontAwesomeIcon style={{ float: "right" }} icon={faArrowRight} />
         </div>
+        <span style={{position: "absolute",bottom: "4px", left: "8px",color:"gray", fontSize: "10px", marginTop: "5px"}}>{ item.filename }</span>
       </div>
 
       {/* Tag submenu */}
