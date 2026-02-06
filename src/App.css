@@ -358,6 +358,17 @@ body {
   box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
 }
 
+.confirm-popup {
+  position: relative;
+  background-color: #15131a;
+  padding: 0px;
+  border-radius: 8px;
+  width: 50%;
+  padding-top: 2px;
+  height: 25%;
+  box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
+}
+
 .heic-popup {
   position: relative;
   background-color: #15131a;
@@ -663,6 +674,19 @@ select:disabled {
   border-radius: 0px 0px 6px 0px;
   border: none;
   color: white;
+  cursor: pointer;
+}
+
+.settings-cancel-btn {
+  float: left;
+  /* margin-left: 12px; */
+  height: 100%;
+  font-size: 15px;
+  padding: 0px 15px;
+  border-radius: 0px 0px 0px 6px;
+  border: none;
+  color: white;
+  cursor: pointer;
 }
 
 .settings-bottom-bar {

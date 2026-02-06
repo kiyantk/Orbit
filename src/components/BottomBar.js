@@ -8,25 +8,28 @@ import {
 const BottomBar = ({ explorerScale, filteredCount }) => {
 
   const [photoCount, setPhotoCount] = useState(0);
+  const fetchPhotoCount = async () => {
+    try {
+      if (window.electron.ipcRenderer) {
+        const count = await window.electron.ipcRenderer.invoke("get-indexed-files-count");
+        setPhotoCount(count);
+      }
+    } catch (err) {
+      console.error("Failed to fetch photo count:", err);
+    }
+  };
 // Fetch photo count
   useEffect(() => {
-    const fetchPhotoCount = async () => {
-      try {
-        if (window.electron.ipcRenderer) {
-          const count = await window.electron.ipcRenderer.invoke("get-indexed-files-count");
-          setPhotoCount(count);
-        }
-      } catch (err) {
-        console.error("Failed to fetch photo count:", err);
-      }
-    };
-
     fetchPhotoCount();
 
     // Optional: refresh count every 10s
     const interval = setInterval(fetchPhotoCount, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    fetchPhotoCount();
+  }, [filteredCount]);
 
   return (
     <div className="bottom-bar">

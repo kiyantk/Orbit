@@ -1485,6 +1485,45 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
   }
 });
 
+ipcMain.handle("remove-item-from-index", async (event, id) => {
+  try {
+    initDatabase();
+
+    if (!id) {
+      throw new Error("No ID provided");
+    }
+
+    // 1. Remove item from DB
+    db.prepare("DELETE FROM files WHERE id = ?").run(id);
+
+    // 2. Remove thumbnail from disk
+    const thumbnailPath = path.join(
+      dataDir,
+      "thumbnails",
+      `${id}_thumb.jpg`
+    );
+
+    if (fs.existsSync(thumbnailPath)) {
+      try {
+        fs.unlinkSync(thumbnailPath);
+      } catch (err) {
+        console.warn(
+          "Failed to delete thumbnail:",
+          thumbnailPath,
+          err.message
+        );
+      }
+    }
+
+    event.sender.send("item-removed", { id });
+
+    return { success: true };
+  } catch (err) {
+    console.error("Error removing item from index:", err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle("apply-heic-thumbnails", async (event, heicFiles) => {
   try {
     const thumbnailsDir = path.join(dataDir, "thumbnails"); // folder where user will copy thumbnails

@@ -6,6 +6,7 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu }) => {
   const menuRef = useRef(null);
   const [showTags, setShowTags] = useState(false);
   const [tags, setTags] = useState([]);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -84,7 +85,7 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu }) => {
         position: "fixed",
         top: y,
         left: x,
-        height: "fit-content",
+        height: "200px",
         backgroundColor: "#1c1a22",
         color: "white",
         border: "1px solid #3a3645",
@@ -130,6 +131,20 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu }) => {
           onMouseEnter={() => setShowTags(true)}
         >
           Add Tag <FontAwesomeIcon style={{ float: "right" }} icon={faArrowRight} />
+        </div>
+        <div
+          style={{
+            padding: "6px 12px",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            textAlign: "left",
+            color: "#ff6b6b",
+          }}
+          className="context-menu-item"
+          onMouseEnter={() => setShowTags(false)}
+          onClick={() => setShowRemoveConfirm(true)}
+        >
+          Remove
         </div>
         <span style={{position: "absolute",bottom: "4px", left: "8px",color:"gray", fontSize: "10px", marginTop: "5px"}}>{ item.filename }</span>
       </div>
@@ -187,6 +202,62 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu }) => {
               </label>
             );
           })}
+        </div>
+      )}
+
+      {showRemoveConfirm && (
+        <div className="welcome-popup-overlay">
+          <div className="confirm-popup" style={{ maxWidth: 420 }}>
+            <div className="welcome-popup-top">
+              <div className="welcome-popup-inline">
+                <h2>Remove item</h2>
+              </div>
+            </div>
+
+            <div className="welcome-popup-content">
+              <span style={{ color: "#ccc" }}>
+                Are you sure you want to remove
+                <br />
+                <strong>{item.filename}</strong>
+                <br />
+                from the index?
+                <br /><br />
+                This does not delete the original file.
+                <br />
+                This action cannot be undone.
+              </span>
+            </div>
+
+            <div className="settings-bottom-bar" style={{ gap: 8 }}>
+              <button
+                className="settings-cancel-btn"
+                style={{ backgroundColor: "#2d2a35" }}
+                onClick={() => setShowRemoveConfirm(false)}
+              >
+                No
+              </button>
+
+              <button
+                className="settings-save-btn"
+                style={{ backgroundColor: "#ff6b6b" }}
+                onClick={async () => {
+                  try {
+                    await window.electron.ipcRenderer.invoke(
+                      "remove-item-from-index",
+                      item.id
+                    );
+                  } catch (err) {
+                    console.error("Failed to remove item:", err);
+                  } finally {
+                    setShowRemoveConfirm(false);
+                    onClose();
+                  }
+                }}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -50,7 +50,6 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   });
 };
 
-
   // Listen for ctrl+scroll
   useEffect(() => {
     const handleWheel = (e) => {
@@ -209,6 +208,42 @@ useEffect(() => {
   fetchTotalCount();        // updates when ready
   fetchPageForIndex(0, true); // shows first items ASAP
 }, [filters, fetchPageForIndex, fetchTotalCount]);
+
+useEffect(() => {
+  const handleItemRemoved = ({ id }) => {
+    // 1️⃣ Remove from refs
+    const index = idToIndex.current.get(id);
+    if (index != null) {
+      delete itemsRef.current[index];
+      idToIndex.current.delete(id);
+    }
+
+    // // 2️⃣ Reset paging state
+    // itemsRef.current = {};
+    // idToIndex.current = new Map();
+    // loadingPages.current.clear();
+
+    // // 3️⃣ Refresh counts + first page
+    // setTotalCount(null);
+    fetchTotalCount();
+    fetchPageForIndex(0, true);
+
+    // 4️⃣ Clear selection if needed
+    if (selectedItem?.id === id) {
+      setSelectedItem(null);
+    }
+  };
+
+  window.electron.ipcRenderer.on("item-removed", handleItemRemoved);
+
+  return () => {
+    window.electron.ipcRenderer.removeListener("item-removed", handleItemRemoved);
+  };
+}, [
+  fetchTotalCount,
+  fetchPageForIndex,
+  selectedItem
+]);
 
 
   const [containerWidth, setContainerWidth] = useState(1200);
@@ -503,8 +538,7 @@ onContextMenu={(e) => {
       // Select the item
       const revealedItem = itemsRef.current[itemIndex];
       if (revealedItem && !cancelled) {
-        setSelectedItem(revealedItem);
-        onSelect(revealedItem, "single");
+        handleSelect(revealedItem, "single")
         setItemToReveal(null)
       }
     };
