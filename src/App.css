@@ -1407,3 +1407,12 @@ select:focus {
 .settings-list-active {
   color: #e6cdff;
 }
+
+.thumb-hidden {
+  display: none;
+}
+
+.explorer-grid>div {
+  margin: 0px auto;
+  position: relative;
+}

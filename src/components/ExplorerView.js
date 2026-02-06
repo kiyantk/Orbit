@@ -27,6 +27,8 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const [contextMenu, setContextMenu] = useState(null);
   const [tags, setTags] = useState([]);
   const [itemToReveal, setItemToReveal] = useState(null);
+  const anchorIndexRef = useRef(0);
+  const isRestoringScrollRef = useRef(false);
 
   // --- Fetch pages into refs ---
   const addItems = (rows, offset) => {
@@ -389,8 +391,17 @@ const scrollToLatest = () => {
   }
 }
 
-const handleScroll = (ev) => {
-  if(ev.scrollTop !== 0) setScrollPosition(ev.scrollTop);
+const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
+  if (scrollUpdateWasRequested || isRestoringScrollRef.current) return;
+
+  const firstVisibleRow = Math.floor(scrollTop / rowHeight);
+  const index = firstVisibleRow * columnCount;
+
+  anchorIndexRef.current = Math.max(0, index);
+
+  if (scrollTop !== 0) {
+    setScrollPosition(scrollTop);
+  }
 };
 
   // render each cell
@@ -445,7 +456,7 @@ onContextMenu={(e) => {
       <div
         className="thumb-card"
         title={`${item.filename}\n${formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
-        style={{ width: "100%", height: rowHeight - 36 }} // leave space for filename
+        style={{ width: "100%", height: scale === 0.5 ? '100%' : rowHeight - 36 }} // leave space for filename
       >
         {thumbSrc ? (
           <img
@@ -461,7 +472,7 @@ onContextMenu={(e) => {
         ) : (
           <div className="thumb-no-image">No preview</div>
         )}
-        { item.file_type === "video" && (
+        { item.file_type === "video" && scale > 0.6 && (
           <div className="thumb-video-indicator"><FontAwesomeIcon icon={faVideo} /></div>
         ) }
 
@@ -476,7 +487,7 @@ onContextMenu={(e) => {
       </div>
       {/* Filename under the thumbnail */}
       <div
-        className={`thumb-filename ${!folderAvailable ? 'thumb-filename-unavailable' : ''}`}
+        className={`thumb-filename ${!folderAvailable ? 'thumb-filename-unavailable' : ''} ${scale === 0.5 ? 'thumb-hidden' : ''}`}
         title={item.filename}
         style={{
           marginTop: 4,
@@ -491,6 +502,28 @@ onContextMenu={(e) => {
     </div>
   );
 });
+
+  useEffect(() => {
+    if (!gridRef.current || totalCount == null) return;
+  
+    const index = Math.min(anchorIndexRef.current, totalCount - 1);
+    const rowIndex = Math.floor(index / columnCount);
+    const columnIndex = index % columnCount;
+  
+    isRestoringScrollRef.current = true;
+  
+    requestAnimationFrame(() => {
+      gridRef.current.scrollToItem({
+        rowIndex,
+        columnIndex,
+        align: "start",
+      });
+    
+      requestAnimationFrame(() => {
+        isRestoringScrollRef.current = false;
+      });
+    });
+  }, [scale, rowHeight, columnCount, totalCount]);
 
   const revealFromContextMenu = async (item) => {
     // 1️⃣ Reset filters to "All"
@@ -602,7 +635,7 @@ onContextMenu={(e) => {
         >
           {({ onItemsRendered, ref }) => (
             <Grid
-              key={`${scale}-${filters ? JSON.stringify(filters) : "nofilter"}`}
+              key={`${filters ? JSON.stringify(filters) : "nofilter"}`}
               ref={(grid) => {
                 ref(grid);
                 gridRef.current = grid;
@@ -614,6 +647,7 @@ onContextMenu={(e) => {
               rowHeight={rowHeight}
               width={containerWidth}
               onScroll={handleScroll}
+              className="explorer-grid"
               onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex, visibleColumnStartIndex, visibleColumnStopIndex }) => {
                 // translate Grid visible indices into linear indices for InfiniteLoader
                 const startIndex = visibleRowStartIndex * columnCount + visibleColumnStartIndex;
