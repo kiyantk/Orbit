@@ -319,6 +319,19 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
 
   const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
 
+  const getReferenceEpoch = item => {
+    if (item.create_date) return item.create_date;
+
+    const fallback = Math.min(
+      item.created ?? Infinity,
+      item.modified ?? Infinity
+    );
+
+    return fallback === Infinity ? null : fallback;
+  };
+
+  const referenceDate = getReferenceEpoch(item);
+
   return (
     <div className="p-4 space-y- preview-panel-wrapper">
       <div className="flex justify-center preview-panel-content">
@@ -569,7 +582,7 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   {(item.create_date || item.created) && birthDate && (
     <div className="metadata-row">
       <span className="metadata-label">Age</span>
-      <span className="metadata-value" title={calculateAge(birthDate, item.create_date || item.created)}>{calculateAge(birthDate, item.create_date || item.created)}</span>
+      <span className="metadata-value" title={calculateAge(birthDate, referenceDate)}>{calculateAge(birthDate, referenceDate)}</span>
     </div>
   )}
   

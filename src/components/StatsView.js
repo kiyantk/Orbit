@@ -57,6 +57,17 @@ const StatsView = ({ birthDate }) => {
     return string.split('').map((char, index) => index === 0 ? char.toUpperCase() : char).join('')
   }
 
+  const getReferenceEpoch = item => {
+    if (item.create_date) return item.create_date;
+
+    const fallback = Math.min(
+      item.created ?? Infinity,
+      item.modified ?? Infinity
+    );
+
+    return fallback === Infinity ? null : fallback;
+  };
+
   useEffect(() => {
     if (!files.length) return;
 
@@ -76,13 +87,25 @@ const StatsView = ({ birthDate }) => {
     const perMonth = Object.keys(perMonthObj).sort().map(month => ({ month, count: perMonthObj[month] })).reverse();
 
     const ageCounts = [];
+
     if (birthDate) {
       const birth = new Date(birthDate);
+    
       files.forEach(f => {
-        if (!f.create_date) return;
-        const fileDate = new Date(f.create_date*1000);
+        const referenceDate = getReferenceEpoch(f);
+        if (!referenceDate) return;
+      
+        const fileDate = new Date(referenceDate * 1000);
+      
         let age = fileDate.getFullYear() - birth.getFullYear();
-        if (fileDate.getMonth() < birth.getMonth() || (fileDate.getMonth() === birth.getMonth() && fileDate.getDate() < birth.getDate())) age--;
+        if (
+          fileDate.getMonth() < birth.getMonth() ||
+          (fileDate.getMonth() === birth.getMonth() &&
+           fileDate.getDate() < birth.getDate())
+        ) {
+          age--;
+        }
+      
         ageCounts[age] = (ageCounts[age] || 0) + 1;
       });
     }
