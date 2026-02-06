@@ -8,7 +8,7 @@ import "leaflet.heat";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCircleNodes, faFire, faGlobe, faLightbulb, faLocationDot, faMoon } from "@fortawesome/free-solid-svg-icons";
 
-const MapView = () => {
+const MapView = ({mapViewType}) => {
   const mapRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -85,23 +85,43 @@ const MapView = () => {
     return () => map.remove();
   }, []);
 
-    function formatTimestamp(timestamp) {
-      if(!timestamp) return ''
-      // Convert seconds to milliseconds
-      const date = new Date(timestamp * 1000);
+  useEffect(() => {
+    const map = mapRef.current.leafletMap;
+    [clusterLayer.current, allLayer.current, heatLayer.current, lineLayer.current].forEach(
+      (l) => l && map.hasLayer(l) && map.removeLayer(l)
+    );
+    setCurrentMode(mapViewType)
+    setCountriesMenuVisible(false)
+    if (mapViewType === "cluster" && clusterLayer.current) {
+      map.addLayer(clusterLayer.current);
+      const bounds = clusterLayer.current.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds);
+    } else if (mapViewType === "heatmap" && heatLayer.current) {
+      map.addLayer(heatLayer.current);
+      const bounds = L.latLngBounds(allCoords.current);
+      if (bounds.isValid()) map.fitBounds(bounds);
+    } else if (mapViewType === "line" && lineLayer.current) {
+      map.addLayer(lineLayer.current);
+      const bounds = lineLayer.current.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds);
+    } else if(mapViewType === "countries") {
+       setCountriesMenuVisible(true)
+    }
+  }, [mapViewType]);
 
-      // Pad function to add leading zeros
-      const pad = (n) => n.toString().padStart(2, '0');
-
-      const day = pad(date.getDate());
-      const month = pad(date.getMonth() + 1); // Months are 0-indexed
-      const year = date.getFullYear();
-
-      const hours = pad(date.getHours());
-      const minutes = pad(date.getMinutes());
-      const seconds = pad(date.getSeconds());
-
-      return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+  function formatTimestamp(timestamp) {
+    if(!timestamp) return ''
+    // Convert seconds to milliseconds
+    const date = new Date(timestamp * 1000);
+    // Pad function to add leading zeros
+    const pad = (n) => n.toString().padStart(2, '0');
+    const day = pad(date.getDate());
+    const month = pad(date.getMonth() + 1); // Months are 0-indexed
+    const year = date.getFullYear();
+    const hours = pad(date.getHours());
+    const minutes = pad(date.getMinutes());
+    const seconds = pad(date.getSeconds());
+    return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
 
   // Load files into map
@@ -197,7 +217,10 @@ const MapView = () => {
   })();
 
     map.addLayer(clusterLayer.current);
-    if (clusterLayer.current.getLayers().length) map.fitBounds(clusterLayer.current.getBounds());
+    if (clusterLayer.current.getLayers().length) {
+      const bounds = clusterLayer.current.getBounds();
+      if (bounds.isValid()) map.fitBounds(bounds);
+    }
   }, [files]);
 
   const handleCountryClick = async (countryCode) => {
@@ -258,78 +281,6 @@ const MapView = () => {
           </ul>
         </div>
       )}
-      <div className="fab-container">
-        {/* Mode buttons */}
-        <div className="mode-buttons" id="modeButtons">
-          <button
-            className="fab"
-            title="Cluster Mode"
-            style={{ color: currentMode === "cluster" ? "#e6cdff" : "white" }}
-            onClick={() => {
-              const map = mapRef.current.leafletMap;
-              [clusterLayer.current, allLayer.current, heatLayer.current, lineLayer.current].forEach(
-                (l) => l && map.removeLayer(l)
-              );
-              map.addLayer(clusterLayer.current);
-              map.fitBounds(clusterLayer.current.getBounds());
-              setCurrentMode("cluster");
-            }}
-          >
-            <FontAwesomeIcon icon={faLocationDot} />
-          </button>
-          <button
-            className="fab"
-            title="Heatmap Mode"
-            style={{ color: currentMode === "heatmap" ? "#e6cdff" : "white" }}
-            onClick={() => {
-              const map = mapRef.current.leafletMap;
-              [clusterLayer.current, allLayer.current, heatLayer.current, lineLayer.current].forEach(
-                (l) => l && map.removeLayer(l)
-              );
-              map.addLayer(heatLayer.current);
-              map.fitBounds(L.latLngBounds(allCoords.current));
-              setCurrentMode("heatmap");
-            }}
-          >
-            <FontAwesomeIcon icon={faFire} />
-          </button>
-          <button
-            className="fab"
-            title="Line Mode"
-            style={{ color: currentMode === "line" ? "#e6cdff" : "white" }}
-            onClick={() => {
-              const map = mapRef.current.leafletMap;
-              [clusterLayer.current, allLayer.current, heatLayer.current, lineLayer.current].forEach(
-                (l) => l && map.removeLayer(l)
-              );
-              map.addLayer(lineLayer.current);
-              map.fitBounds(lineLayer.current.getBounds());
-              setCurrentMode("line");
-            }}
-          >
-            <FontAwesomeIcon icon={faCircleNodes} />
-          </button>
-                  <button
-          className="fab"
-          title="Countries & Regions"
-          onClick={() => setCountriesMenuVisible(!countriesMenuVisible)}
-        >
-          <FontAwesomeIcon icon={faGlobe} />
-        </button>
-        </div>
-        {/* Theme buttons */}
-        <div className="theme-buttons" id="themeButtons">
-          <button className="fab" onClick={() => switchTheme("default")}>
-            D
-          </button>
-          <button className="fab" onClick={() => switchTheme("light")}>
-            <FontAwesomeIcon icon={faLightbulb} />
-          </button>
-          <button className="fab" onClick={() => switchTheme("dark")}>
-            <FontAwesomeIcon icon={faMoon} />
-          </button>
-        </div>
-      </div>
       {loading && (
       <div className="map-loading stats-loading"><div className="loader"></div></div>
       )}

@@ -165,6 +165,7 @@ body {
   user-select: none;
   grid-template-rows: 50px 50px 50px 50px 50px 50px;
   border-right: 1px solid #484050;
+  z-index: 999;
 }
 
 .side-bar button {

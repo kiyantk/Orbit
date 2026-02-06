@@ -2,8 +2,12 @@ import React from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faChartSimple,
+  faCircleNodes,
   faFilter,
+  faFire,
   faGear,
+  faGlobe,
+  faLocationDot,
   faMagnifyingGlass,
   faMap,
   faPhotoFilm,
@@ -18,7 +22,9 @@ const SideBar = ({
   activeView,
   activeViewChanged,
   openActionPanel,
-  actionPanelType
+  actionPanelType,
+  mapViewType,
+  switchMapViewType
 }) => {
   const switchView = (type) => {
     activeViewChanged(type);
@@ -52,24 +58,49 @@ const SideBar = ({
         </button>
       {activeView === "explore" && (
         <div className="side-bar-bottom">
-          <button className={actionPanelType === "sort" ? 'side-bar-active' : '' } onClick={() => openActionPanel("sort")}>
+          <button className={`side-bar-btn ${actionPanelType === "sort" ? 'side-bar-active' : '' }`} onClick={() => openActionPanel("sort")}>
             <FontAwesomeIcon icon={faSort}/> 
+            <span className="tooltip">Sort</span>
           </button>
-          <button className={actionPanelType === "filter" ? 'side-bar-active' : '' } onClick={() => openActionPanel("filter")}>
+          <button className={`side-bar-btn ${actionPanelType === "filter" ? 'side-bar-active' : '' }`} onClick={() => openActionPanel("filter")}>
             <FontAwesomeIcon icon={faFilter}/>
+            <span className="tooltip">Filter</span>
           </button>
-          <button className={actionPanelType === "search" ? 'side-bar-active' : '' } onClick={() => openActionPanel("search")}>
+          <button className={`side-bar-btn ${actionPanelType === "search" ? 'side-bar-active' : '' }`} onClick={() => openActionPanel("search")}>
             <FontAwesomeIcon icon={faMagnifyingGlass}/>
+            <span className="tooltip">Search</span>
           </button>
         </div>
       )}
       {activeView === "shuffle" && (
         <div className="side-bar-bottom">
-          <button className={actionPanelType === "shuffle-filter" ? 'side-bar-active' : '' } onClick={() => openActionPanel("shuffle-filter")}>
+          <button className={`side-bar-btn ${actionPanelType === "shuffle-filter" ? 'side-bar-active' : '' }`} onClick={() => openActionPanel("shuffle-filter")}>
             <FontAwesomeIcon icon={faFilter}/>
+            <span className="tooltip">Filter</span>
           </button>
-          <button className={actionPanelType === "shuffle-settings" ? 'side-bar-active' : '' } onClick={() => openActionPanel("shuffle-settings")}>
+          <button className={`side-bar-btn ${actionPanelType === "shuffle-settings" ? 'side-bar-active' : '' }`} onClick={() => openActionPanel("shuffle-settings")}>
             <FontAwesomeIcon icon={faSliders}/>
+            <span className="tooltip">Shuffle Settings</span>
+          </button>
+        </div>
+      )}
+      {activeView === "map" && (
+        <div className="side-bar-bottom">
+          <button className={`side-bar-btn ${mapViewType === "cluster" ? 'side-bar-active' : '' }`} onClick={() => switchMapViewType("cluster")}>
+            <FontAwesomeIcon icon={faLocationDot} />
+            <span className="tooltip">Cluster Mode</span>
+          </button>
+          <button className={`side-bar-btn ${mapViewType === "heatmap" ? 'side-bar-active' : '' }`} onClick={() => switchMapViewType("heatmap")}>
+            <FontAwesomeIcon icon={faFire} />
+            <span className="tooltip">Heatmap Mode</span>
+          </button>
+          <button className={`side-bar-btn ${mapViewType === "line" ? 'side-bar-active' : '' }`} onClick={() => switchMapViewType("line")}>
+            <FontAwesomeIcon icon={faCircleNodes} />
+            <span className="tooltip">Line Mode</span>
+          </button>
+          <button className={`side-bar-btn ${mapViewType === "countries" ? 'side-bar-active' : '' }`} onClick={() => switchMapViewType("countries")}>
+            <FontAwesomeIcon icon={faGlobe} />
+            <span className="tooltip">Country Mode</span>
           </button>
         </div>
       )}

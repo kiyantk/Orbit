@@ -31,6 +31,7 @@ const App = () => {
   const [explorerScroll, setExplorerScroll] = useState(0);
   const [previewPanelKey, setPreviewPanelKey] = useState(0);
   const [actionPanelKey, setActionPanelKey] = useState(0);
+  const [mapViewType, setMapViewType] = useState("cluster");
 
   const handleActionPanelApply = (data) => {
     if (actionPanelType === "filter" || actionPanelType === "sort" || actionPanelType === "search") {
@@ -86,7 +87,6 @@ const App = () => {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      console.log(e)
       // Ignore if user is typing in an input / textarea
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -191,7 +191,13 @@ const App = () => {
       <div className="App-main">
         <MenuBar
         />
-        <SideBar activeView={activeView} activeViewChanged={setNewActiveView} openActionPanel={handleActionPanelClick} actionPanelType={actionPanelType} />
+        <SideBar activeView={activeView} 
+          activeViewChanged={setNewActiveView} 
+          openActionPanel={handleActionPanelClick} 
+          actionPanelType={actionPanelType}
+          mapViewType={mapViewType}
+          switchMapViewType={setMapViewType}
+        />
         <div className="content">
           {activeView === "settings" && (
             <SettingsView
@@ -206,7 +212,7 @@ const App = () => {
             <StatsView birthDate={settings.birthDate} />
           )}
           {activeView === "map" && (
-            <MapView />
+            <MapView mapViewType={mapViewType} />
           )}
           {activeView === "tags" && (
             <TagsView

@@ -83,9 +83,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
         setSearchBy(activeFilters.searchBy)
         setSearchTerm(activeFilters.searchTerm)
       } else if(activeFilters) {
-        console.log(filters)
         setFilters(prev => ({ ...prev, ...activeFilters }))
-        console.log(filters)
       }
     } else if(activeView === "shuffle") {
       if(activeShuffleFilters) {
