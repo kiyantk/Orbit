@@ -192,7 +192,7 @@ const defaultConfig = {
   indexedFolders: [],
   birthDate: null,
   adjustHeicColors: true,
-  defaultSort: "id"
+  defaultSort: "media_id"
 };
 
 // Database
@@ -479,7 +479,7 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
       orderSQL = "ORDER BY RANDOM()";
     } else {
       const validSorts = ["media_id", "filename", "create_date", "created", "size"];
-      const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : (settings && settings.defaultSort ? settings.defaultSort : "id");
+      const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : (settings && settings.defaultSort ? settings.defaultSort : "media_id");
       const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC";
       orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
     }

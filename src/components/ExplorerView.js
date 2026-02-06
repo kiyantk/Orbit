@@ -210,6 +210,10 @@ useEffect(() => {
 }, [filters, fetchPageForIndex, fetchTotalCount]);
 
 useEffect(() => {
+  setScrollPosition(0)
+}, [filters]);
+
+useEffect(() => {
   const handleItemRemoved = ({ id }) => {
     // 1️⃣ Remove from refs
     const index = idToIndex.current.get(id);

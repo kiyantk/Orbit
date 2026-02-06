@@ -242,7 +242,7 @@ const App = () => {
           )}
         </div>
         {(activeView === "explore" || activeView === "shuffle") && (
-          <ActionPanel settings={settings} type={actionPanelType} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
+          <ActionPanel settings={settings} type={actionPanelType} activeView={activeView} activeFilters={filters} activeShuffleFilters={shuffleFilters} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
         )}
         <div>
           {showWelcomePopup && (

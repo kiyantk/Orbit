@@ -2,7 +2,7 @@ import { faUndo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
-const ActionPanel = ({ settings, type, onApply, actionPanelKey }) => {
+const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, activeView, activeShuffleFilters }) => {
   const [sortBy, setSortBy] = useState("media_id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState({
@@ -20,6 +20,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey }) => {
   });
   const [searchBy, setSearchBy] = useState("name");
   const [searchTerm, setSearchTerm] = useState("");
+  const [prevActionPanelKey, setPrevActionPanelKey] = useState(0);
 
   // Options dynamically loaded from indexed files
   const [options, setOptions] = useState({
@@ -67,12 +68,31 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey }) => {
     fetchOptions();
   }, []);
   
-    // Fetch options from database on mount
   useEffect(() => {
     if(settings && settings.defaultSort) {
       setSortBy(settings.defaultSort)
     }
   }, [settings]);
+
+  useEffect(() => {
+    if(activeView === "explore") {
+      if(activeFilters && activeFilters.sortBy && activeFilters.sortOrder) {
+        setSortBy(activeFilters.sortBy)
+        setSortOrder(activeFilters.sortOrder)
+      } else if(activeFilters && activeFilters.searchBy && activeFilters.searchTerm) {
+        setSearchBy(activeFilters.searchBy)
+        setSearchTerm(activeFilters.searchTerm)
+      } else if(activeFilters) {
+        console.log(filters)
+        setFilters(prev => ({ ...prev, ...activeFilters }))
+        console.log(filters)
+      }
+    } else if(activeView === "shuffle") {
+      if(activeShuffleFilters) {
+        setShuffleFilters(prev => ({ ...prev, ...activeShuffleFilters }))
+      }
+    }
+  }, [activeView]);
 
   // Auto-apply filters or sort whenever they change
   useEffect(() => {
@@ -297,10 +317,13 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey }) => {
   };
 
   useEffect(() => {
-    resetFilters();
-    resetSearch();
-    setSortBy("media_id");
-    setSortOrder("desc");
+    if(actionPanelKey !== prevActionPanelKey) {
+      setPrevActionPanelKey(actionPanelKey)
+      resetFilters();
+      resetSearch();
+      setSortBy("media_id");
+      setSortOrder("desc");
+    }
   }, [actionPanelKey]);
 
   if (!type) return null;
