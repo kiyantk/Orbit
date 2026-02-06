@@ -85,6 +85,24 @@ const App = () => {
   }, [activeView, settings, checkFolderStatuses]);
 
   useEffect(() => {
+    const handleKeyDown = (e) => {
+      console.log(e)
+      // Ignore if user is typing in an input / textarea
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      // ~ or `
+      if (e.code === "Backquote") {
+        e.preventDefault();
+        window.electron.ipcRenderer.send("quick-minimize");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
     setActionPanelType(null)
   }, [activeView]);
 

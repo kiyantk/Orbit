@@ -391,6 +391,7 @@ useEffect(() => {
                     onChange={handleCheckboxChange('adjustHeicColors')}
                   />
                   <span>Adjust HEIC Colors</span>
+                  <span className="settings-hint">Recommended. Improves color accuracy for HEIC photos.</span>
                 </div>
                 <div className="settings-content-item">
                   <span>Default Sort:</span>
@@ -399,7 +400,7 @@ useEffect(() => {
                     onChange={(e) => handleDefaultSortChange(e)}
                     className="settings-itemstyle-select"
                   >
-                    <option value="id">ID (Default)</option>
+                    <option value="media_id">ID (Default)</option>
                     <option value="name">Name</option>
                     <option value="create_date">Date Taken</option>
                     <option value="created">Date Created</option>
@@ -492,6 +493,13 @@ useEffect(() => {
             )}
             {selectedTab === "Controls" && (
               <div>
+                <h3>General</h3>
+                <div className="settings-content-item">
+                  <span>
+                    Quick minimize:</span>{" "}
+                    <span className="settings-shortcut-key">~</span> or <span className="settings-shortcut-key">`</span>
+                </div>
+                <br />
                 <h3>Explorer</h3>
                 <div className="settings-content-item">
                   <span>

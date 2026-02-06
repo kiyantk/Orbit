@@ -1635,6 +1635,10 @@ ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
   }
 });
 
+ipcMain.on("quick-minimize", () => {
+    mainWindow.minimize();
+});
+
 // Properly shut down exiftool on exit
 app.on("before-quit", async () => {
   await exiftool.end();

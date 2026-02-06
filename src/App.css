@@ -1368,3 +1368,8 @@ select:focus {
 .context-menu-item:hover {
   background-color: #2d2a35;
 }
+
+.settings-hint {
+  color: #7a7183;
+  font-size: 13px;
+}
