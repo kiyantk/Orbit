@@ -97,6 +97,11 @@ const SettingsView = ({
     }
   }, [newTab]);
 
+  useEffect(() => {
+    const img = new Image();
+    img.src = process.env.PUBLIC_URL + "/logo-v2-orbit-bright-white-shadow-small.png";
+  }, []);
+
   // Set local settings
   const handleCheckboxChange = (key) => (event) => {
     setSettings((prev) => ({

@@ -127,6 +127,10 @@ body {
   margin-bottom: 12px;
   font-size: 1rem;
   font-weight: 500;
+  position: sticky;
+  top: 0;
+  background-color: #1f1d27;
+  padding-bottom: 11px;
 }
 
 .stats-card table {
@@ -1372,4 +1376,29 @@ select:focus {
 .settings-hint {
   color: #7a7183;
   font-size: 13px;
+}
+
+.side-bar-btn {
+  position: relative;
+}
+
+.side-bar-btn .tooltip {
+  position: absolute;
+  left: 110%;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #09001e;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.side-bar-btn:hover .tooltip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(4px);
 }
