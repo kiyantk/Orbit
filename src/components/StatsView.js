@@ -17,7 +17,8 @@ const StatsView = ({ birthDate }) => {
     totalFiles: 0,
     totalStorage: 0,
     longestStreaks: [],
-    calendarData: []
+    calendarData: [],
+    sources: []
   });
   const currentYear = new Date().getFullYear();
   const [calendarDate, setCalendarDate] = useState({
@@ -126,6 +127,46 @@ const StatsView = ({ birthDate }) => {
     const totalFiles = files.length;
     const totalStorage = files.reduce((sum,f) => sum + (f.size || 0), 0);
 
+    const sourcesMap = {};
+
+    files.forEach(f => {
+      if (!f.folder_path) return;
+    
+      const epoch = getReferenceEpoch(f);
+      if (!epoch) return;
+    
+      if (!sourcesMap[f.folder_path]) {
+        sourcesMap[f.folder_path] = {
+          folder: f.folder_path,
+          first: epoch,
+          last: epoch,
+          count: 1
+        };
+      } else {
+        sourcesMap[f.folder_path].first = Math.min(
+          sourcesMap[f.folder_path].first,
+          epoch
+        );
+        sourcesMap[f.folder_path].last = Math.max(
+          sourcesMap[f.folder_path].last,
+          epoch
+        );
+        sourcesMap[f.folder_path].count++;
+      }
+    });
+
+    const sources = Object.values(sourcesMap)
+      .map(s => ({
+        folder: s.folder,
+        first: new Date(s.first * 1000).toISOString().split("T")[0],
+        last: new Date(s.last * 1000).toISOString().split("T")[0],
+        count: s.count
+      }))
+      .sort((a, b) => {
+        // newest activity first
+        return new Date(b.last) - new Date(a.last);
+      });
+
     // Compute streaks
     const dates = Object.keys(topDaysObj).sort();
     let streaks = [];
@@ -169,7 +210,7 @@ const StatsView = ({ birthDate }) => {
         }, {})
     );
 
-    setStats({ perYear, perMonth, perAge, topDays, byType, byDevice, byCountry, totalFiles, totalStorage, longestStreaks: streaks, calendarData });
+    setStats({ perYear, perMonth, perAge, topDays, byType, byDevice, byCountry, totalFiles, totalStorage, longestStreaks: streaks, calendarData, sources });
   }, [files, birthDate, calendarDate]);
 
   const formatBytes = (bytes) => {
@@ -225,7 +266,8 @@ const StatsView = ({ birthDate }) => {
       <div className="tabs-sidebar">
         {[
           { id: "overview", label: "Overview" },
-          { id: "calendar", label: "Calendar" }
+          { id: "calendar", label: "Calendar" },
+          { id: "sources", label: "Sources" }
         ].map(tab => (
           <div
             key={tab.id}
@@ -308,6 +350,35 @@ const StatsView = ({ birthDate }) => {
 
             <div className="calendar-streaks">
               {renderTable("Longest Streaks", stats.longestStreaks?.slice(0, 20), "start", "length", "end")}
+            </div>
+          </div>
+        )}
+        {activeTab === "sources" && (
+          <div className="stats-grid">
+            <div className="stats-card-wrapper">
+              <div className="stats-card">
+                <h3>Sources</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Folder</th>
+                      <th>First Date</th>
+                      <th>Last Date</th>
+                      <th>Files</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.sources.map((s, idx) => (
+                      <tr key={idx}>
+                        <td>{s.folder}</td>
+                        <td>{s.first}</td>
+                        <td>{s.last}</td>
+                        <td>{s.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

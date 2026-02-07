@@ -504,7 +504,7 @@ onContextMenu={(e) => {
 });
 
   useEffect(() => {
-    if (!gridRef.current || totalCount == null) return;
+    if (!gridRef || !gridRef.current || totalCount == null) return;
   
     const index = Math.min(anchorIndexRef.current, totalCount - 1);
     const rowIndex = Math.floor(index / columnCount);
@@ -513,6 +513,8 @@ onContextMenu={(e) => {
     isRestoringScrollRef.current = true;
   
     requestAnimationFrame(() => {
+      if (!gridRef.current) return; // <-- check again
+    
       gridRef.current.scrollToItem({
         rowIndex,
         columnIndex,

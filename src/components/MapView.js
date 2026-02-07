@@ -5,8 +5,6 @@ import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import "leaflet.markercluster";
 import "leaflet.heat";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCircleNodes, faFire, faGlobe, faLightbulb, faLocationDot, faMoon } from "@fortawesome/free-solid-svg-icons";
 
 const MapView = ({mapViewType}) => {
   const mapRef = useRef(null);
@@ -20,94 +18,112 @@ const MapView = ({mapViewType}) => {
   const allLayer = useRef(L.layerGroup());
   const heatLayer = useRef(null);
   const lineLayer = useRef(null);
-  const currentTileLayer = useRef(null);
   const [countriesMenuVisible, setCountriesMenuVisible] = useState(false);
-  const [currentMode, setCurrentMode] = useState(null)
 
   // Fetch all files on mount
   useEffect(() => {
-    const fetchAllFiles = async () => {
-      setLoading(true);
-      try {
-        const res = await window.electron.ipcRenderer.invoke("fetch-files", {
-          offset: 0,
-          limit: 100000000,
-        });
-        if (res.success) setFiles(res.rows || []);
-      } catch (err) {
-        console.error("Failed to fetch files", err);
-      } finally {
-        setLoading(false);
+ const loadMapData = async () => {
+  setLoading(true);
+  const res = await window.electron.ipcRenderer.invoke("fetch-map-data");
+  if (!res.success) return;
+
+  // markers
+  const markers = res.points.map((p) => {
+    const marker = L.marker([p.lat, p.lng], {
+      icon: L.icon({ iconUrl: "/marker.png", iconSize: [10,10], iconAnchor: [5,5] }),
+    });
+    marker.on("click", () => {
+      if (!marker.getPopup()) {
+        const { filename, date, device, country, altitude } = p.popup;
+        marker.bindPopup(`
+          <b>${filename}</b><br>
+          ${formatTimestamp(date)}<br>
+          ${device || "Unknown"}<br>
+          ${country || "Unknown"}${altitude ? ` | ${altitude.toFixed(0)}m` : ""}
+        `).openPopup();
       }
-    };
-    fetchAllFiles();
+    });
+    return marker;
+  });
+
+  clusterLayer.current.clearLayers();
+  clusterLayer.current.addLayers(markers);
+
+  allCoords.current = res.points.map(p => [p.lat, p.lng]);
+  heatLayer.current = L.heatLayer(allCoords.current, { radius: 20, blur: 15 });
+  lineLayer.current = L.featureGroup(res.lines.map(seg => L.polyline(seg, { color: "red", weight: 2 })));
+
+  setCountryCounts(res.countryCounts);
+  setCountryBounds(res.countryBounds);
+
+  // Fit bounds immediately for first mode
+  const map = mapRef.current.leafletMap;
+  if (map) {
+    let bounds = clusterLayer.current.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds);
+    map.addLayer(clusterLayer.current); // default mode
+  }
+
+  setLoading(false);
+};
+
+
+    loadMapData();
   }, []);
-
-  // Inside the component, but outside useEffect
-  const switchTheme = (themeName) => {
-    const map = mapRef.current.leafletMap;
-    if (!map) return;
-  
-    const themes = {
-      default: {
-        url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>',
-      },
-      light: {
-        url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-        attribution:
-          '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>, © <a href="https://carto.com/">CARTO</a>',
-      },
-      dark: {
-        url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        attribution:
-          '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a>, © <a href="https://carto.com/">CARTO</a>',
-      },
-    };
-  
-    if (!themes[themeName]) return;
-    if (currentTileLayer.current) map.removeLayer(currentTileLayer.current);
-    currentTileLayer.current = L.tileLayer(themes[themeName].url, {
-      attribution: themes[themeName].attribution,
-      maxZoom: 20,
-    }).addTo(map);
-  };
-
 
   // Initialize map
-  useEffect(() => {
-    const map = L.map(mapRef.current, { preferCanvas: false }).setView([0, 0], 2);
-    mapRef.current.leafletMap = map;
+useEffect(() => {
+  const map = L.map(mapRef.current, { preferCanvas: false, maxZoom: 18 }).setView([0, 0], 2);
 
-    switchTheme("default");
-    setCurrentMode("cluster");
+  // Add OSM tiles
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  }).addTo(map);
 
-    return () => map.remove();
-  }, []);
+  mapRef.current.leafletMap = map;
 
-  useEffect(() => {
-    const map = mapRef.current.leafletMap;
-    [clusterLayer.current, allLayer.current, heatLayer.current, lineLayer.current].forEach(
-      (l) => l && map.hasLayer(l) && map.removeLayer(l)
-    );
-    setCurrentMode(mapViewType)
-    setCountriesMenuVisible(false)
-    if (mapViewType === "cluster" && clusterLayer.current) {
-      map.addLayer(clusterLayer.current);
-      const bounds = clusterLayer.current.getBounds();
-      if (bounds.isValid()) map.fitBounds(bounds);
-    } else if (mapViewType === "heatmap" && heatLayer.current) {
-      map.addLayer(heatLayer.current);
-      const bounds = L.latLngBounds(allCoords.current);
-      if (bounds.isValid()) map.fitBounds(bounds);
-    } else if (mapViewType === "line" && lineLayer.current) {
-      map.addLayer(lineLayer.current);
-      const bounds = lineLayer.current.getBounds();
-      if (bounds.isValid()) map.fitBounds(bounds);
-    } else if(mapViewType === "countries") {
-       setCountriesMenuVisible(true)
-    }
-  }, [mapViewType]);
+  return () => map.remove();
+}, []);
+
+// Mode switch effect
+useEffect(() => {
+  const map = mapRef.current.leafletMap;
+  if (!map || !clusterLayer.current) return;
+
+  // Remove all layers first
+  [clusterLayer.current, heatLayer.current, lineLayer.current].forEach(
+    (layer) => layer && map.hasLayer(layer) && map.removeLayer(layer)
+  );
+
+  setCountriesMenuVisible(false);
+
+  let activeLayer = null;
+
+  if (mapViewType === "cluster") {
+    activeLayer = clusterLayer.current;
+  } else if (mapViewType === "heatmap") {
+    activeLayer = heatLayer.current;
+  } else if (mapViewType === "line") {
+    activeLayer = lineLayer.current;
+  } else if (mapViewType === "countries") {
+    setCountriesMenuVisible(true);
+  }
+
+  if (activeLayer) {
+    map.addLayer(activeLayer);
+
+    // Fit bounds automatically for current layer
+    let bounds = null;
+    if (mapViewType === "cluster") bounds = clusterLayer.current.getBounds();
+    if (mapViewType === "heatmap") bounds = L.latLngBounds(allCoords.current);
+    if (mapViewType === "line") bounds = lineLayer.current.getBounds();
+
+    if (bounds && bounds.isValid()) map.fitBounds(bounds);
+  }
+}, [mapViewType, clusterLayer.current, heatLayer.current, lineLayer.current]);
+
 
   function formatTimestamp(timestamp) {
     if(!timestamp) return ''
@@ -124,104 +140,134 @@ const MapView = ({mapViewType}) => {
     return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
 
-  // Load files into map
   useEffect(() => {
-    if (!files.length) return;
-    const map = mapRef.current.leafletMap;
+  if (!files.length) return;
 
-    const haversineDistance = (coord1, coord2) => {
-      const R = 6371;
-      const toRad = (x) => (x * Math.PI) / 180;
-      const [lat1, lon1] = coord1;
-      const [lat2, lon2] = coord2;
-      const dLat = toRad(lat2 - lat1);
-      const dLon = toRad(lon2 - lon1);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    };
+  const map = mapRef.current.leafletMap;
 
-    const countryBoundsTemp = {};
-    const countryCountsTemp = {};
-    const allCoordsTemp = [];
+  // ---------- helpers ----------
+  const toRad = (x) => (x * Math.PI) / 180;
+  const haversineDistance = ([lat1, lon1], [lat2, lon2]) => {
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) *
+        Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
 
-    let lineSegments = [];
-    let currentSegment = [];
-    let lastPoint = null;
+  // ---------- temp structures ----------
+  const markers = [];
+  const allCoordsTemp = [];
+  const countryCountsTemp = {};
+  const countryBoundsTemp = {};
 
-    files.forEach((item) => {
-      if (!item.latitude || !item.longitude) return;
-      const latlng = [item.latitude, item.longitude];
-      allCoordsTemp.push(latlng);
+  const lineSegments = [];
+  let currentSegment = [];
+  let lastPoint = null;
 
-      if (item.altitude && item.altitude <= 1500) {
-        if (item.country) {
-          if (!countryBoundsTemp[item.country]) countryBoundsTemp[item.country] = [];
-          countryBoundsTemp[item.country].push(latlng);
-          countryCountsTemp[item.country] = (countryCountsTemp[item.country] || 0) + 1;
+  // ---------- main loop ----------
+  for (const item of files) {
+    const { latitude, longitude, altitude, country } = item;
+    if (latitude == null || longitude == null) continue;
+
+    const latlng = [latitude, longitude];
+    allCoordsTemp.push(latlng);
+
+    // ---- marker (NO popup yet) ----
+    const marker = L.marker(latlng, {
+      icon: L.icon({
+        iconUrl: "/marker.png",
+        iconSize: [10, 10],
+        iconAnchor: [5, 5],
+      }),
+    });
+
+    marker.on("click", () => {
+      if (!marker.getPopup()) {
+        marker.bindPopup(`
+          <b>${item.filename}</b><br>
+          ${formatTimestamp(item.create_date) || "No date"}<br>
+          ${item.device_model || "Unknown device"}<br>
+          ${country || "Unknown country"}${
+          altitude ? ` | ${altitude.toFixed(0)} meters` : ""
         }
-      }
-
-      const marker = L.marker(latlng, {
-        icon: L.icon({
-          iconUrl: "/marker.png",
-          iconSize: [10, 10],
-          iconAnchor: [5, 5],
-        }),
-      });
-
-      const popupContent = `
-        <b>${item.filename}</b><br>
-        ${formatTimestamp(item.create_date) || "No date"}<br>
-        ${item.device_model || "Unknown device"}<br>
-        ${item.country || "Unknown country"}${
-        item.altitude ? " | " + item.altitude.toFixed(0) + " meters" : ""
-      }
-      `;
-      marker.bindPopup(popupContent);
-
-      clusterLayer.current.addLayer(marker);
-      allLayer.current.addLayer(marker);
-
-      if (item.altitude && item.altitude <= 1500) {
-        if (lastPoint) {
-          const dist = haversineDistance(lastPoint, latlng);
-          if (dist > 200) {
-            if (currentSegment.length > 1) lineSegments.push(currentSegment);
-            currentSegment = [];
-          }
-        }
-        currentSegment.push(latlng);
-        lastPoint = latlng;
+        `).openPopup();
       }
     });
 
-    if (currentSegment.length > 1) lineSegments.push(currentSegment);
+    markers.push(marker);
 
-    heatLayer.current = L.heatLayer(allCoordsTemp, { radius: 20, blur: 15 });
-    lineLayer.current = L.featureGroup(
-      lineSegments.map((seg) => L.polyline(seg, { color: "red" }))
-    );
+    // ---- country stats + lines (low altitude only) ----
+    if (altitude && altitude <= 1500 && country) {
+      countryCountsTemp[country] =
+        (countryCountsTemp[country] || 0) + 1;
+      (countryBoundsTemp[country] ||= []).push(latlng);
 
-    allCoords.current = allCoordsTemp;
-    setCountryBounds(countryBoundsTemp);
-    setCountryCounts(countryCountsTemp);
-
-      (async () => {
-    const nameMap = {};
-    for (const code of Object.keys(countryCountsTemp)) {
-      nameMap[code] = await getCountryName(code);
+      if (lastPoint) {
+        const dist = haversineDistance(lastPoint, latlng);
+        if (dist > 200) {
+          if (currentSegment.length > 1)
+            lineSegments.push(currentSegment);
+          currentSegment = [];
+        }
+      }
+      currentSegment.push(latlng);
+      lastPoint = latlng;
     }
-    setCountryNameMap(nameMap);
+  }
+
+  if (currentSegment.length > 1) {
+    lineSegments.push(currentSegment);
+  }
+
+  // ---------- layers ----------
+  clusterLayer.current.clearLayers();
+  allLayer.current.clearLayers();
+
+  clusterLayer.current.addLayers(markers);
+  allLayer.current.addLayers(markers);
+
+  heatLayer.current = L.heatLayer(allCoordsTemp, {
+    radius: 20,
+    blur: 15,
+  });
+
+  lineLayer.current = L.featureGroup(
+    lineSegments.map((seg) =>
+      L.polyline(seg, {
+        color: "red",
+        weight: 2,
+        opacity: 0.9,
+      })
+    )
+  );
+
+  // ---------- state updates ----------
+  allCoords.current = allCoordsTemp;
+  setCountryCounts(countryCountsTemp);
+  setCountryBounds(countryBoundsTemp);
+
+  // ---------- resolve country names (parallel) ----------
+  (async () => {
+    const entries = await Promise.all(
+      Object.keys(countryCountsTemp).map(async (code) => [
+        code,
+        await getCountryName(code),
+      ])
+    );
+    setCountryNameMap(Object.fromEntries(entries));
   })();
 
-    map.addLayer(clusterLayer.current);
-    if (clusterLayer.current.getLayers().length) {
-      const bounds = clusterLayer.current.getBounds();
-      if (bounds.isValid()) map.fitBounds(bounds);
-    }
-  }, [files]);
+  // ---------- initial fit ----------
+  map.addLayer(clusterLayer.current);
+  const bounds = clusterLayer.current.getBounds();
+  if (bounds.isValid()) map.fitBounds(bounds);
+
+}, [files]);
 
   const handleCountryClick = async (countryCode) => {
     const map = mapRef.current.leafletMap;

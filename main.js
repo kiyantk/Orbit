@@ -506,6 +506,93 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
   }
 });
 
+ipcMain.handle("fetch-map-data", async () => {
+  try {
+    initDatabase();
+
+    // Only select what the map actually needs
+    const rows = db.prepare(`
+      SELECT latitude, longitude, altitude, country, create_date, filename, device_model
+      FROM files
+      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+    `).all();
+
+    const points = [];
+    const heat = [];
+    const countryCounts = {};
+    const countryBounds = {};
+
+    let lineSegments = [];
+    let currentSegment = [];
+    let lastPoint = null;
+
+    const haversineDistance = (a, b) => {
+      const R = 6371;
+      const toRad = x => (x * Math.PI) / 180;
+      const dLat = toRad(b[0] - a[0]);
+      const dLon = toRad(b[1] - a[1]);
+      const lat1 = toRad(a[0]);
+      const lat2 = toRad(b[0]);
+
+      const h =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+
+      return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    };
+
+    for (const item of rows) {
+      const latlng = [item.latitude, item.longitude];
+
+      // markers
+      points.push({
+        lat: item.latitude,
+        lng: item.longitude,
+        popup: {
+          filename: item.filename,
+          date: item.create_date,
+          device: item.device_model,
+          country: item.country,
+          altitude: item.altitude,
+        },
+      });
+
+      // heatmap
+      heat.push([item.latitude, item.longitude, 1]);
+
+      // country stats (only low altitude)
+      if (item.altitude && item.altitude <= 1500 && item.country) {
+        countryCounts[item.country] = (countryCounts[item.country] || 0) + 1;
+        (countryBounds[item.country] ||= []).push(latlng);
+
+        if (lastPoint) {
+          const dist = haversineDistance(lastPoint, latlng);
+          if (dist > 200) {
+            if (currentSegment.length > 1) lineSegments.push(currentSegment);
+            currentSegment = [];
+          }
+        }
+        currentSegment.push(latlng);
+        lastPoint = latlng;
+      }
+    }
+
+    if (currentSegment.length > 1) lineSegments.push(currentSegment);
+
+    return {
+      success: true,
+      points,
+      heat,
+      lines: lineSegments,
+      countryCounts,
+      countryBounds,
+    };
+  } catch (err) {
+    console.error("fetch-map-data error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
 // Load the mapped JSON once on startup
 const countriesPath = path.join(__dirname, 'countries_mapped.json');
 const countriesMap = JSON.parse(fs.readFileSync(countriesPath, 'utf8'));
