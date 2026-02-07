@@ -66,10 +66,11 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     }
   
     fetchOptions();
-  }, []);
+  }, [settings, actionPanelKey]);
   
   useEffect(() => {
-    if(settings && settings.defaultSort) {
+    console.log(activeFilters)
+    if(settings && settings.defaultSort && !activeFilters) {
       setSortBy(settings.defaultSort)
     }
   }, [settings]);

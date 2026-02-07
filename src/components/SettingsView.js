@@ -20,7 +20,8 @@ const SettingsView = ({
   applySettings,
   folderStatuses,
   checkStatusses,
-  newTab
+  newTab,
+  enterRemoveMode
 }) => {
   const [selectedTab, setSelectedTab] = useState("User");
   const [settings, setSettings] = useState(currentSettings);
@@ -577,6 +578,8 @@ useEffect(() => {
                   onClick={fixIDs}>Fix IDs</button>
                 <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
                   onClick={fixThumbnails}>Fix Thumbnails</button>
+                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                  onClick={enterRemoveMode}>Remove Mode</button>
               </div>
               <div className="settings-bottom-bar" style={{ height: "70px"}}>
                 <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" onClick={() => setShowChecksPopup(false)}>Close</button>

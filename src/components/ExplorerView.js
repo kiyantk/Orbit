@@ -14,7 +14,7 @@ const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
 const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
-const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated, disableAddMode, scrollPosition, setScrollPosition, actionPanelType, resetFilters }) => {
+const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated, disableAddMode, scrollPosition, setScrollPosition, actionPanelType, resetFilters, itemDeleted }) => {
   const [totalCount, setTotalCount] = useState(null);
   const loadingPages = useRef(new Set());
   const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
@@ -24,6 +24,8 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const [, forceUpdate] = useState(0); // trigger re-render when itemsRef changes
   const [addModeSelected, setAddModeSelected] = useState(new Set());
   const [addMode, setAddMode]  = useState(filters?.addMode === true);
+  const [removeModeSelected, setRemoveModeSelected] = useState(new Set());
+  const [removeMode, setRemoveMode] = useState(false);
   const [contextMenu, setContextMenu] = useState(null);
   const [tags, setTags] = useState([]);
   const [itemToReveal, setItemToReveal] = useState(null);
@@ -216,29 +218,38 @@ useEffect(() => {
 }, [filters]);
 
 useEffect(() => {
-  const handleItemRemoved = ({ id }) => {
-    // 1️⃣ Remove from refs
-    const index = idToIndex.current.get(id);
-    if (index != null) {
-      delete itemsRef.current[index];
-      idToIndex.current.delete(id);
-    }
+  setRemoveMode(filters?.removeMode === true);
+  if (filters?.removeMode !== true) {
+    setRemoveModeSelected(new Set());
+  }
+}, [filters]);
 
-    // // 2️⃣ Reset paging state
-    // itemsRef.current = {};
-    // idToIndex.current = new Map();
-    // loadingPages.current.clear();
+useEffect(() => {
+const handleItemRemoved = ({ id }) => {
+  const index = idToIndex.current.get(id);
+  if (index != null) {
+    // Remove the item
+    delete itemsRef.current[index];
+    idToIndex.current.delete(id);
 
-    // // 3️⃣ Refresh counts + first page
-    // setTotalCount(null);
-    fetchTotalCount();
-    fetchPageForIndex(0, true);
+    // Decrement totalCount to reflect removal
+    setTotalCount((prev) => (prev ? prev - 1 : prev));
 
-    // 4️⃣ Clear selection if needed
+    // Rebuild idToIndex mapping for remaining items
+    const newIdToIndex = new Map();
+    Object.entries(itemsRef.current).forEach(([idx, item]) => {
+      newIdToIndex.set(item.id, Number(idx));
+    });
+    idToIndex.current = newIdToIndex;
+
+    // Clear selection if needed
     if (selectedItem?.id === id) {
       setSelectedItem(null);
     }
-  };
+
+    itemDeleted();
+  }
+};
 
   window.electron.ipcRenderer.on("item-removed", handleItemRemoved);
 
@@ -429,18 +440,22 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
   return (
     <div style={{ ...style, padding: 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
       className={
-  addMode && addModeSelected.has(item.id)
-    ? "thumb-selected-addmode"
-    : selectedItem && item.id === selectedItem.id
-    ? "thumb-selected"
-    : "thumb-item"
-}
+        addMode && addModeSelected.has(item.id)
+          ? "thumb-selected-addmode"          // highlighted in Add Mode
+          : removeMode && removeModeSelected.has(item.id)
+          ? "thumb-selected-removemode"       // highlighted in Remove Mode
+          : selectedItem && item.id === selectedItem.id
+          ? "thumb-selected"                  // normal selected
+          : "thumb-item"                      // default thumbnail
+      }
 
       onClick={(e) => {
   if (!folderAvailable) return;
 
   if (addMode) {
     handleAddModeClick(item);
+  } else if (removeMode) {
+    handleRemoveModeClick(item);
   } else {
     handleClick(e, item);
   }
@@ -505,22 +520,22 @@ onContextMenu={(e) => {
 
   useEffect(() => {
     if (!gridRef || !gridRef.current || totalCount == null) return;
-  
+
     const index = Math.min(anchorIndexRef.current, totalCount - 1);
     const rowIndex = Math.floor(index / columnCount);
     const columnIndex = index % columnCount;
-  
+
     isRestoringScrollRef.current = true;
-  
+
     requestAnimationFrame(() => {
       if (!gridRef.current) return; // <-- check again
-    
+
       gridRef.current.scrollToItem({
         rowIndex,
         columnIndex,
         align: "start",
       });
-    
+
       requestAnimationFrame(() => {
         isRestoringScrollRef.current = false;
       });
@@ -587,6 +602,28 @@ onContextMenu={(e) => {
     return () => { cancelled = true; };
   }, [itemToReveal, containerWidth, scale, currentSettings]);
 
+  const handleRemoveItem = async (itemId) => {
+    try {
+      await window.electron.ipcRenderer.invoke(
+        "remove-item-from-index",
+        itemId
+      );
+    } catch (err) {
+      console.error("Failed to remove item:", err);
+    }
+  }
+
+  const handleRemoveModeClick = (item) => {
+    setRemoveModeSelected((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(item.id)) {
+        newSet.delete(item.id);
+      } else {
+        newSet.add(item.id);
+      }
+      return newSet;
+    });
+  };
 
   // If we know there are no files, show settings hint
   if (totalCount === 0 && filters.length === 0) {
@@ -662,6 +699,67 @@ onContextMenu={(e) => {
           )}
         </InfiniteLoader>
       </div>
+      {removeMode && (
+  <div
+    style={{
+      position: "fixed",
+      bottom: 40,
+      right: 20,
+      padding: "10px 20px",
+      backgroundColor: "#15131a",
+      color: "white",
+      border: "1px solid #484050",
+      borderRadius: 6,
+      zIndex: 1000,
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+    }}
+  >
+    <span>Remove Mode Enabled</span>
+
+    <button
+      style={{
+        padding: "6px 12px",
+        backgroundColor: "#484050",
+        border: "none",
+        color: "white",
+        borderRadius: 4,
+        cursor: "pointer",
+      }}
+      onClick={async () => {
+        // Remove all selected items
+        for (const id of removeModeSelected) {
+          await handleRemoveItem(id);
+        }
+        setRemoveMode(false);
+        setRemoveModeSelected(new Set());
+      }}
+    >
+      Remove Selected ({removeModeSelected.size})
+    </button>
+
+    <button
+      style={{
+        padding: "6px 12px",
+        backgroundColor: "#484050",
+        border: "none",
+        color: "white",
+        borderRadius: 4,
+        cursor: "pointer",
+        fontWeight: "bold",
+      }}
+      onClick={() => {
+        setRemoveMode(false);
+        setRemoveModeSelected(new Set());
+      }}
+    >
+      <FontAwesomeIcon icon={faXmark} />
+    </button>
+  </div>
+)}
+
 {addMode && (
   <div
     style={{
@@ -733,6 +831,7 @@ onContextMenu={(e) => {
     item={contextMenu.item}
     onClose={() => setContextMenu(null)}
     revealFromContextMenu={revealFromContextMenu}
+    onRemoveItem={handleRemoveItem}
   />
 )}
 

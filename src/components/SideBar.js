@@ -10,11 +10,11 @@ import {
   faLocationDot,
   faMagnifyingGlass,
   faMap,
+  faPanorama,
   faPhotoFilm,
   faShuffle,
   faSliders,
   faSort,
-  faTag,
   faTags,
 } from "@fortawesome/free-solid-svg-icons";
 
@@ -39,23 +39,27 @@ const SideBar = ({
       <button className={`side-bar-btn ${activeView === "map" ? "side-bar-active" : ""}`} onClick={() => switchView("map")}>
         <FontAwesomeIcon icon={faMap}/>
         <span className="tooltip">Map</span>
-        </button>
+      </button>
       <button className={`side-bar-btn ${activeView === "stats" ? "side-bar-active" : ""}`} onClick={() => switchView("stats")}>
         <FontAwesomeIcon icon={faChartSimple}/>
         <span className="tooltip">Stats</span>
-        </button>
-      <button className={`side-bar-btn ${activeView === "tags" ? "side-bar-active" : ""}`} onClick={() => switchView("tags")}>
-        <FontAwesomeIcon icon={faTags}/>
-        <span className="tooltip">Tags</span>
-        </button>
+      </button>
       <button className={`side-bar-btn ${activeView === "shuffle" ? "side-bar-active" : ""}`} onClick={() => switchView("shuffle")}>
         <FontAwesomeIcon icon={faShuffle}/>
         <span className="tooltip">Shuffle</span>
-        </button>
+      </button>
+      <button className={`side-bar-btn ${activeView === "memories" ? "side-bar-active" : ""}`} onClick={() => switchView("memories")}>
+        <FontAwesomeIcon icon={faPanorama}/>
+        <span className="tooltip">Memories</span>
+      </button>
+      <button className={`side-bar-btn ${activeView === "tags" ? "side-bar-active" : ""}`} onClick={() => switchView("tags")}>
+        <FontAwesomeIcon icon={faTags}/>
+        <span className="tooltip">Tags</span>
+      </button>
       <button className={`side-bar-btn ${activeView === "settings" ? "side-bar-active" : ""}`} onClick={() => switchView("settings")}>
         <FontAwesomeIcon icon={faGear}/>
         <span className="tooltip">Settings</span>
-        </button>
+      </button>
       {activeView === "explore" && (
         <div className="side-bar-bottom">
           <button className={`side-bar-btn ${actionPanelType === "sort" ? 'side-bar-active' : '' }`} onClick={() => openActionPanel("sort")}>

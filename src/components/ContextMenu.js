@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowRight } from "@fortawesome/free-solid-svg-icons";
 
-const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu }) => {
+const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem }) => {
   const menuRef = useRef(null);
   const [showTags, setShowTags] = useState(false);
   const [tags, setTags] = useState([]);
@@ -240,18 +240,10 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu }) => {
               <button
                 className="settings-save-btn"
                 style={{ backgroundColor: "#ff6b6b" }}
-                onClick={async () => {
-                  try {
-                    await window.electron.ipcRenderer.invoke(
-                      "remove-item-from-index",
-                      item.id
-                    );
-                  } catch (err) {
-                    console.error("Failed to remove item:", err);
-                  } finally {
-                    setShowRemoveConfirm(false);
-                    onClose();
-                  }
+                onClick={() => {
+                  onRemoveItem(item.id)
+                  setShowRemoveConfirm(false)
+                  onClose()
                 }}
               >
                 Yes

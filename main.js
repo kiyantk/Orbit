@@ -412,13 +412,13 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     if (filters.dateFrom) {
       const d = new Date(filters.dateFrom);
       d.setHours(0, 0, 0, 0); // midnight local
-      whereClauses.push("create_date >= ?");
+      whereClauses.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) >= ?");
       params.push(Math.floor(d.getTime() / 1000));
     }
     if (filters.dateTo) {
       const d = new Date(filters.dateTo);
       d.setHours(23, 59, 59, 999); // end of day
-      whereClauses.push("create_date <= ?");
+      whereClauses.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) <= ?");
       params.push(Math.floor(d.getTime() / 1000));
     }
     if (filters.dateExact) {
@@ -620,13 +620,13 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
       if (filters.dateFrom) {
         const d = new Date(filters.dateFrom);
         d.setHours(0, 0, 0, 0); // midnight local
-        conditions.push("create_date >= ?");
+        conditions.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) >= ?");
         params.push(Math.floor(d.getTime() / 1000));
       }
       if (filters.dateTo) {
         const d = new Date(filters.dateTo);
         d.setHours(23, 59, 59, 999); // end of day
-        conditions.push("create_date <= ?");
+        conditions.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) <= ?");
         params.push(Math.floor(d.getTime() / 1000));
       }
       if (filters.dateExact) {
@@ -1080,7 +1080,7 @@ async function extractMetadata(filePath) {
     ".heic",
     ".webp",
   ];
-  const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv"];
+  const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".3gp"];
 
   if (imageExtensions.includes(ext)) metadata.file_type = "image";
   else if (videoExtensions.includes(ext)) metadata.file_type = "video";

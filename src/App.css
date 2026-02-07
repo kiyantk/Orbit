@@ -163,7 +163,7 @@ body {
   gap: 10px;
   -webkit-user-select: none;
   user-select: none;
-  grid-template-rows: 50px 50px 50px 50px 50px 50px;
+  grid-template-rows: 50px 50px 50px 50px 50px 50px 50px 50px;
   border-right: 1px solid #484050;
   z-index: 999;
 }
@@ -1143,6 +1143,11 @@ select:focus {
 .thumb-selected-addmode {
   background-color: rgba(255, 255, 0, 0.268);
   border: 1px solid #0f0f12;
+}
+
+.thumb-selected-removemode {
+  background-color: rgba(255, 0, 0, 0.268);
+  border: 1px solid #af3a3a;
 }
 
 

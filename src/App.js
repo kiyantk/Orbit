@@ -186,6 +186,10 @@ const App = () => {
       setActionPanelKey(actionPanelKey + 1)
     }
 
+    const handleItemDeleted = () => {
+      setActionPanelKey(actionPanelKey + 1)
+    }
+
   return (
     <div className="App">
       <div className="App-main">
@@ -206,6 +210,10 @@ const App = () => {
               folderStatuses={folderStatuses}
               checkStatusses={checkFolderStatuses}
               newTab={selectedSettingsTab}
+              enterRemoveMode={() => {
+                setFilters({ ...filters, removeMode: true });
+                setActiveView("explore");
+              }}
             />
           )}
           {activeView === "stats" && (
@@ -245,6 +253,7 @@ const App = () => {
                 setScrollPosition={setExplorerScroll}
                 actionPanelType={actionPanelType}
                 resetFilters={resetFilters}
+                itemDeleted={handleItemDeleted}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (
