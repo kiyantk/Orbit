@@ -11,11 +11,14 @@ import {
   faMagnifyingGlass,
   faMap,
   faPanorama,
+  faPenToSquare,
   faPhotoFilm,
+  faPlus,
   faShuffle,
   faSliders,
   faSort,
   faTags,
+  faTrash,
 } from "@fortawesome/free-solid-svg-icons";
 
 const SideBar = ({
@@ -24,7 +27,11 @@ const SideBar = ({
   openActionPanel,
   actionPanelType,
   mapViewType,
-  switchMapViewType
+  switchMapViewType,
+  switchMemoryMode,
+  memoryMode,
+  showTagPopup,
+  setShowTagPopup
 }) => {
   const switchView = (type) => {
     activeViewChanged(type);
@@ -105,6 +112,26 @@ const SideBar = ({
           <button className={`side-bar-btn ${mapViewType === "countries" ? 'side-bar-active' : '' }`} onClick={() => switchMapViewType("countries")}>
             <FontAwesomeIcon icon={faGlobe} />
             <span className="tooltip">Country Mode</span>
+          </button>
+        </div>
+      )}
+      {activeView === "memories" && (
+        <div className="side-bar-bottom">
+          <button className={`side-bar-btn ${memoryMode === "new" ? 'side-bar-active' : '' }`} onClick={() => switchMemoryMode("new")}>
+            <FontAwesomeIcon icon={faPlus} />
+            <span className="tooltip">New Memory</span>
+          </button>
+          <button className={`side-bar-btn ${memoryMode === "edit" ? 'side-bar-active' : '' }`} onClick={() => switchMemoryMode(memoryMode !== "edit" ? "edit" : null)}>
+            <FontAwesomeIcon icon={faPenToSquare} />
+            <span className="tooltip">Edit a Memory</span>
+          </button>
+        </div>
+      )}
+      {activeView === "tags" && (
+        <div className="side-bar-bottom">
+          <button className={`side-bar-btn ${showTagPopup.type === "add" ? 'side-bar-active' : '' }`} onClick={() => setShowTagPopup({value: true, type: "add"})}>
+            <FontAwesomeIcon icon={faPlus} />
+            <span className="tooltip">New Tag</span>
           </button>
         </div>
       )}

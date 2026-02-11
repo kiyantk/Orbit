@@ -6,7 +6,7 @@ import "./ExplorerView.css"; // optional, add styles you like
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowRight, faVideo, faXmark } from "@fortawesome/free-solid-svg-icons";
 import ContextMenu from "./ContextMenu";
-import { SnackbarProvider, closeSnackbar, enqueueSnackbar } from "notistack";
+import { SnackbarProvider, enqueueSnackbar } from "notistack";
 
 const BASE_COLUMN_WIDTH = 130; 
 const BASE_ROW_HEIGHT = 130;
@@ -14,7 +14,8 @@ const GUTTER = 10;
 const PAGE_SIZE = 200; // fetch 200 items per page
 const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
-const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated, disableAddMode, scrollPosition, setScrollPosition, actionPanelType, resetFilters, itemDeleted }) => {
+const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated,
+  scrollPosition, setScrollPosition, actionPanelType, resetFilters, itemDeleted, explorerMode, setExplorerMode }) => {
   const [totalCount, setTotalCount] = useState(null);
   const loadingPages = useRef(new Set());
   const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
@@ -23,9 +24,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const idToIndex = useRef(new Map());
   const [, forceUpdate] = useState(0); // trigger re-render when itemsRef changes
   const [addModeSelected, setAddModeSelected] = useState(new Set());
-  const [addMode, setAddMode]  = useState(filters?.addMode === true);
   const [removeModeSelected, setRemoveModeSelected] = useState(new Set());
-  const [removeMode, setRemoveMode] = useState(false);
   const [contextMenu, setContextMenu] = useState(null);
   const [tags, setTags] = useState([]);
   const [itemToReveal, setItemToReveal] = useState(null);
@@ -215,13 +214,6 @@ useEffect(() => {
 
 useEffect(() => {
   setScrollPosition(0)
-}, [filters]);
-
-useEffect(() => {
-  setRemoveMode(filters?.removeMode === true);
-  if (filters?.removeMode !== true) {
-    setRemoveModeSelected(new Set());
-  }
 }, [filters]);
 
 useEffect(() => {
@@ -440,9 +432,9 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
   return (
     <div style={{ ...style, padding: 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
       className={
-        addMode && addModeSelected.has(item.id)
+        explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory") && addModeSelected.has(item.id)
           ? "thumb-selected-addmode"          // highlighted in Add Mode
-          : removeMode && removeModeSelected.has(item.id)
+          : explorerMode && explorerMode.enabled && (explorerMode.type === "remove") && removeModeSelected.has(item.id)
           ? "thumb-selected-removemode"       // highlighted in Remove Mode
           : selectedItem && item.id === selectedItem.id
           ? "thumb-selected"                  // normal selected
@@ -452,9 +444,9 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
       onClick={(e) => {
   if (!folderAvailable) return;
 
-  if (addMode) {
+  if (explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory")) {
     handleAddModeClick(item);
-  } else if (removeMode) {
+  } else if (explorerMode && explorerMode.enabled && (explorerMode.type === "remove")) {
     handleRemoveModeClick(item);
   } else {
     handleClick(e, item);
@@ -699,7 +691,7 @@ onContextMenu={(e) => {
           )}
         </InfiniteLoader>
       </div>
-      {removeMode && (
+      {explorerMode && explorerMode.enabled && (explorerMode.type === "remove") && (
   <div
     style={{
       position: "fixed",
@@ -733,7 +725,7 @@ onContextMenu={(e) => {
         for (const id of removeModeSelected) {
           await handleRemoveItem(id);
         }
-        setRemoveMode(false);
+        setExplorerMode({enabled: false, value: null, type: ""})
         setRemoveModeSelected(new Set());
       }}
     >
@@ -751,7 +743,7 @@ onContextMenu={(e) => {
         fontWeight: "bold",
       }}
       onClick={() => {
-        setRemoveMode(false);
+        setExplorerMode({enabled: false, value: null, type: ""})
         setRemoveModeSelected(new Set());
       }}
     >
@@ -760,13 +752,13 @@ onContextMenu={(e) => {
   </div>
 )}
 
-{addMode && (
+{explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory") && (
   <div
     style={{
       position: "fixed",
       bottom: 40,
       right: 20,
-      padding: "10px 20px",
+      padding: "10px 15px",
       backgroundColor: "#15131a",
       color: "white",
       border: "1px solid #484050",
@@ -779,7 +771,7 @@ onContextMenu={(e) => {
     }}
   >
     {/* Tagging Mode Text */}
-    <span>Tagging Mode Enabled</span>
+    <span style={{lineHeight: "1"}}>Add Mode active</span>
 
     {/* Attach Tag Button */}
     <button
@@ -792,14 +784,21 @@ onContextMenu={(e) => {
         cursor: "pointer",
       }}
       onClick={() => {
-        setAddMode(false)
-        window.electron.ipcRenderer.invoke("tag-selected-items", {
-          tagId: filters.tagId,
-          mediaIds: Array.from(addModeSelected),
-        });
+        setExplorerMode({enabled: false, value: null, type: ""})
+        if(explorerMode.type === "tag") {
+          window.electron.ipcRenderer.invoke("tag-selected-items", {
+            tagId: explorerMode.value,
+            mediaIds: Array.from(addModeSelected),
+          });
+        } else if(explorerMode.type === "memory") {
+          window.electron.ipcRenderer.invoke("add-items-to-memory", {
+            memoryId: explorerMode.value,
+            mediaIds: Array.from(addModeSelected),
+          });
+        }
       }}
     >
-      Attach Tag ({addModeSelected.size})
+      Add to {explorerMode.type} ({addModeSelected.size})
     </button>
 
     {/* Close Button */}
@@ -815,8 +814,7 @@ onContextMenu={(e) => {
       }}
       onClick={() => {
         // Close tagging mode
-        setAddMode(false)
-        disableAddMode()
+        setExplorerMode({enabled: false, value: null, type: ""})
       }}
     >
       <FontAwesomeIcon icon={faXmark} />

@@ -16,9 +16,8 @@ const getContrastColor = (hex) => {
   return luminance > 150 ? "#000" : "#fff"; // light bg = black text, dark bg = white text
 };
 
-const TagsView = ({onViewTag, onAddMedia}) => {
+const TagsView = ({onViewTag, onAddMedia, showPopup, setShowPopup}) => {
   const [tags, setTags] = useState([]);
-  const [showPopup, setShowPopup] = useState(false);
   const [editingTag, setEditingTag] = useState(null); // track if editing
   const [tagData, setTagData] = useState({ name: "", description: "", color: "#d3d3d3" });
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -32,6 +31,14 @@ const TagsView = ({onViewTag, onAddMedia}) => {
   useEffect(() => {
     window.electron.ipcRenderer.invoke("tags:get-all").then(setTags);
   }, []);
+
+  useEffect(() => {
+    if(!showPopup) return
+    if(showPopup.type === "add") {
+      setEditingTag(null);
+      setNewTag({ name: "", description: "", color: "#d3d3d3" });
+    }
+  }, [showPopup]);
   
 const handleSaveTag = async () => {
   if (!newTag.name.trim()) return;
@@ -51,7 +58,7 @@ const handleSaveTag = async () => {
   // reset state
   setNewTag({ name: "", description: "", color: "#d3d3d3" });
   setEditingTag(null);
-  setShowPopup(false);
+  setShowPopup({value: false, type: ""});
 };
 
   
@@ -69,21 +76,11 @@ const handleSaveTag = async () => {
       description: tag.description,
       color: tag.color
     });
-    setShowPopup(true);        // open the modal
+    setShowPopup({value: true, type: "edit"});        // open the modal
   };
 
   return (
     <div className="tags-view">
-      <div className="tags-header">
-        <h2 className="tags-title"><FontAwesomeIcon icon={faTags} /> Tags</h2>
-        <button
-          onClick={() => { setEditingTag(null); setShowPopup(true); }}
-          className="btn btn-primary"
-        >
-          New Tag
-        </button>
-      </div>
-
       {/* Table */}
       <table className="tags-table">
         <thead>
@@ -150,7 +147,7 @@ const handleSaveTag = async () => {
       </table>
 
       {/* Create/Edit Popup */}
-      {showPopup && (
+      {showPopup && showPopup.value && (
         <div className="modal-overlay">
           <div className="modal">
             <h3 className="modal-title">

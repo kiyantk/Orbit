@@ -262,6 +262,17 @@ function initDatabase() {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS memories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      color TEXT,
+      media_ids TEXT DEFAULT '[]',
+      created INTEGER
+    )
+  `);
+
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_files_create_date ON files(create_date);
     CREATE INDEX IF NOT EXISTS idx_files_filename ON files(filename);
     CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
@@ -1719,6 +1730,488 @@ ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
   } catch (err) {
     console.error('get-index-of-item error:', err);
     return null;
+  }
+});
+
+// Returns unique years from create_date
+ipcMain.handle("fetch-years", async () => {
+  initDatabase();
+
+  // 1. Years based on effective date
+  const years = db.prepare(`
+    SELECT DISTINCT
+      strftime(
+        '%Y',
+        datetime(
+          CASE
+            WHEN create_date IS NOT NULL THEN create_date
+            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+            ELSE COALESCE(created, modified)
+          END,
+          'unixepoch'
+        )
+      ) AS year
+    FROM files
+    WHERE
+      create_date IS NOT NULL
+      OR created IS NOT NULL
+      OR modified IS NOT NULL
+    ORDER BY year DESC
+  `).all();
+
+  const results = years.map((y) => {
+    // 2. Thumbnails: ONLY real photos
+    const thumbnails = db.prepare(`
+      SELECT id, thumbnail_path
+      FROM files
+      WHERE file_type = 'image'
+        AND thumbnail_path IS NOT NULL
+        AND create_date IS NOT NULL
+        AND strftime('%Y', datetime(create_date, 'unixepoch')) = ?
+      ORDER BY RANDOM()
+      LIMIT 20
+    `).all(y.year);
+
+    // 3. Total: everything in that year (fallback-aware)
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM files
+      WHERE strftime(
+        '%Y',
+        datetime(
+          CASE
+            WHEN create_date IS NOT NULL THEN create_date
+            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+            ELSE COALESCE(created, modified)
+          END,
+          'unixepoch'
+        )
+      ) = ?
+    `).get(y.year).count;
+
+    return {
+      year: y.year,
+      thumbnails,
+      total,
+    };
+  });
+
+  return results;
+});
+
+// Returns unique months with years
+ipcMain.handle("fetch-months", async () => {
+  initDatabase();
+
+  // 1. Year/months from effective date
+  const months = db.prepare(`
+    SELECT DISTINCT
+      strftime(
+        '%Y',
+        datetime(
+          CASE
+            WHEN create_date IS NOT NULL THEN create_date
+            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+            ELSE COALESCE(created, modified)
+          END,
+          'unixepoch'
+        )
+      ) AS year,
+      strftime(
+        '%m',
+        datetime(
+          CASE
+            WHEN create_date IS NOT NULL THEN create_date
+            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+            ELSE COALESCE(created, modified)
+          END,
+          'unixepoch'
+        )
+      ) AS month
+    FROM files
+    WHERE
+      create_date IS NOT NULL
+      OR created IS NOT NULL
+      OR modified IS NOT NULL
+    ORDER BY year DESC, month DESC
+  `).all();
+
+  const results = months.map((m) => {
+    // 2. Thumbnails: only files with create_date
+    const thumbnails = db.prepare(`
+      SELECT id, thumbnail_path
+      FROM files
+      WHERE file_type = 'image'
+        AND thumbnail_path IS NOT NULL
+        AND create_date IS NOT NULL
+        AND strftime('%Y', datetime(create_date, 'unixepoch')) = ?
+        AND strftime('%m', datetime(create_date, 'unixepoch')) = ?
+      ORDER BY RANDOM()
+      LIMIT 20
+    `).all(m.year, m.month);
+
+    // 3. Total: fallback-aware
+    const total = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM files
+      WHERE
+        strftime(
+          '%Y',
+          datetime(
+            CASE
+              WHEN create_date IS NOT NULL THEN create_date
+              WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+              ELSE COALESCE(created, modified)
+            END,
+            'unixepoch'
+          )
+        ) = ?
+        AND
+        strftime(
+          '%m',
+          datetime(
+            CASE
+              WHEN create_date IS NOT NULL THEN create_date
+              WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+              ELSE COALESCE(created, modified)
+            END,
+            'unixepoch'
+          )
+        ) = ?
+    `).get(m.year, m.month).count;
+
+    return {
+      year: m.year,
+      month: m.month,
+      thumbnails,
+      total,
+    };
+  });
+
+  return results;
+});
+
+ipcMain.handle("fetch-trips", async (_, options = {}) => {
+  initDatabase();
+
+  const home = db.prepare(`
+    SELECT country
+    FROM files
+    WHERE country IS NOT NULL
+    GROUP BY country
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+  `).get()?.country;
+
+  if (!home) return [];
+
+  const rows = db.prepare(`
+    SELECT
+      id,
+      country,
+      thumbnail_path,
+      datetime(
+        CASE
+          WHEN create_date IS NOT NULL THEN create_date
+          WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+          ELSE COALESCE(created, modified)
+        END,
+        'unixepoch'
+      ) AS date
+    FROM files
+    WHERE country IS NOT NULL
+      AND country != ?
+    ORDER BY date ASC
+  `).all(home);
+
+  const MAX_GAP_DAYS = options.maxGapDays ?? 4;
+  const MIN_TRIP_PHOTOS = options.minTripPhotos ?? 500; 
+  const MIN_COUNTRY_PERCENT = options.minCountryPercent ?? 0.20 // countries contributing >=20% of trip photos; 
+  const MIN_MAIN_COUNTRIES_PERCENT = options.minMainCountriesPercent ?? 0.50; 
+
+  const trips = [];
+  let current = null;
+
+  const daysBetween = (a, b) =>
+    (new Date(b) - new Date(a)) / (1000 * 60 * 60 * 24);
+
+  for (const row of rows) {
+    if (!current || daysBetween(current.end, row.date) > MAX_GAP_DAYS) {
+      if (current) trips.push(current);
+      current = { start: row.date, end: row.date, photos: [], countryCounts: {} };
+    }
+
+    current.end = row.date;
+    current.photos.push(row);
+    current.countryCounts[row.country] = (current.countryCounts[row.country] || 0) + 1;
+  }
+  if (current) trips.push(current);
+
+  const finalTrips = trips
+    .filter((t) => t.photos.length >= MIN_TRIP_PHOTOS)
+    .map((t) => {
+      const year = new Date(t.start).getFullYear();
+
+      // compute % per country
+      const totalPhotos = t.photos.length;
+      const countryPercent = Object.fromEntries(
+        Object.entries(t.countryCounts).map(([code, count]) => [code, count / totalPhotos])
+      );
+
+      // include only countries that are main contributors
+      const mainCountries = Object.entries(countryPercent)
+        .filter(([_, pct]) => pct >= MIN_COUNTRY_PERCENT)
+        .map(([code]) => code);
+
+      // ignore trips where main countries contribute too little
+      const mainTotalPercent = mainCountries.reduce((sum, c) => sum + countryPercent[c], 0);
+      if (mainTotalPercent < MIN_MAIN_COUNTRIES_PERCENT) return null;
+
+      return {
+        id: `${t.start}-${t.end}`,
+        title: mainCountries.join(" – ") + ` ${year}`,
+        start: t.start,
+        end: t.end,
+        total: totalPhotos,
+        countries: mainCountries,
+        thumbnails: t.photos
+          .filter((p) => p.thumbnail_path)
+          .sort(() => 0.5 - Math.random())
+          .slice(0, 20),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(b.start) - new Date(a.start)); // most recent first
+
+  return finalTrips;
+});
+
+ipcMain.handle(
+  "add-memory",
+  async (
+    event,
+    { title, description, color, startDate, endDate, idFrom, idTo }
+  ) => {
+    try {
+      initDatabase();
+
+      let mediaIds = [];
+
+      /**
+       * DATE RANGE (takes priority)
+       */
+      if (startDate || endDate) {
+        const where = [];
+        const params = [];
+
+        if (startDate) {
+          where.push(`
+            COALESCE(
+              create_date,
+              CASE
+                WHEN created <= modified THEN created
+                ELSE modified
+              END
+            ) >= ?
+          `);
+          params.push(Math.floor(new Date(startDate).getTime() / 1000));
+        }
+
+        if (endDate) {
+          where.push(`
+            COALESCE(
+              create_date,
+              CASE
+                WHEN created <= modified THEN created
+                ELSE modified
+              END
+            ) <= ?
+          `);
+          params.push(Math.floor(new Date(endDate).getTime() / 1000));
+        }
+
+        const rows = db
+          .prepare(`SELECT id FROM files WHERE ${where.join(" AND ")}`)
+          .all(...params);
+
+        mediaIds = rows.map(r => r.id);
+      }
+
+      /**
+       * ID RANGE (fallback if no dates)
+       */
+      else if (idFrom != null && idTo != null) {
+        const rows = db.prepare(`
+          SELECT id
+          FROM files
+          WHERE id BETWEEN ? AND ?
+          ORDER BY id
+        `).all(Number(idFrom), Number(idTo));
+
+        mediaIds = rows.map(r => r.id);
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+
+      const info = db.prepare(`
+        INSERT INTO memories (title, description, color, media_ids, created)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        title,
+        description,
+        color,
+        JSON.stringify(mediaIds),
+        now
+      );
+
+      return {
+        success: true,
+        id: info.lastInsertRowid,
+        mediaIds
+      };
+    } catch (err) {
+      console.error("add-memory error:", err);
+      return { success: false, error: err.message };
+    }
+  }
+);
+
+ipcMain.handle("fetch-memories", async () => {
+  try {
+    initDatabase();
+
+    // 1. Get all memories
+    const memories = db.prepare(`
+      SELECT *
+      FROM memories
+      ORDER BY created DESC
+    `).all();
+
+    // 2. For each memory, fetch thumbnails from files
+    const results = memories.map((m) => {
+      let mediaIds = [];
+      try {
+        mediaIds = JSON.parse(m.media_ids || "[]");
+      } catch (err) {
+        console.error("Invalid media_ids JSON for memory:", m.id, err);
+      }
+
+      const thumbnails = mediaIds.length
+        ? db.prepare(`
+            SELECT id, thumbnail_path
+            FROM files
+            WHERE id IN (${mediaIds.map(() => "?").join(",")})
+              AND file_type = 'image'
+              AND thumbnail_path IS NOT NULL
+            ORDER BY RANDOM()
+            LIMIT 20
+          `).all(...mediaIds)
+        : [];
+
+      return {
+        ...m,
+        thumbnails,
+      };
+    });
+
+    return results;
+  } catch (err) {
+    console.error("fetch-memories error:", err);
+    return [];
+  }
+});
+
+ipcMain.handle("update-memory", async (event, { id, title, description, color }) => {
+  try {
+    initDatabase();
+
+    if (!id) {
+      throw new Error("Missing memory id");
+    }
+
+    const stmt = db.prepare(`
+      UPDATE memories
+      SET
+        title = ?,
+        description = ?,
+        color = ?
+      WHERE id = ?
+    `);
+
+    const info = stmt.run(
+      title,
+      description,
+      color,
+      id
+    );
+
+    if (info.changes === 0) {
+      throw new Error(`Memory ${id} not found`);
+    }
+
+    return { success: true, id };
+  } catch (err) {
+    console.error("update-memory error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("delete-memory", async (event, { id }) => {
+  try {
+    initDatabase();
+
+    if (!id) {
+      throw new Error("Missing memory id");
+    }
+
+    const stmt = db.prepare(`
+      DELETE FROM memories
+      WHERE id = ?
+    `);
+
+    const info = stmt.run(id);
+
+    if (info.changes === 0) {
+      throw new Error(`Memory ${id} not found`);
+    }
+
+    return { success: true, id };
+  } catch (err) {
+    console.error("delete-memory error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("add-items-to-memory", async (event, { memoryId, mediaIds }) => {
+  try {
+    initDatabase();
+
+    if (!memoryId || !Array.isArray(mediaIds)) {
+      throw new Error("Invalid parameters: memoryId and mediaIds are required.");
+    }
+
+    // Fetch the existing media_ids for the tag
+    const memoryRow = db.prepare("SELECT media_ids FROM memories WHERE id = ?").get(memoryId);
+    if (!memoryRow) throw new Error(`Memory with id ${memoryId} not found`);
+
+    let existingIds = [];
+    try {
+      existingIds = JSON.parse(memoryRow.media_ids || "[]");
+    } catch {
+      existingIds = [];
+    }
+
+    // Merge and deduplicate IDs
+    const updatedIds = Array.from(new Set([...existingIds, ...mediaIds]));
+
+    // Update the tag + set last_used timestamp
+    db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?")
+      .run(JSON.stringify(updatedIds), memoryId);
+
+    return { success: true, updatedIds };
+  } catch (err) {
+    console.error("add-items-to-memory:", err);
+    return { success: false, error: err.message };
   }
 });
 

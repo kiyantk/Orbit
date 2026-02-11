@@ -12,6 +12,7 @@ import StatsView from "./components/StatsView";
 import MapView from "./components/MapView";
 import TagsView from "./components/TagsView";
 import ShuffleView from "./components/ShuffleView";
+import MemoriesView from "./components/MemoriesView";
 
 const App = () => {
   const [settings, setSettings] = useState(null);
@@ -32,6 +33,9 @@ const App = () => {
   const [previewPanelKey, setPreviewPanelKey] = useState(0);
   const [actionPanelKey, setActionPanelKey] = useState(0);
   const [mapViewType, setMapViewType] = useState("cluster");
+  const [memoryMode, setMemoryMode] = useState(null);
+  const [showTagPopup, setShowTagPopup] = useState({value: false, type: ""});
+  const [explorerMode, setExplorerMode] = useState({enabled: false, value: null, type: ""});
 
   const handleActionPanelApply = (data) => {
     if (actionPanelType === "filter" || actionPanelType === "sort" || actionPanelType === "search") {
@@ -201,6 +205,10 @@ const App = () => {
           actionPanelType={actionPanelType}
           mapViewType={mapViewType}
           switchMapViewType={setMapViewType}
+          switchMemoryMode={setMemoryMode}
+          memoryMode={memoryMode}
+          setShowTagPopup={setShowTagPopup}
+          showTagPopup={showTagPopup}
         />
         <div className="content">
           {activeView === "settings" && (
@@ -211,7 +219,7 @@ const App = () => {
               checkStatusses={checkFolderStatuses}
               newTab={selectedSettingsTab}
               enterRemoveMode={() => {
-                setFilters({ ...filters, removeMode: true });
+                setExplorerMode({enabled: true, value: null, type: "remove"})
                 setActiveView("explore");
               }}
             />
@@ -229,13 +237,24 @@ const App = () => {
                 setActiveView("explore");
               }}
               onAddMedia={(tag) => {
-                setFilters({ tagId: tag.id, addMode: true });
+                setExplorerMode({enabled: true, value: tag.id, type: "tag"})
+                // setFilters({ tagId: tag.id, addMode: true });
                 setActiveView("explore");
               }} 
+              showPopup={showTagPopup}
+              setShowPopup={setShowTagPopup}
             />
           )}
           {activeView === "shuffle" && (
             <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} />
+          )}
+          {activeView === "memories" && (
+            <MemoriesView switchMemoryMode={setMemoryMode} memoryMode={memoryMode}
+              onAddMedia={(memory) => {
+                setExplorerMode({enabled: true, value: memory.id, type: "memory"})
+                setActiveView("explore");
+              }} 
+            />
           )}
           {activeView === "explore" && (
             <div className="explorer-container">
@@ -254,6 +273,8 @@ const App = () => {
                 actionPanelType={actionPanelType}
                 resetFilters={resetFilters}
                 itemDeleted={handleItemDeleted}
+                explorerMode={explorerMode}
+                setExplorerMode={setExplorerMode}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (

@@ -619,7 +619,7 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   {tags.length > 0 && (
         <div className="metadata-row">
           <span className="metadata-label">Tags</span>
-          <span className="metadata-value">
+          <span className="metadata-value metadata-tags">
             {tags.length > 0 && tags.map(tag => (
               <span
                 key={tag.id}
