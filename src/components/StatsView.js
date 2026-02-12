@@ -81,11 +81,18 @@ const StatsView = ({ birthDate }) => {
       }, {});
     };
 
-    const perYearObj = groupBy(files, f => f.create_date ? new Date(f.create_date*1000).getFullYear() : null);
-    const perYear = Object.keys(perYearObj).sort((a,b) => a-b).map(year => ({ year, count: perYearObj[year] })).reverse();
+    const perYearObj = groupBy(files, f => {
+      const epoch = getReferenceEpoch(f);
+      return epoch ? new Date(epoch * 1000).getFullYear() : null;
+    });
+        const perYear = Object.keys(perYearObj).sort((a,b) => a-b).map(year => ({ year, count: perYearObj[year] })).reverse();
 
-    const perMonthObj = groupBy(files, f => f.create_date ? `${new Date(f.create_date*1000).getFullYear()}-${String(new Date(f.create_date*1000).getMonth()+1).padStart(2,'0')}` : null);
-    const perMonth = Object.keys(perMonthObj).sort().map(month => ({ month, count: perMonthObj[month] })).reverse();
+    const perMonthObj = groupBy(files, f => {
+      const epoch = getReferenceEpoch(f);
+      if (!epoch) return null;
+      const d = new Date(epoch * 1000);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    });    const perMonth = Object.keys(perMonthObj).sort().map(month => ({ month, count: perMonthObj[month] })).reverse();
 
     const ageCounts = [];
 
@@ -112,7 +119,14 @@ const StatsView = ({ birthDate }) => {
     }
     const perAge = Object.keys(ageCounts).map(a => ({ age: a, count: ageCounts[a] })).reverse();
 
-    const topDaysObj = groupBy(files, f => f.create_date ? new Date(f.create_date*1000).toISOString().split("T")[0] : null);
+    const topDaysObj = groupBy(files, f => {
+      const epoch = getReferenceEpoch(f);
+      if (!epoch) return null;
+      const d = new Date(epoch * 1000);
+      return d.getFullYear() + "-" +
+        String(d.getMonth() + 1).padStart(2, "0") + "-" +
+        String(d.getDate()).padStart(2, "0");
+    });
     const topDays = Object.keys(topDaysObj).map(day => ({ day, count: topDaysObj[day] })).sort((a,b) => b.count - a.count).slice(0,10);
 
     const byTypeObj = groupBy(files, f => capitalizeFirstLetter(f.file_type) || "Unknown");
@@ -192,18 +206,17 @@ const StatsView = ({ birthDate }) => {
     const calendarData = Object.values(
       files
         .filter(f => {
-          const date = new Date(f.create_date * 1000); // treat as local
-          const time = date.getTime();
+          const epoch = getReferenceEpoch(f);
+          if (!epoch) return false;
+          const time = new Date(epoch * 1000).getTime();
           return time >= calendarDate.start && time <= calendarDate.end;
         })
         .reduce((acc, f) => {
-          const date = new Date(f.create_date * 1000); // local date
-        
-          // Use local YYYY-MM-DD
-          const key = date.getFullYear() + "-" +
-                      String(date.getMonth() + 1).padStart(2, "0") + "-" +
-                      String(date.getDate()).padStart(2, "0");
-        
+          const epoch = getReferenceEpoch(f);
+          const d = new Date(epoch * 1000);
+          const key = d.getFullYear() + "-" +
+            String(d.getMonth() + 1).padStart(2, "0") + "-" +
+            String(d.getDate()).padStart(2, "0");
           if (!acc[key]) acc[key] = { date: key, count: 0 };
           acc[key].count++;
           return acc;

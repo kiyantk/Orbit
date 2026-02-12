@@ -250,10 +250,14 @@ const App = () => {
           )}
           {activeView === "memories" && (
             <MemoriesView switchMemoryMode={setMemoryMode} memoryMode={memoryMode}
+              onViewMemory={(ids) => {
+                setFilters({ ids });
+                setActiveView("explore");
+              }}
               onAddMedia={(memory) => {
                 setExplorerMode({enabled: true, value: memory.id, type: "memory"})
                 setActiveView("explore");
-              }} 
+              }}
             />
           )}
           {activeView === "explore" && (

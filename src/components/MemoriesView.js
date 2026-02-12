@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 import { SnackbarProvider, enqueueSnackbar } from "notistack";
 
-const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia }) => {
+const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }) => {
   const [selectedTab, setSelectedTab] = useState("Years");
   const [years, setYears] = useState([]);
   const [months, setMonths] = useState([]);
@@ -119,7 +119,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia }) => {
   const renderYearBoxes = () => (
     <div className="memories-grid">
       {years.map((y) => (
-        <div key={y.year} className="memory-box">
+        <div key={y.year} className="memory-box" onClick={() => {onViewMemory(y.ids)}}>
           <div className="memory-text">
             <div className="title">{y.year}</div>
             <div className="description">All media from {y.year}</div>
@@ -140,7 +140,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia }) => {
           year: "numeric",
         });
         return (
-          <div key={`${m.year}-${m.month}`} className="memory-box">
+          <div key={`${m.year}-${m.month}`} className="memory-box" onClick={() => {onViewMemory(m.ids)}}>
             <div className="memory-text">
               <div className="title">{label}</div>
               <div className="description">All media from {label}</div>
@@ -156,7 +156,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia }) => {
   const renderVacationBoxes = () => (
     <div className="memories-grid">
       {vacations.map((t) => (
-        <div key={t.id} className="memory-box">
+        <div key={t.id} className="memory-box" onClick={() => {onViewMemory(t.ids)}}>
           <div className="memory-text">
             <div className="title">{t.title}</div>
             <div className="description">
@@ -173,7 +173,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia }) => {
   const renderTripBoxes = () => (
     <div className="memories-grid">
       {trips.map((t) => (
-        <div key={t.id} className="memory-box">
+        <div key={t.id} className="memory-box" onClick={() => {onViewMemory(t.ids)}}>
           <div className="memory-text">
             <div className="title">{t.title}</div>
             <div className="description">
@@ -191,17 +191,21 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia }) => {
     <div className="memories-grid">
       {customMemories.map((m) => (
         <div key={m.id} className="memory-box"
-       onClick={() => {
-          if (memoryMode !== "edit") return;
-
-          setNewMemory({
-            id: m.id,
-            title: m.title,
-            description: m.description,
-            color: m.color
-          });
-          setShowAddMemory(true);
-        }}>
+           onClick={() => {
+            if (memoryMode !== "edit") {
+              onViewMemory(m.media_ids)
+              return;
+            }
+        
+            setNewMemory({
+              id: m.id,
+              title: m.title,
+              description: m.description,
+              color: m.color
+            });
+            setShowAddMemory(true);
+          }}
+        >
           <div className="memory-color" style={{ backgroundColor: m.color }}></div>
           <div className="memory-text">
             <div className="title">{m.title}</div>

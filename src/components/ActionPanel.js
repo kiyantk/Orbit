@@ -16,7 +16,8 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     country: "",
     year: "",
     tag: null,
-    age: ""
+    age: "",
+    ids: null
   });
   const [searchBy, setSearchBy] = useState("name");
   const [searchTerm, setSearchTerm] = useState("");
@@ -51,7 +52,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     country: "",
     year: "",
     tag: null,
-    age: ""
+    age: "",
   });
 
   // Fetch options from database on mount
@@ -73,6 +74,10 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       setSortBy(settings.defaultSort)
     }
   }, [settings]);
+
+    useEffect(() => {
+    console.log(filters)
+  }, [filters]);
 
   useEffect(() => {
     if(activeView === "explore") {
@@ -199,8 +204,9 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       mediaType: "",
       country: "",
       year: "",
-      tag: "",
+      tag: null,
       age: "",
+      ids: null
     });
   };
 
@@ -215,7 +221,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       mediaType: "",
       country: "",
       year: "",
-      tag: "",
+      tag: null,
       age: "",
     });
   }
@@ -347,6 +353,12 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
 
       {type === "filter" && (
         <div className="filter-panel">
+          {filters.ids && (
+            <div>
+              <label>Selection</label>
+              <span className="filter-static">{filters.ids.length + " items"}</span>
+            </div>
+          )}
           <div>
             <label>Year</label>
             <select value={filters.year} onChange={e => handleYearChange(e.target.value)}>

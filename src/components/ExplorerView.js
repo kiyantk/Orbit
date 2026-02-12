@@ -618,7 +618,7 @@ onContextMenu={(e) => {
   };
 
   // If we know there are no files, show settings hint
-  if (totalCount === 0 && filters.length === 0) {
+  if (totalCount === 0 && (!filters || filters && filters.length === 0)) {
     return (
       <div className="explorer-view empty" style={{ padding: 40 }}>
         <h2>No indexed files</h2>

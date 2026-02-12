@@ -254,6 +254,7 @@ body {
 .filter-panel {
   display: flex;
   gap: 15px;
+  user-select: none;
 }
 
 .filter-panel div {
@@ -1620,4 +1621,12 @@ select:focus {
   margin-top: 10px;
   color: gray;
   font-size: 14px;
+}
+
+.filter-static {
+  background-color: #484050;
+  font-size: 14px;
+  padding: 2px 9px;
+  user-select: none;
+  color: #ffffff;
 }

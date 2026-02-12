@@ -410,6 +410,20 @@ ipcMain.handle("select-folders", async () => {
   return result.canceled ? [] : result.filePaths;
 });
 
+function applyIdsFilter(db, ids) {
+  db.prepare(`DROP TABLE IF EXISTS temp_ids`).run();
+  db.prepare(`CREATE TEMP TABLE temp_ids (id INTEGER PRIMARY KEY)`).run();
+
+  const insert = db.prepare(`INSERT INTO temp_ids (id) VALUES (?)`);
+  const insertMany = db.transaction((ids) => {
+    for (const id of ids) insert.run(id);
+  });
+
+  insertMany(ids);
+
+  return "id IN (SELECT id FROM temp_ids)";
+}
+
 // Fetch paginated files for the UI
 // Args: { offset: number, limit: number }
 // Returns: array of rows [{ id, filename, thumbnail_path, path, width, height, file_type }]
@@ -419,6 +433,12 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
 
     let whereClauses = [];
     const params = [];
+
+    filters = filters ?? {};
+
+    if (Array.isArray(filters.ids) && filters.ids.length > 0) {
+      whereClauses.push(applyIdsFilter(db, filters.ids));
+    }
 
     if (filters.dateFrom) {
       const d = new Date(filters.dateFrom);
@@ -626,6 +646,12 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
     let query = "SELECT COUNT(*) as count FROM files";
     const conditions = [];
     const params = [];
+
+    filters = filters ?? {};
+
+    if (Array.isArray(filters.ids) && filters.ids.length > 0) {
+      conditions.push(applyIdsFilter(db, filters.ids));
+    }
 
     if (filters) {
       if (filters.dateFrom) {
@@ -1733,67 +1759,53 @@ ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
   }
 });
 
-// Returns unique years from create_date
 ipcMain.handle("fetch-years", async () => {
   initDatabase();
 
-  // 1. Years based on effective date
+  // Get local offset in seconds (e.g. UTC+1 = 3600, UTC-5 = -18000)
+  const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
+
+  const EFFECTIVE_DATE = `
+    CASE
+      WHEN create_date IS NOT NULL THEN create_date
+      WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+      ELSE COALESCE(created, modified)
+    END
+  `;
+
   const years = db.prepare(`
     SELECT DISTINCT
-      strftime(
-        '%Y',
-        datetime(
-          CASE
-            WHEN create_date IS NOT NULL THEN create_date
-            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-            ELSE COALESCE(created, modified)
-          END,
-          'unixepoch'
-        )
-      ) AS year
+      strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) AS year
     FROM files
-    WHERE
-      create_date IS NOT NULL
-      OR created IS NOT NULL
-      OR modified IS NOT NULL
+    WHERE create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
     ORDER BY year DESC
   `).all();
 
   const results = years.map((y) => {
-    // 2. Thumbnails: ONLY real photos
     const thumbnails = db.prepare(`
       SELECT id, thumbnail_path
       FROM files
       WHERE file_type = 'image'
         AND thumbnail_path IS NOT NULL
         AND create_date IS NOT NULL
-        AND strftime('%Y', datetime(create_date, 'unixepoch')) = ?
+        AND strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) = ?
       ORDER BY RANDOM()
       LIMIT 20
     `).all(y.year);
 
-    // 3. Total: everything in that year (fallback-aware)
     const total = db.prepare(`
       SELECT COUNT(*) AS count
       FROM files
-      WHERE strftime(
-        '%Y',
-        datetime(
-          CASE
-            WHEN create_date IS NOT NULL THEN create_date
-            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-            ELSE COALESCE(created, modified)
-          END,
-          'unixepoch'
-        )
-      ) = ?
+      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
     `).get(y.year).count;
 
-    return {
-      year: y.year,
-      thumbnails,
-      total,
-    };
+    const ids = db.prepare(`
+      SELECT id
+      FROM files
+      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
+    `).all(y.year).map(r => r.id);
+
+    return { year: y.year, ids, thumbnails, total };
   });
 
   return results;
@@ -1803,89 +1815,53 @@ ipcMain.handle("fetch-years", async () => {
 ipcMain.handle("fetch-months", async () => {
   initDatabase();
 
-  // 1. Year/months from effective date
+  const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
+
+  const EFFECTIVE_DATE = `
+    CASE
+      WHEN create_date IS NOT NULL THEN create_date
+      WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
+      ELSE COALESCE(created, modified)
+    END
+  `;
+
   const months = db.prepare(`
     SELECT DISTINCT
-      strftime(
-        '%Y',
-        datetime(
-          CASE
-            WHEN create_date IS NOT NULL THEN create_date
-            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-            ELSE COALESCE(created, modified)
-          END,
-          'unixepoch'
-        )
-      ) AS year,
-      strftime(
-        '%m',
-        datetime(
-          CASE
-            WHEN create_date IS NOT NULL THEN create_date
-            WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-            ELSE COALESCE(created, modified)
-          END,
-          'unixepoch'
-        )
-      ) AS month
+      strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) AS year,
+      strftime('%m', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) AS month
     FROM files
-    WHERE
-      create_date IS NOT NULL
-      OR created IS NOT NULL
-      OR modified IS NOT NULL
+    WHERE create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
     ORDER BY year DESC, month DESC
   `).all();
 
   const results = months.map((m) => {
-    // 2. Thumbnails: only files with create_date
     const thumbnails = db.prepare(`
       SELECT id, thumbnail_path
       FROM files
       WHERE file_type = 'image'
         AND thumbnail_path IS NOT NULL
         AND create_date IS NOT NULL
-        AND strftime('%Y', datetime(create_date, 'unixepoch')) = ?
-        AND strftime('%m', datetime(create_date, 'unixepoch')) = ?
+        AND strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) = ?
+        AND strftime('%m', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) = ?
       ORDER BY RANDOM()
       LIMIT 20
     `).all(m.year, m.month);
 
-    // 3. Total: fallback-aware
     const total = db.prepare(`
       SELECT COUNT(*) AS count
       FROM files
-      WHERE
-        strftime(
-          '%Y',
-          datetime(
-            CASE
-              WHEN create_date IS NOT NULL THEN create_date
-              WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-              ELSE COALESCE(created, modified)
-            END,
-            'unixepoch'
-          )
-        ) = ?
-        AND
-        strftime(
-          '%m',
-          datetime(
-            CASE
-              WHEN create_date IS NOT NULL THEN create_date
-              WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-              ELSE COALESCE(created, modified)
-            END,
-            'unixepoch'
-          )
-        ) = ?
+      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
+        AND strftime('%m', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
     `).get(m.year, m.month).count;
 
-    return {
-      year: m.year,
-      month: m.month,
-      thumbnails,
-      total,
-    };
+    const ids = db.prepare(`
+      SELECT id
+      FROM files
+      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
+        AND strftime('%m', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
+    `).all(m.year, m.month).map(r => r.id);
+
+    return { year: m.year, month: m.month, ids, thumbnails, total };
   });
 
   return results;
@@ -1973,6 +1949,7 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
         start: t.start,
         end: t.end,
         total: totalPhotos,
+        ids: t.photos.map(p => p.id),
         countries: mainCountries,
         thumbnails: t.photos
           .filter((p) => p.thumbnail_path)
