@@ -1761,8 +1761,6 @@ ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
 
 ipcMain.handle("fetch-years", async () => {
   initDatabase();
-
-  // Get local offset in seconds (e.g. UTC+1 = 3600, UTC-5 = -18000)
   const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
 
   const EFFECTIVE_DATE = `
@@ -1773,48 +1771,46 @@ ipcMain.handle("fetch-years", async () => {
     END
   `;
 
-  const years = db.prepare(`
-    SELECT DISTINCT
-      strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) AS year
+  // Single query: year + count + all ids
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y', datetime((${EFFECTIVE_DATE}) + ${tzOffsetSeconds}, 'unixepoch')) AS year,
+      COUNT(*) AS total,
+      GROUP_CONCAT(id) AS ids
     FROM files
     WHERE create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
+    GROUP BY year
     ORDER BY year DESC
   `).all();
 
-  const results = years.map((y) => {
-    const thumbnails = db.prepare(`
-      SELECT id, thumbnail_path
-      FROM files
-      WHERE file_type = 'image'
-        AND thumbnail_path IS NOT NULL
-        AND create_date IS NOT NULL
-        AND strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) = ?
-      ORDER BY RANDOM()
-      LIMIT 20
-    `).all(y.year);
+  // One thumbnail query for all years, not one per year
+  const thumbRows = db.prepare(`
+    SELECT id, thumbnail_path,
+      strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) AS year
+    FROM files
+    WHERE file_type = 'image'
+      AND thumbnail_path IS NOT NULL
+      AND create_date IS NOT NULL
+    ORDER BY RANDOM()
+  `).all();
 
-    const total = db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM files
-      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
-    `).get(y.year).count;
+  // Group thumbnails by year in JS — cap at 20 per year
+  const thumbsByYear = {};
+  for (const t of thumbRows) {
+    if (!thumbsByYear[t.year]) thumbsByYear[t.year] = [];
+    if (thumbsByYear[t.year].length < 20) thumbsByYear[t.year].push(t);
+  }
 
-    const ids = db.prepare(`
-      SELECT id
-      FROM files
-      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
-    `).all(y.year).map(r => r.id);
-
-    return { year: y.year, ids, thumbnails, total };
-  });
-
-  return results;
+  return rows.map((r) => ({
+    year: r.year,
+    total: r.total,
+    ids: r.ids.split(",").map(Number),
+    thumbnails: thumbsByYear[r.year] || [],
+  }));
 });
 
-// Returns unique months with years
 ipcMain.handle("fetch-months", async () => {
   initDatabase();
-
   const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
 
   const EFFECTIVE_DATE = `
@@ -1825,46 +1821,46 @@ ipcMain.handle("fetch-months", async () => {
     END
   `;
 
-  const months = db.prepare(`
-    SELECT DISTINCT
-      strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) AS year,
-      strftime('%m', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) AS month
+  // Single query: year + month + count + all ids
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y', datetime((${EFFECTIVE_DATE}) + ${tzOffsetSeconds}, 'unixepoch')) AS year,
+      strftime('%m', datetime((${EFFECTIVE_DATE}) + ${tzOffsetSeconds}, 'unixepoch')) AS month,
+      COUNT(*) AS total,
+      GROUP_CONCAT(id) AS ids
     FROM files
     WHERE create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
+    GROUP BY year, month
     ORDER BY year DESC, month DESC
   `).all();
 
-  const results = months.map((m) => {
-    const thumbnails = db.prepare(`
-      SELECT id, thumbnail_path
-      FROM files
-      WHERE file_type = 'image'
-        AND thumbnail_path IS NOT NULL
-        AND create_date IS NOT NULL
-        AND strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) = ?
-        AND strftime('%m', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) = ?
-      ORDER BY RANDOM()
-      LIMIT 20
-    `).all(m.year, m.month);
+  // One thumbnail query for all months, not one per month
+  const thumbRows = db.prepare(`
+    SELECT id, thumbnail_path,
+      strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) AS year,
+      strftime('%m', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) AS month
+    FROM files
+    WHERE file_type = 'image'
+      AND thumbnail_path IS NOT NULL
+      AND create_date IS NOT NULL
+    ORDER BY RANDOM()
+  `).all();
 
-    const total = db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM files
-      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
-        AND strftime('%m', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
-    `).get(m.year, m.month).count;
+  // Group thumbnails by "year-month" key in JS — cap at 20 per month
+  const thumbsByMonth = {};
+  for (const t of thumbRows) {
+    const key = `${t.year}-${t.month}`;
+    if (!thumbsByMonth[key]) thumbsByMonth[key] = [];
+    if (thumbsByMonth[key].length < 20) thumbsByMonth[key].push(t);
+  }
 
-    const ids = db.prepare(`
-      SELECT id
-      FROM files
-      WHERE strftime('%Y', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
-        AND strftime('%m', datetime(${EFFECTIVE_DATE} + ${tzOffsetSeconds}, 'unixepoch')) = ?
-    `).all(m.year, m.month).map(r => r.id);
-
-    return { year: m.year, month: m.month, ids, thumbnails, total };
-  });
-
-  return results;
+  return rows.map((r) => ({
+    year: r.year,
+    month: r.month,
+    total: r.total,
+    ids: r.ids.split(",").map(Number),
+    thumbnails: thumbsByMonth[`${r.year}-${r.month}`] || [],
+  }));
 });
 
 ipcMain.handle("fetch-trips", async (_, options = {}) => {
@@ -1881,11 +1877,15 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
 
   if (!home) return [];
 
+  const MAX_GAP_DAYS = options.maxGapDays ?? 4;
+  const MIN_TRIP_PHOTOS = options.minTripPhotos ?? 500;
+  const MIN_COUNTRY_PERCENT = options.minCountryPercent ?? 0.20;
+  const MIN_MAIN_COUNTRIES_PERCENT = options.minMainCountriesPercent ?? 0.50;
+
   const rows = db.prepare(`
     SELECT
       id,
       country,
-      thumbnail_path,
       datetime(
         CASE
           WHEN create_date IS NOT NULL THEN create_date
@@ -1900,11 +1900,7 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
     ORDER BY date ASC
   `).all(home);
 
-  const MAX_GAP_DAYS = options.maxGapDays ?? 4;
-  const MIN_TRIP_PHOTOS = options.minTripPhotos ?? 500; 
-  const MIN_COUNTRY_PERCENT = options.minCountryPercent ?? 0.20 // countries contributing >=20% of trip photos; 
-  const MIN_MAIN_COUNTRIES_PERCENT = options.minMainCountriesPercent ?? 0.50; 
-
+  // Group into trips
   const trips = [];
   let current = null;
 
@@ -1914,53 +1910,85 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
   for (const row of rows) {
     if (!current || daysBetween(current.end, row.date) > MAX_GAP_DAYS) {
       if (current) trips.push(current);
-      current = { start: row.date, end: row.date, photos: [], countryCounts: {} };
+      current = { start: row.date, end: row.date, ids: [], countryCounts: {} };
     }
-
     current.end = row.date;
-    current.photos.push(row);
+    current.ids.push(row.id);
     current.countryCounts[row.country] = (current.countryCounts[row.country] || 0) + 1;
   }
   if (current) trips.push(current);
 
-  const finalTrips = trips
-    .filter((t) => t.photos.length >= MIN_TRIP_PHOTOS)
+  // Filter and build final trip objects
+  const filtered = trips
+    .filter((t) => t.ids.length >= MIN_TRIP_PHOTOS)
     .map((t) => {
-      const year = new Date(t.start).getFullYear();
-
-      // compute % per country
-      const totalPhotos = t.photos.length;
+      const totalPhotos = t.ids.length;
       const countryPercent = Object.fromEntries(
         Object.entries(t.countryCounts).map(([code, count]) => [code, count / totalPhotos])
       );
 
-      // include only countries that are main contributors
       const mainCountries = Object.entries(countryPercent)
         .filter(([_, pct]) => pct >= MIN_COUNTRY_PERCENT)
         .map(([code]) => code);
 
-      // ignore trips where main countries contribute too little
       const mainTotalPercent = mainCountries.reduce((sum, c) => sum + countryPercent[c], 0);
       if (mainTotalPercent < MIN_MAIN_COUNTRIES_PERCENT) return null;
 
       return {
         id: `${t.start}-${t.end}`,
-        title: mainCountries.join(" – ") + ` ${year}`,
         start: t.start,
         end: t.end,
         total: totalPhotos,
-        ids: t.photos.map(p => p.id),
+        ids: t.ids,
         countries: mainCountries,
-        thumbnails: t.photos
-          .filter((p) => p.thumbnail_path)
-          .sort(() => 0.5 - Math.random())
-          .slice(0, 20),
       };
     })
     .filter(Boolean)
-    .sort((a, b) => new Date(b.start) - new Date(a.start)); // most recent first
+    .sort((a, b) => new Date(b.start) - new Date(a.start));
 
-  return finalTrips;
+  if (!filtered.length) return [];
+
+  // Build temp table with (file_id, trip_id) for all surviving trips
+  db.exec(`CREATE TEMP TABLE IF NOT EXISTS trip_thumb_lookup (
+    file_id INTEGER NOT NULL,
+    trip_id TEXT NOT NULL
+  )`);
+  db.exec(`DELETE FROM trip_thumb_lookup`);
+
+  const insertLookup = db.prepare(
+    `INSERT INTO trip_thumb_lookup (file_id, trip_id) VALUES (?, ?)`
+  );
+  const insertMany = db.transaction((trips) => {
+    for (const trip of trips) {
+      for (const id of trip.ids) {
+        insertLookup.run(id, trip.id);
+      }
+    }
+  });
+  insertMany(filtered);
+
+  // Single join query — no variable limit concerns
+  const thumbRows = db.prepare(`
+    SELECT f.id, f.thumbnail_path, t.trip_id
+    FROM files f
+    INNER JOIN trip_thumb_lookup t ON f.id = t.file_id
+    WHERE f.file_type = 'image'
+      AND f.thumbnail_path IS NOT NULL
+    ORDER BY RANDOM()
+  `).all();
+
+  // Group thumbnails by trip, cap at 20
+  const thumbsByTrip = {};
+  for (const row of thumbRows) {
+    if (!thumbsByTrip[row.trip_id]) thumbsByTrip[row.trip_id] = [];
+    if (thumbsByTrip[row.trip_id].length < 20) thumbsByTrip[row.trip_id].push(row);
+  }
+
+  return filtered.map((t) => ({
+    ...t,
+    title: t.countries.join(" – ") + ` ${new Date(t.start).getFullYear()}`,
+    thumbnails: thumbsByTrip[t.id] || [],
+  }));
 });
 
 ipcMain.handle(

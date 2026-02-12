@@ -3,6 +3,20 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 import { SnackbarProvider, enqueueSnackbar } from "notistack";
 
+const ThumbnailStrip = React.memo(({ thumbnails = [] }) => (
+  <div className="memory-thumbs">
+    {thumbnails.map((t) => (
+      <img
+        key={t.id}
+        src={`orbit://thumbs/${t.id}_thumb.jpg`}
+        draggable={false}
+        alt=""
+        onError={(e) => (e.currentTarget.style.display = "none")}
+      />
+    ))}
+  </div>
+));
+
 const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }) => {
   const [selectedTab, setSelectedTab] = useState("Years");
   const [years, setYears] = useState([]);
@@ -40,6 +54,12 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
 
   // --- FETCHING DATA ---
   useEffect(() => {
+    setLoading(true);
+    setYears([]);
+    setMonths([]);
+    setTrips([]);
+    setVacations([]);
+    setCustomMemories([]);
     if (selectedTab === "Years") fetchYears();
     if (selectedTab === "Months") fetchMonths();
     if (selectedTab === "Vacations") fetchVacations();
@@ -214,20 +234,6 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
           <ThumbnailStrip thumbnails={m.thumbnails} />
           <div className="memory-count">{m.thumbnails.length} items</div>
         </div>
-      ))}
-    </div>
-  );
-
-  const ThumbnailStrip = ({ thumbnails = [] }) => (
-    <div className="memory-thumbs">
-      {thumbnails.map((t) => (
-        <img
-          key={t.id}
-          src={`orbit://thumbs/${t.id}_thumb.jpg`}
-          draggable={false}
-          alt=""
-          onError={(e) => (e.currentTarget.style.display = "none")}
-        />
       ))}
     </div>
   );

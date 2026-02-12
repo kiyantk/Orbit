@@ -486,7 +486,7 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
             <Marker position={[item.latitude, item.longitude]} />
           </MapContainer>
         </div>
-        <div title={item.latitude + ',' + item.longitude + (item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : '')} style={{ padding: "2px 0px", backgroundColor: "#28262d", borderRadius: "0px 0px 10px 10px" }}>
+        <div title={item.latitude + ', ' + item.longitude + (item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : '')} style={{ padding: "2px 0px", backgroundColor: "#28262d", borderRadius: "0px 0px 10px 10px" }}>
           {item.latitude}, {item.longitude}
           {item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : ''}
         </div>
