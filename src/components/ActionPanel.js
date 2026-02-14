@@ -340,7 +340,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
           <select value={sortBy} onChange={e => applySortChange(e.target.value)}>
             <option value="media_id">ID</option>
             <option value="name">Name</option>
-            <option value="create_date">Date Taken</option>
+            <option value="create_date_local">Date Taken</option>
             <option value="created">Date Created</option>
             <option value="size">File Size</option>
             <option value="random">Random</option>

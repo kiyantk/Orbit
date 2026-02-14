@@ -139,6 +139,15 @@ useEffect(() => {
     const seconds = pad(date.getSeconds());
     return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
+  
+  function formatLocalDateString(str) {
+    if (!str) return '';
+    // str is "2024-12-31 23:59:25"
+    const [datePart, timePart] = str.split(' ');
+    if (!datePart) return '';
+    const [year, month, day] = datePart.split('-');
+    return `${day}-${month}-${year}${timePart ? ' ' + timePart : ''}`;
+  }
 
   useEffect(() => {
   if (!files.length) return;
@@ -190,7 +199,7 @@ useEffect(() => {
       if (!marker.getPopup()) {
         marker.bindPopup(`
           <b>${item.filename}</b><br>
-          ${formatTimestamp(item.create_date) || "No date"}<br>
+          ${formatLocalDateString(item.create_date_local) || formatTimestamp(item.create_date) || "No date"}<br>
           ${item.device_model || "Unknown device"}<br>
           ${country || "Unknown country"}${
           altitude ? ` | ${altitude.toFixed(0)} meters` : ""

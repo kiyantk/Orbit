@@ -27,6 +27,14 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, filters = {} }) => {
       return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
 
+  function formatLocalDateString(str) {
+    if (!str) return '';
+    const [datePart, timePart] = str.split(' ');
+    if (!datePart) return '';
+    const [year, month, day] = datePart.split('-');
+    return `${day}-${month}-${year}${timePart ? ' ' + timePart : ''}`;
+  }
+
   const fetchRandom = useCallback(async (count = preloadCount) => {
     try {
       const result = await window.electron.ipcRenderer.invoke("fetch-files", {
@@ -114,7 +122,13 @@ const nextImage = () => {
       {showMetadata && (
         <div className="shuffle-metadata">
           <div>{current.filename}</div>
-          {current.create_date && <div>{formatDate(current.create_date)}</div>}
+          {(current.create_date_local || current.create_date) && (
+            <div>
+              {current.create_date_local
+                ? formatLocalDateString(current.create_date_local)
+                : formatDate(current.create_date)}
+            </div>
+          )}
         </div>
       )}
 

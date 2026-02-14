@@ -908,6 +908,8 @@ select:disabled {
       align-content: center;
       margin: 0 auto;
       font-size: 20px;
+      height: calc(100% - 23px);
+      width: 100%;
     }
     
     .theme-buttons {

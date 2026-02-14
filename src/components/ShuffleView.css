@@ -44,7 +44,8 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100%;
+  height: calc(100% - 23px);
+  width: 100%;
 }
 
 .loader {

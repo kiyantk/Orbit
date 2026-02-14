@@ -104,6 +104,7 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   }, [item]);
   
   useEffect(() => {
+    console.log(item)
     setCurrentTime(0);
     setIsPlaying(true);
     setIsLoading(true);
@@ -201,6 +202,15 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
       const seconds = pad(date.getSeconds());
 
       return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+  }
+
+  function formatLocalDateString(str) {
+    if (!str) return '';
+    // str is "2024-12-31 23:59:25"
+    const [datePart, timePart] = str.split(' ');
+    if (!datePart) return '';
+    const [year, month, day] = datePart.split('-');
+    return `${day}-${month}-${year}${timePart ? ' ' + timePart : ''}`;
   }
 
   const togglePlay = () => {
@@ -444,10 +454,14 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     </div>
   )}
 
-  {item.create_date && (
+  {(item.create_date_local || item.create_date) && (
     <div className="metadata-row">
       <span className="metadata-label">Taken</span>
-      <span className="metadata-value" title={formatTimestamp(item.create_date)}>{formatTimestamp(item.create_date)}</span>
+      <span className="metadata-value">
+        {item.create_date_local
+          ? formatLocalDateString(item.create_date_local)
+          : formatTimestamp(item.create_date)}
+      </span>
     </div>
   )}
 

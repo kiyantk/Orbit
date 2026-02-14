@@ -290,6 +290,44 @@ useEffect(() => {
     return normalized;
   }
 
+//   useEffect(() => {
+//   const handleProgress = (data) => { /* existing handler */ };
+//   const handleMigrationProgress = (data) => {
+//     setIndexingStatus(`Migrating: ${data.processed}/${data.total} (${data.percentage}%)`);
+//   };
+
+//   window.electron.ipcRenderer.on("indexing-progress", handleProgress);
+//   window.electron.ipcRenderer.on("migration-progress", handleMigrationProgress);
+
+//   return () => {
+//     window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
+//     window.electron.ipcRenderer.removeListener("migration-progress", handleMigrationProgress);
+//   };
+// }, []);
+
+// const migrateCreateDateLocal = async () => {
+//   setIsIndexing(true);
+//   setIndexingStatus("Migrating local dates...");
+
+//   try {
+//     const result = await window.electron.ipcRenderer.invoke("migrate-create-date-local");
+//     if (result.success) {
+//       setIndexingStatus(
+//         result.updated === 0
+//           ? "All files already migrated."
+//           : `Done! Updated ${result.updated} files.`
+//       );
+//     } else {
+//       setIndexingStatus(`Error: ${result.error}`);
+//     }
+//   } catch (err) {
+//     setIndexingStatus("Migration failed.");
+//   }
+
+//   setIsIndexing(false);
+//   setTimeout(() => setIndexingStatus(null), 5000);
+// };
+
   // Select folders
   const selectFolders = async () => {
     try {
@@ -580,6 +618,8 @@ useEffect(() => {
                   onClick={fixThumbnails}>Fix Thumbnails</button>
                 <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
                   onClick={enterRemoveMode}>Remove Mode</button>
+                {/* <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                  onClick={migrateCreateDateLocal}>Migrate - create_date_local</button> */}
               </div>
               <div className="settings-bottom-bar" style={{ height: "70px"}}>
                 <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" onClick={() => setShowChecksPopup(false)}>Close</button>

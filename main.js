@@ -226,6 +226,7 @@ function initDatabase() {
       longitude REAL,
       altitude REAL,
       create_date INTEGER,
+      create_date_local TEXT,
       thumbnail_path TEXT,
       lens_model TEXT,
       iso INTEGER,
@@ -440,25 +441,28 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
       whereClauses.push(applyIdsFilter(db, filters.ids));
     }
 
+    const localDateExpr = `
+      CASE
+        WHEN create_date_local IS NOT NULL
+          THEN date(create_date_local)
+        WHEN create_date IS NOT NULL
+          THEN date(datetime(create_date, 'unixepoch', 'localtime'))
+        ELSE
+          date(datetime(MIN(created, modified), 'unixepoch', 'localtime'))
+      END
+    `;
+
     if (filters.dateFrom) {
-      const d = new Date(filters.dateFrom);
-      d.setHours(0, 0, 0, 0); // midnight local
-      whereClauses.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) >= ?");
-      params.push(Math.floor(d.getTime() / 1000));
+      whereClauses.push(`${localDateExpr} >= date(?)`);
+      params.push(filters.dateFrom); // e.g. "2024-01-01"
     }
     if (filters.dateTo) {
-      const d = new Date(filters.dateTo);
-      d.setHours(23, 59, 59, 999); // end of day
-      whereClauses.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) <= ?");
-      params.push(Math.floor(d.getTime() / 1000));
+      whereClauses.push(`${localDateExpr} <= date(?)`);
+      params.push(filters.dateTo); // e.g. "2024-12-31"
     }
     if (filters.dateExact) {
-      const start = new Date(filters.dateExact);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(filters.dateExact);
-      end.setHours(23, 59, 59, 999);
-      whereClauses.push("create_date >= ? AND create_date <= ?");
-      params.push(Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000));
+      whereClauses.push(`${localDateExpr} = date(?)`);
+      params.push(filters.dateExact); // e.g. "2024-03-15"
     }
     if (filters.device) {
       whereClauses.push("device_model = ?");
@@ -509,10 +513,19 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     if (filters.sortBy === "random") {
       orderSQL = "ORDER BY RANDOM()";
     } else {
-      const validSorts = ["media_id", "filename", "create_date", "created", "size"];
+      const validSorts = ["media_id", "filename", "create_date_local", "created", "size"];
       const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : (settings && settings.defaultSort ? settings.defaultSort : "media_id");
       const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC";
-      orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
+      if (filters.sortBy === "create_date_local") {
+        // Sort by local date string where available, fall back to create_date epoch
+        orderSQL = `ORDER BY
+          CASE
+            WHEN create_date_local IS NOT NULL THEN create_date_local
+            ELSE datetime(create_date, 'unixepoch', 'localtime')
+          END ${safeSortOrder}`;
+      } else {
+        orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
+      }
     }
 
     const whereSQL = whereClauses.length ? "WHERE " + whereClauses.join(" AND ") : "";
@@ -654,25 +667,28 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
     }
 
     if (filters) {
+      const localDateExpr = `
+        CASE
+          WHEN create_date_local IS NOT NULL
+            THEN date(create_date_local)
+          WHEN create_date IS NOT NULL
+            THEN date(datetime(create_date, 'unixepoch', 'localtime'))
+          ELSE
+            date(datetime(MIN(created, modified), 'unixepoch', 'localtime'))
+        END
+      `;
+
       if (filters.dateFrom) {
-        const d = new Date(filters.dateFrom);
-        d.setHours(0, 0, 0, 0); // midnight local
-        conditions.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) >= ?");
-        params.push(Math.floor(d.getTime() / 1000));
+        conditions.push(`${localDateExpr} >= date(?)`);
+        params.push(filters.dateFrom);
       }
       if (filters.dateTo) {
-        const d = new Date(filters.dateTo);
-        d.setHours(23, 59, 59, 999); // end of day
-        conditions.push("(CASE WHEN create_date IS NOT NULL THEN create_date ELSE CASE WHEN created <= modified THEN created ELSE modified END END) <= ?");
-        params.push(Math.floor(d.getTime() / 1000));
+        conditions.push(`${localDateExpr} <= date(?)`);
+        params.push(filters.dateTo);
       }
       if (filters.dateExact) {
-        const start = new Date(filters.dateExact);
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(filters.dateExact);
-        end.setHours(23, 59, 59, 999);
-        conditions.push("create_date >= ? AND create_date <= ?");
-        params.push(Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000));
+        conditions.push(`${localDateExpr} = date(?)`);
+        params.push(filters.dateExact);
       }
       if (filters.device) {
         conditions.push("device_model = ?");
@@ -1091,6 +1107,7 @@ async function extractMetadata(filePath) {
     longitude: null,
     altitude: null,
     create_date: null,
+    create_date_local: null,
     lens_model: null,
     iso: null,
     software: null,
@@ -1144,9 +1161,33 @@ async function extractMetadata(filePath) {
     // Altitude
     if (exifData.GPSAltitude) metadata.altitude = exifData.GPSAltitude;
     
-    // Create date (choose DateTimeOriginal if available)
-    const dateStr = exifData.DateTimeOriginal || exifData.CreateDate;
-    if (dateStr) metadata.create_date = Math.floor(new Date(dateStr).getTime() / 1000);
+    // Create date priority:
+    // 1. DateTimeOriginal — camera shutter time, already local, most accurate
+    // 2. CreationDate    — MOV/MP4 field, includes timezone offset (e.g. "2024:01:01 00:09:28+01:00")
+    // 3. CreateDate      — UTC-only fallback, least reliable for local time
+    const rawDate = exifData.DateTimeOriginal ?? exifData.CreationDate ?? null;
+    if (rawDate) {
+      const dateStr = typeof rawDate === "object" ? rawDate.toString() : rawDate;
+      const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+      metadata.create_date_local = normalised.substring(0, 19);
+      metadata.create_date = Math.floor(new Date(normalised).getTime() / 1000);
+    } else {
+      // Fallback 3: filename-encoded local time (e.g. Android MP4: 20230101_000507.mp4)
+      const fromFilename = parseFilenameDateTime(filePath);
+      if (fromFilename) {
+        metadata.create_date_local = fromFilename;
+        metadata.create_date = Math.floor(new Date(fromFilename).getTime() / 1000);
+      } else {
+        // Fallback 4: CreateDate (UTC) — store as-is, create_date_local will be wrong by UTC offset
+        const utcRaw = exifData.CreateDate;
+        if (utcRaw) {
+          const dateStr = typeof utcRaw === "object" ? utcRaw.toString() : utcRaw;
+          const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+          metadata.create_date_local = null; // explicitly null — UTC is not local time
+          metadata.create_date = Math.floor(new Date(normalised).getTime() / 1000);
+        }
+      }
+    }
 
     metadata.lens_model = exifData.LensModel || exifData.Lens || null;
     metadata.iso = exifData.ISO || null;
@@ -1196,89 +1237,6 @@ function countTotalFiles(folderPath, existingPaths = new Set()) {
   return total;
 }
 
-// async function indexFilesRecursively(folderPath, rootFolder, totalFiles, progressCallback) {
-//   let processedFiles = 0;
-  
-//   const updateProgress = () => {
-//     processedFiles++;
-//     if (progressCallback) {
-//       progressCallback(processedFiles);
-//     }
-//   };
-//   const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-
-//   // Separate directories and files
-//   const dirs = [];
-//   const files = [];
-//   for (const entry of entries) {
-//     if (entry.isDirectory()) dirs.push(entry.name);
-//     else if (entry.isFile()) files.push(entry.name);
-//   }
-
-//   // Recurse into directories first
-//   for (const dirName of dirs) {
-//     await indexFilesRecursively(path.join(folderPath, dirName), rootFolder, totalFiles, progressCallback);
-//   }
-
-//   const limitMetadata = pLimit(METADATA_CONCURRENCY);
-//   const limitThumb = pLimit(THUMBNAIL_CONCURRENCY);
-
-//   const insertStmt = db.prepare(`
-//     INSERT OR REPLACE INTO files 
-//     (filename, path, size, created, modified, extension, folder_path,
-//      file_type, device_model, camera_make, camera_model, width, height,
-//      orientation, latitude, longitude, altitude, create_date, thumbnail_path,
-//      lens_model, iso, software, offset_time_original, megapixels,
-//      exposure_time, color_space, flash, aperture, focal_length, focal_length_35mm, country)
-//     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-//   `);
-
-//   let batchRows = [];
-
-//     for (const fileName of files) {
-//     const fullPath = path.join(folderPath, fileName);
-//     if (mainWindow) {
-//       mainWindow.webContents.send("indexing-progress", {
-//         filename: fileName,
-//         processed: processedFiles,
-//         total: totalFiles,
-//         percentage: totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0
-//       });
-//     }
-
-//     const stats = fs.statSync(fullPath);
-
-//     // Skip already indexed files
-//     const exists = db.prepare("SELECT id FROM files WHERE path = ?").get(fullPath);
-//     if (exists) continue;
-
-//     // Extract metadata with limited concurrency
-//     const metadata = await limitMetadata(() => extractMetadata(fullPath));
-
-//     batchRows.push({
-//       fileName,
-//       fullPath,
-//       stats,
-//       metadata
-//     });
-
-//     // When batch is full, insert transactionally
-//     if (batchRows.length >= BATCH_SIZE) {
-//       await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
-//       batchRows = [];
-//     }
-    
-//     updateProgress();
-//   }
-
-//   // Insert any remaining files
-//   if (batchRows.length > 0) {
-//     await insertBatch(batchRows, insertStmt, rootFolder, limitThumb);
-//     processedFiles += batchRows.length;
-//     updateProgress();
-//   }
-// }
-
 // Async generator for walking directories
 async function* walkDir(dir) {
   const dirHandle = await fsPromises.opendir(dir);
@@ -1292,39 +1250,6 @@ async function* walkDir(dir) {
   }
 }
 
-// function getNextMediaId() {
-//   const row = db.prepare("SELECT MAX(media_id) as max FROM files").get();
-//   return (row?.max || 0) + 1;
-// }
-
-// ipcMain.handle("add-media-id", async () => {
-//   try {
-//     initDatabase();
-
-//     db.transaction(() => {
-//       // 1. Add column if not exists
-//       db.prepare(`ALTER TABLE files ADD COLUMN media_id INTEGER`).run();
-
-//       // 2. Fill it with sequential IDs without gaps
-//       const rows = db.prepare("SELECT id FROM files ORDER BY id").all();
-
-//       let counter = 1;
-//       for (const row of rows) {
-//         db.prepare("UPDATE files SET media_id = ? WHERE id = ?").run(counter, row.id);
-//         counter++;
-//       }
-
-//       // 3. Add a unique index to keep it clean
-//       db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_files_media_id ON files(media_id)").run();
-//     })();
-
-//     return { success: true, message: "media_id column added and populated successfully." };
-//   } catch (err) {
-//     console.error("Error adding media_id:", err);
-//     return { success: false, error: err.message };
-//   }
-// });
-
 // Preload all existing file paths into a Set
 function loadIndexedPaths() {
   const rows = db.prepare("SELECT path FROM files").all();
@@ -1337,10 +1262,10 @@ async function indexFilesRecursively(rootFolder, existingPaths, progressCallback
     INSERT OR REPLACE INTO files 
     (media_id, filename, path, size, created, modified, extension, folder_path,
      file_type, device_model, camera_make, camera_model, width, height,
-     orientation, latitude, longitude, altitude, create_date, thumbnail_path,
+     orientation, latitude, longitude, altitude, create_date, create_date_local, thumbnail_path,
      lens_model, iso, software, offset_time_original, megapixels,
      exposure_time, color_space, flash, aperture, focal_length, focal_length_35mm, country)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const limitMetadata = pLimit(METADATA_CONCURRENCY);
@@ -1399,15 +1324,22 @@ ipcMain.handle("fetch-options", async (event, {birthDate = null}) => {
       WHERE media_ids IS NOT NULL
     `).all().map(r => r.name);
 
-    const dateRange = db.prepare("SELECT MIN(create_date) as min, MAX(create_date) as max FROM files WHERE create_date IS NOT NULL").get();
+    const dateRange = db.prepare(`
+      SELECT
+        MIN(CASE WHEN create_date_local IS NOT NULL THEN date(create_date_local) ELSE date(datetime(create_date, 'unixepoch', 'localtime')) END) AS min,
+        MAX(CASE WHEN create_date_local IS NOT NULL THEN date(create_date_local) ELSE date(datetime(create_date, 'unixepoch', 'localtime')) END) AS max
+      FROM files
+      WHERE create_date_local IS NOT NULL OR create_date IS NOT NULL
+    `).get();
+
 
     let minDate = "";
     let maxDate = "";
     let years = [];
 
     if (dateRange?.min && dateRange?.max) {
-      minDate = new Date(dateRange.min * 1000).toISOString().split("T")[0];
-      maxDate = new Date(dateRange.max * 1000).toISOString().split("T")[0];
+      minDate = dateRange.min;  // already "YYYY-MM-DD" from SQLite date()
+      maxDate = dateRange.max;
 
       const startYear = new Date(minDate).getFullYear();
       const endYear = new Date(maxDate).getFullYear();
@@ -1417,8 +1349,8 @@ ipcMain.handle("fetch-options", async (event, {birthDate = null}) => {
     let ages = [];
 
     if (dateRange?.min && dateRange?.max && birthDate) {
-      const minAge = ageOnDate(birthDate, dateRange.min);
-      const maxAge = ageOnDate(birthDate, dateRange.max);
+      const minAge = ageOnDate(birthDate, new Date(dateRange.min).getTime() / 1000);
+      const maxAge = ageOnDate(birthDate, new Date(dateRange.max).getTime() / 1000);
     
       ages = Array.from(
         { length: maxAge - minAge + 1 },
@@ -1508,6 +1440,7 @@ async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
           row.metadata.longitude,
           row.metadata.altitude,
           row.metadata.create_date,
+          row.metadata.create_date_local,
           null, // thumbnail path updated later
           row.metadata.lens_model,
           row.metadata.iso,
@@ -1761,40 +1694,39 @@ ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
 
 ipcMain.handle("fetch-years", async () => {
   initDatabase();
-  const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
 
-  const EFFECTIVE_DATE = `
+  const datePart = (fmt) => `
     CASE
-      WHEN create_date IS NOT NULL THEN create_date
-      WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-      ELSE COALESCE(created, modified)
+      WHEN create_date_local IS NOT NULL
+        THEN strftime('${fmt}', create_date_local)
+      WHEN create_date IS NOT NULL
+        THEN strftime('${fmt}', datetime(create_date, 'unixepoch', 'localtime'))
+      ELSE
+        strftime('${fmt}', datetime(MIN(created, modified), 'unixepoch', 'localtime'))
     END
   `;
 
-  // Single query: year + count + all ids
   const rows = db.prepare(`
     SELECT
-      strftime('%Y', datetime((${EFFECTIVE_DATE}) + ${tzOffsetSeconds}, 'unixepoch')) AS year,
+      ${datePart('%Y')} AS year,
       COUNT(*) AS total,
       GROUP_CONCAT(id) AS ids
     FROM files
-    WHERE create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
+    WHERE create_date_local IS NOT NULL OR create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
     GROUP BY year
     ORDER BY year DESC
   `).all();
 
-  // One thumbnail query for all years, not one per year
   const thumbRows = db.prepare(`
     SELECT id, thumbnail_path,
-      strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) AS year
+      ${datePart('%Y')} AS year
     FROM files
     WHERE file_type = 'image'
       AND thumbnail_path IS NOT NULL
-      AND create_date IS NOT NULL
+      AND (create_date_local IS NOT NULL OR create_date IS NOT NULL)
     ORDER BY RANDOM()
   `).all();
 
-  // Group thumbnails by year in JS — cap at 20 per year
   const thumbsByYear = {};
   for (const t of thumbRows) {
     if (!thumbsByYear[t.year]) thumbsByYear[t.year] = [];
@@ -1811,42 +1743,41 @@ ipcMain.handle("fetch-years", async () => {
 
 ipcMain.handle("fetch-months", async () => {
   initDatabase();
-  const tzOffsetSeconds = -(new Date().getTimezoneOffset() * 60);
 
-  const EFFECTIVE_DATE = `
+  const datePart = (fmt) => `
     CASE
-      WHEN create_date IS NOT NULL THEN create_date
-      WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-      ELSE COALESCE(created, modified)
+      WHEN create_date_local IS NOT NULL
+        THEN strftime('${fmt}', create_date_local)
+      WHEN create_date IS NOT NULL
+        THEN strftime('${fmt}', datetime(create_date, 'unixepoch', 'localtime'))
+      ELSE
+        strftime('${fmt}', datetime(MIN(created, modified), 'unixepoch', 'localtime'))
     END
   `;
 
-  // Single query: year + month + count + all ids
   const rows = db.prepare(`
     SELECT
-      strftime('%Y', datetime((${EFFECTIVE_DATE}) + ${tzOffsetSeconds}, 'unixepoch')) AS year,
-      strftime('%m', datetime((${EFFECTIVE_DATE}) + ${tzOffsetSeconds}, 'unixepoch')) AS month,
+      ${datePart('%Y')} AS year,
+      ${datePart('%m')} AS month,
       COUNT(*) AS total,
       GROUP_CONCAT(id) AS ids
     FROM files
-    WHERE create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
+    WHERE create_date_local IS NOT NULL OR create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
     GROUP BY year, month
     ORDER BY year DESC, month DESC
   `).all();
 
-  // One thumbnail query for all months, not one per month
   const thumbRows = db.prepare(`
     SELECT id, thumbnail_path,
-      strftime('%Y', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) AS year,
-      strftime('%m', datetime(create_date + ${tzOffsetSeconds}, 'unixepoch')) AS month
+      ${datePart('%Y')} AS year,
+      ${datePart('%m')} AS month
     FROM files
     WHERE file_type = 'image'
       AND thumbnail_path IS NOT NULL
-      AND create_date IS NOT NULL
+      AND (create_date_local IS NOT NULL OR create_date IS NOT NULL)
     ORDER BY RANDOM()
   `).all();
 
-  // Group thumbnails by "year-month" key in JS — cap at 20 per month
   const thumbsByMonth = {};
   for (const t of thumbRows) {
     const key = `${t.year}-${t.month}`;
@@ -1886,14 +1817,11 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
     SELECT
       id,
       country,
-      datetime(
-        CASE
-          WHEN create_date IS NOT NULL THEN create_date
-          WHEN created IS NOT NULL AND modified IS NOT NULL THEN MIN(created, modified)
-          ELSE COALESCE(created, modified)
-        END,
-        'unixepoch'
-      ) AS date
+      CASE
+        WHEN create_date_local IS NOT NULL THEN create_date_local
+        WHEN create_date IS NOT NULL THEN datetime(create_date, 'unixepoch', 'localtime')
+        ELSE datetime(MIN(created, modified), 'unixepoch', 'localtime')
+      END AS date
     FROM files
     WHERE country IS NOT NULL
       AND country != ?
@@ -2219,6 +2147,241 @@ ipcMain.handle("add-items-to-memory", async (event, { memoryId, mediaIds }) => {
     return { success: false, error: err.message };
   }
 });
+
+ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
+  try {
+    initDatabase();
+
+    const hasDate = `(create_date_local IS NOT NULL OR create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL)`;
+
+    const datePart = (fmt) => `
+      CASE
+        WHEN create_date_local IS NOT NULL
+          THEN strftime('${fmt}', create_date_local)
+        WHEN create_date IS NOT NULL
+          THEN strftime('${fmt}', datetime(create_date, 'unixepoch', 'localtime'))
+        ELSE
+          strftime('${fmt}', datetime(MIN(created, modified), 'unixepoch', 'localtime'))
+      END
+    `;
+
+    const perYear = db.prepare(`
+      SELECT CAST(${datePart('%Y')} AS INTEGER) AS year, COUNT(*) AS count
+      FROM files
+      WHERE ${hasDate}
+      GROUP BY year
+      ORDER BY year DESC
+    `).all();
+
+    const perMonth = db.prepare(`
+      SELECT ${datePart('%Y-%m')} AS month, COUNT(*) AS count
+      FROM files
+      WHERE ${hasDate}
+      GROUP BY month
+      ORDER BY month DESC
+    `).all();
+
+    const topDays = db.prepare(`
+      SELECT ${datePart('%Y-%m-%d')} AS day, COUNT(*) AS count
+      FROM files
+      WHERE ${hasDate}
+      GROUP BY day
+      ORDER BY count DESC
+      LIMIT 10
+    `).all();
+
+    const allDays = db.prepare(`
+      SELECT ${datePart('%Y-%m-%d')} AS day, COUNT(*) AS count
+      FROM files
+      WHERE ${hasDate}
+      GROUP BY day
+      ORDER BY day ASC
+    `).all();
+
+    const byType = db.prepare(`
+      SELECT COALESCE(file_type, 'Unknown') AS type, COUNT(*) AS count
+      FROM files
+      GROUP BY type
+      ORDER BY count DESC
+    `).all();
+
+    const byDevice = db.prepare(`
+      SELECT COALESCE(device_model, 'Unknown') AS device, COUNT(*) AS count
+      FROM files
+      GROUP BY device
+      ORDER BY count DESC
+    `).all();
+
+    const byCountry = db.prepare(`
+      SELECT COALESCE(country, 'Unknown') AS country, COUNT(*) AS count
+      FROM files
+      GROUP BY country
+      ORDER BY count DESC
+    `).all();
+
+    const totals = db.prepare(`
+      SELECT COUNT(*) AS totalFiles, SUM(size) AS totalStorage FROM files
+    `).get();
+
+    const sources = db.prepare(`
+      SELECT
+        folder_path AS folder,
+        MIN(${datePart('%Y-%m-%d')}) AS first,
+        MAX(${datePart('%Y-%m-%d')}) AS last,
+        COUNT(*) AS count
+      FROM files
+      WHERE folder_path IS NOT NULL
+      GROUP BY folder_path
+      ORDER BY last DESC
+    `).all();
+
+    let perAge = [];
+    if (birthDate) {
+      const birth = new Date(birthDate);
+      const byYearMonthDay = db.prepare(`
+        SELECT
+          CAST(${datePart('%Y')} AS INTEGER) AS year,
+          CAST(${datePart('%m')} AS INTEGER) AS month,
+          CAST(${datePart('%d')} AS INTEGER) AS day,
+          COUNT(*) AS count
+        FROM files
+        WHERE ${hasDate}
+        GROUP BY year, month, day
+      `).all();
+
+      const ageCounts = {};
+      for (const row of byYearMonthDay) {
+        let age = row.year - birth.getFullYear();
+        if (
+          row.month < birth.getMonth() + 1 ||
+          (row.month === birth.getMonth() + 1 && row.day < birth.getDate())
+        ) age--;
+        ageCounts[age] = (ageCounts[age] || 0) + row.count;
+      }
+      perAge = Object.keys(ageCounts)
+        .map(a => ({ age: Number(a), count: ageCounts[a] }))
+        .sort((a, b) => b.age - a.age);
+    }
+
+    return {
+      success: true,
+      perYear, perMonth, topDays, allDays,
+      byType, byDevice, byCountry,
+      totalFiles: totals.totalFiles,
+      totalStorage: totals.totalStorage || 0,
+      sources, perAge
+    };
+  } catch (err) {
+    console.error("fetch-stats error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("migrate-create-date-local", async () => {
+  try {
+    initDatabase();
+
+    const rows = db.prepare(`
+      SELECT id, path
+      FROM files
+      WHERE create_date_local IS NULL
+        AND create_date IS NOT NULL
+    `).all();
+
+    console.log(`Found ${rows.length} rows to migrate`);
+    if (rows.length === 0) return { success: true, updated: 0 };
+
+    const updateStmt = db.prepare(`UPDATE files SET create_date_local = ? WHERE id = ?`);
+    
+    // Much higher concurrency — exiftool reads are I/O bound
+    const limit = pLimit(32);
+    let updated = 0;
+    let processed = 0;
+
+    // Process in chunks so we can write incrementally and report progress
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const chunk = rows.slice(i, i + BATCH_SIZE);
+
+      const results = await Promise.all(
+        chunk.map(row => limit(async () => {
+          try {
+            const exifData = await exiftool.read(row.path);
+            // Mirror the same priority as extractMetadata
+            const rawDate = exifData?.DateTimeOriginal ?? exifData?.CreationDate ?? null;
+                      
+            if (rawDate) {
+              if (typeof rawDate === "object" && rawDate.year) {
+                const pad = n => String(n).padStart(2, "0");
+                const local =
+                  `${rawDate.year}-${pad(rawDate.month)}-${pad(rawDate.day)} ` +
+                  `${pad(rawDate.hour)}:${pad(rawDate.minute)}:${pad(rawDate.second)}`;
+                return { id: row.id, local };
+              }
+              // String form (e.g. CreationDate with offset stripped to 19 chars)
+              const dateStr = typeof rawDate === "object" ? rawDate.toString() : rawDate;
+              const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+              return { id: row.id, local: normalised.substring(0, 19) };
+            }
+            
+            // Fallback: filename-encoded local time
+            const fromFilename = parseFilenameDateTime(row.path);
+            if (fromFilename) return { id: row.id, local: fromFilename };
+
+            return null;
+          } catch {
+            return null;
+          }
+        }))
+      );
+
+      const valid = results.filter(Boolean);
+
+      if (valid.length > 0) {
+        db.transaction((b) => {
+          for (const { id, local } of b) {
+            updateStmt.run(local, id);
+          }
+        })(valid);
+        updated += valid.length;
+      }
+
+      processed += chunk.length;
+
+      if (mainWindow) {
+        mainWindow.webContents.send("migration-progress", {
+          processed,
+          total: rows.length,
+          percentage: Math.round((processed / rows.length) * 100)
+        });
+      }
+
+      console.log(`Progress: ${processed}/${rows.length} processed, ${updated} updated`);
+    }
+
+    return { success: true, updated };
+  } catch (err) {
+    console.error("migrate-create-date-local error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+/**
+ * Parses local datetime from Android/camera filename conventions.
+ * Handles: 20230101_000507.mp4, VID_20230101_000507.mp4, IMG_20230101_000507.jpg, etc.
+ * Returns "YYYY-MM-DD HH:MM:SS" string, or null if no match.
+ */
+function parseFilenameDateTime(filePath) {
+  const name = path.basename(filePath);
+  const match = name.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if (!match) return null;
+
+  const [, yr, mo, dy, hh, mm, ss] = match;
+
+  // Basic sanity check
+  if (mo < 1 || mo > 12 || dy < 1 || dy > 31 || hh > 23 || mm > 59 || ss > 59) return null;
+
+  return `${yr}-${mo}-${dy} ${hh}:${mm}:${ss}`;
+}
 
 ipcMain.on("quick-minimize", () => {
     mainWindow.minimize();

@@ -255,6 +255,16 @@ const handleItemRemoved = ({ id }) => {
 ]);
 
 
+  function formatLocalDateString(str) {
+    if (!str) return '';
+    // str is "2024-12-31 23:59:25"
+    const [datePart, timePart] = str.split(' ');
+    if (!datePart) return '';
+    const [year, month, day] = datePart.split('-');
+    return `${day}-${month}-${year}${timePart ? ' ' + timePart : ''}`;
+  }
+
+
   const [containerWidth, setContainerWidth] = useState(1200);
 
   useEffect(() => {
@@ -462,7 +472,7 @@ onContextMenu={(e) => {
       onDoubleClick={() => folderAvailable && handleSelect(item, "double")}>
       <div
         className="thumb-card"
-        title={`${item.filename}\n${formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
+        title={`${item.filename}\n${formatLocalDateString(item.create_date_local) || formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
         style={{ width: "100%", height: scale === 0.5 ? '100%' : rowHeight - 36 }} // leave space for filename
       >
         {thumbSrc ? (
