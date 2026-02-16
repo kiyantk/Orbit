@@ -117,7 +117,7 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
           onMouseEnter={() => setShowTags(false)}
           onClick={() => revealFromCtx()}
         >
-          Reveal in all <FontAwesomeIcon style={{ float: "right",  }} icon={faArrowRight} />
+          Reveal in all
         </div>
         <div
           style={{

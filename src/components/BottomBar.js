@@ -5,7 +5,7 @@ import {
   faMagnifyingGlass,
 } from "@fortawesome/free-solid-svg-icons";
 
-const BottomBar = ({ explorerScale, filteredCount }) => {
+const BottomBar = ({ explorerScale, filteredCount, activeView }) => {
 
   const [photoCount, setPhotoCount] = useState(0);
   const fetchPhotoCount = async () => {
@@ -34,11 +34,11 @@ const BottomBar = ({ explorerScale, filteredCount }) => {
   return (
     <div className="bottom-bar">
       <div className="bottom-bar-left">
-        <div className="bottom-bar-media-counter"><FontAwesomeIcon icon={faPhotoFilm} /><span>{photoCount} {filteredCount !== null && filteredCount !== photoCount ? '(' + filteredCount + ')' : ''}</span></div>
+        <div className="bottom-bar-media-counter"><FontAwesomeIcon icon={faPhotoFilm} /><span>{photoCount} {filteredCount !== null && activeView === "explore" && filteredCount !== photoCount ? '(' + filteredCount + ')' : ''}</span></div>
       </div>
 
       <div className="bottom-bar-right">
-        { Number(explorerScale) !== 1 ? (
+        { activeView === "explore" && Number(explorerScale) !== 1 ? (
           <div className="bottom-bar-scale-counter">
             <FontAwesomeIcon icon={faMagnifyingGlass} />
             <span>{Number(explorerScale * 100).toFixed(0) + '%'}</span>

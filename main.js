@@ -2403,6 +2403,41 @@ function parseFilenameDateTime(filePath) {
   return `${yr}-${mo}-${dy} ${hh}:${mm}:${ss}`;
 }
 
+ipcMain.handle("cleanup-thumbnails", async () => {
+  try {
+    initDatabase();
+
+    const thumbnailsDir = path.join(dataDir, "thumbnails");
+    if (!fs.existsSync(thumbnailsDir)) {
+      return { success: true, message: "No thumbnails folder found.", removed: 0 };
+    }
+
+    // Build a Set of all valid thumbnail filenames from the DB
+    const rows = db.prepare("SELECT id FROM files").all();
+    const validFilenames = new Set(rows.map(r => `${r.id}_thumb.jpg`));
+
+    // Read all files in the thumbnails directory
+    const files = fs.readdirSync(thumbnailsDir);
+    let removed = 0;
+
+    for (const file of files) {
+      if (!validFilenames.has(file)) {
+        try {
+          fs.unlinkSync(path.join(thumbnailsDir, file));
+          removed++;
+        } catch (err) {
+          console.warn(`Failed to delete orphan thumbnail: ${file}`, err.message);
+        }
+      }
+    }
+
+    return { success: true, message: `Removed ${removed} thumbnail(s).`, removed };
+  } catch (err) {
+    console.error("cleanup-thumbnails error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle("toggle-fullscreen", () => {
   if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
 });

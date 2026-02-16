@@ -1650,3 +1650,13 @@ input[type="checkbox"] {
 .shuffle-settings-panel input[type="checkbox"] {
   width: 16px;
 }
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 20px;
+  height: calc(100% - 95px - 23px - 26px);
+  overflow-y: auto;
+  padding-bottom: 20px;
+}

@@ -2,6 +2,21 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import CalendarHeatmap from "react-calendar-heatmap";
 import { faChevronLeft, faChevronRight } from "@fortawesome/free-solid-svg-icons";
+import { Line, Bar } from "react-chartjs-2";
+import {
+  Chart as ChartJS,
+  CategoryScale, LinearScale,
+  PointElement, LineElement, BarElement,
+  Tooltip, Filler
+} from "chart.js";
+import zoomPlugin from "chartjs-plugin-zoom";
+
+ChartJS.register(
+  CategoryScale, LinearScale,
+  PointElement, LineElement, BarElement,
+  Tooltip, Filler,
+  zoomPlugin
+);
 
 const StatsView = ({ birthDate }) => {
   const [stats, setStats] = useState(null);
@@ -78,6 +93,99 @@ const StatsView = ({ birthDate }) => {
 
   const capitalize = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
+  const toChartData = (data, xKey, color = "#775ae4") => {
+    const isNumeric = xKey === "year" || xKey === "age";
+
+    return {
+      labels: isNumeric ? undefined : data.map(d => d[xKey]),
+      datasets: [{
+        data: isNumeric 
+          ? data.map(d => ({ x: Number(d[xKey]), y: d.count }))
+          : data.map(d => d.count),
+        borderColor: color,
+        backgroundColor: color + "33",
+        borderWidth: 2,
+        pointRadius: 2,
+        fill: true,
+        tension: 0.3,
+      }]
+    };
+  };
+
+  const getChartOptions = (xKey, data) => {
+    const isNumeric = xKey === "year" || xKey === "age";
+    
+    // Calculate min/max for zoom limits
+    let minLimit, maxLimit;
+    if (isNumeric && data.length > 0) {
+      const values = data.map(d => Number(d[xKey]));
+      minLimit = Math.min(...values);
+      maxLimit = Math.max(...values);
+    }
+    
+    return {
+      responsive: true,
+      plugins: { 
+        legend: { display: false },
+        zoom: {
+          limits: isNumeric ? {
+            x: { min: minLimit, max: maxLimit }
+          } : undefined,
+          pan: {
+            enabled: true,
+            mode: 'x',
+          },
+          zoom: {
+            wheel: {
+              enabled: true,
+            },
+            pinch: {
+              enabled: true,
+            },
+            mode: 'x',
+          },
+        }
+      },
+      scales: {
+        x: isNumeric ? {
+          type: 'linear',
+          min: minLimit,
+          max: maxLimit,
+          ticks: { 
+            font: { size: 11 },
+            stepSize: 1,
+            callback: function(value) {
+              return Number.isInteger(value) ? value : null;
+            }
+          }
+        } : {
+          ticks: { font: { size: 11 } }
+        },
+        y: { 
+          ticks: { font: { size: 11 } },
+          beginAtZero: true,
+        },
+      }
+    };
+  };
+
+  const prepChartData = (data, xKey) => {
+    // Filter out "Unknown" entries
+    let filtered = data.filter(d => d[xKey] !== "Unknown" && d[xKey] !== "");
+    
+    // Sort appropriately based on key type
+    if (xKey === "year" || xKey === "age") {
+      // Numeric ascending sort
+      filtered = filtered.sort((a, b) => Number(a[xKey]) - Number(b[xKey]));
+    } else if (xKey === "month") {
+      // Month format is "YYYY-MM", sort chronologically
+      filtered = filtered.sort((a, b) => a[xKey].localeCompare(b[xKey]));
+    }
+    // For device/country (categorical), keep original order (likely sorted by count DESC)
+
+    return filtered;
+  };
+
   if (loading) return <div className="stats-loading"><div className="loader"></div></div>;
   if (!stats) return null;
 
@@ -120,7 +228,8 @@ const StatsView = ({ birthDate }) => {
         {[
           { id: "overview", label: "Overview" },
           { id: "calendar", label: "Calendar" },
-          { id: "sources", label: "Sources" }
+          { id: "sources", label: "Sources" },
+          { id: "charts", label: "Charts" },
         ].map(tab => (
           <div key={tab.id} className={`tab-item ${activeTab === tab.id ? "active" : ""}`} onClick={() => setActiveTab(tab.id)}>
             {tab.label}
@@ -193,6 +302,28 @@ const StatsView = ({ birthDate }) => {
                 </table>
               </div>
             </div>
+          </div>
+        )}
+        {activeTab === "charts" && (
+          <div className="charts-grid">
+            {[
+              { title: "Media Per Year",  data: stats.perYear,   xKey: "year",    Chart: Line },
+              { title: "Media Per Month", data: stats.perMonth,  xKey: "month",   Chart: Line },
+              { title: "Media Per Age",   data: stats.perAge,    xKey: "age",     Chart: Line },
+              { title: "By Device",       data: stats.byDevice,  xKey: "device",  Chart: Bar },
+              { title: "By Country",      data: stats.byCountry, xKey: "country", Chart: Bar },
+            ].map(({ title, data, xKey, Chart }) => {
+              const preparedData = prepChartData(data, xKey);
+
+              return (
+                <div className="stats-card-wrapper" key={title}>
+                  <div className="stats-card">
+                    <h3>{title}</h3>
+                    <Chart data={toChartData(preparedData, xKey)} options={getChartOptions(xKey, preparedData)} />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

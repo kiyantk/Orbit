@@ -331,6 +331,7 @@ const App = () => {
         <BottomBar
           explorerScale={explorerScale}
           filteredCount={filteredCount}
+          activeView={activeView}
         />
       </div>
     </div>

@@ -64,6 +64,7 @@ const SettingsView = ({
     }
 
     setIsIndexing(true);
+    setShowChecksPopup(false);
     // setIndexingStatus("Indexing files...");
     
     try {
@@ -237,6 +238,7 @@ const SettingsView = ({
 const fixThumbnails = async () => {
   setIndexingStatus("Fixing thumbnails...");
   setIsIndexing(true);
+  setShowChecksPopup(false);
   const result = await window.electron.ipcRenderer.invoke("fix-thumbnails");
   
   if (result.success) {
@@ -252,6 +254,7 @@ const fixThumbnails = async () => {
 const fixIDs = async () => {
   setIndexingStatus("Fixing media IDs...");
   setIsIndexing(true);
+  setShowChecksPopup(false);
   const result = await window.electron.ipcRenderer.invoke("fix-media-ids");
   
   if (result.success) {
@@ -392,6 +395,22 @@ const toggleFullscreen = () => {
     };
   }, []);
 
+  const cleanupThumbnails = async () => {
+    setIndexingStatus("Scanning for orphaned thumbnails...");
+    setIsIndexing(true);
+    setShowChecksPopup(false);
+    const result = await window.electron.ipcRenderer.invoke("cleanup-thumbnails");
+
+    if (result.success) {
+      setIndexingStatus(result.message);
+      setTimeout(() => setIndexingStatus(null), 5000);
+    } else {
+      setIndexingStatus(`Error: ${result.error}`);
+    }
+
+    setIsIndexing(false);
+  };
+
   return (
       <div className="settings-view">
         <div className="settings-main">
@@ -515,6 +534,7 @@ const toggleFullscreen = () => {
                     <button
                       className="welcome-popup-select-folders-btn"
                       onClick={() => setShowHeicPopup(true)}
+                      disabled={isIndexing}
                     >
                       Generate HEIC Thumbnails
                     </button>
@@ -645,19 +665,21 @@ const toggleFullscreen = () => {
         {showChecksPopup && (
           <div className="welcome-popup-overlay">
             <div className="welcome-popup">
-              <h2>Maintenance Actions</h2>
-              <p>Select which maintenance task to run:</p>
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center" }}>
-                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" 
+              <h2>Tools</h2>
+              <p>Select which tool to run:</p>
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginTop: "10px", padding: "0px 10px" }}>
+                <button className="welcome-popup-select-folders-btn" 
                   onClick={() => startIndex(settings.indexedFolders)}>Reindex All</button>
-                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" 
-                  onClick={checkStatusses}>Check Status</button>
-                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                <button className="welcome-popup-select-folders-btn" 
+                  onClick={() => {setShowChecksPopup(false); checkStatusses()}}>Check Status</button>
+                <button className="welcome-popup-select-folders-btn"
                   onClick={fixIDs}>Fix IDs</button>
-                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
+                <button className="welcome-popup-select-folders-btn"
                   onClick={fixThumbnails}>Fix Thumbnails</button>
-                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                  onClick={enterRemoveMode}>Remove Mode</button>
+                <button className="welcome-popup-select-folders-btn"
+                  onClick={cleanupThumbnails}>Cleanup Thumbnails</button>
+                <button className="welcome-popup-select-folders-btn"
+                  onClick={() => {setShowChecksPopup(false); enterRemoveMode()}}>Remove Mode</button>
                 {/* <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
                   onClick={migrateCreateDateLocal}>Migrate - create_date_local</button> */}
               </div>
