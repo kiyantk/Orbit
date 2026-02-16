@@ -2403,6 +2403,10 @@ function parseFilenameDateTime(filePath) {
   return `${yr}-${mo}-${dy} ${hh}:${mm}:${ss}`;
 }
 
+ipcMain.handle("toggle-fullscreen", () => {
+  if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
+});
+
 ipcMain.on("quick-minimize", () => {
     mainWindow.minimize();
 });

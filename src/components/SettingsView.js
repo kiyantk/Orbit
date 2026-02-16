@@ -31,6 +31,7 @@ const SettingsView = ({
   const [missingHeicFiles, setMissingHeicFiles] = useState([]);
   const [showHeicPopup, setShowHeicPopup] = useState(false);
   const [showChecksPopup, setShowChecksPopup] = useState(false);
+  const [isFetchingUsage, setIsFetchingUsage] = useState(false);
 
   const [storageUsage, setStorageUsage] = useState({
     app: 0,
@@ -41,6 +42,7 @@ const SettingsView = ({
 
   // Get storage used in bytes
   const getUsageData = async () => {
+    setIsFetchingUsage(true);
     await window.electron.ipcRenderer
       .invoke("get-storage-usage")
       .then((data) => {
@@ -52,6 +54,7 @@ const SettingsView = ({
           });
         }
       });
+      setIsFetchingUsage(false);
   };
 
   const startIndex = async (folders) => {
@@ -270,6 +273,9 @@ useEffect(() => {
   checkHeicThumbnails();
 }, [settings.indexedFolders]);
 
+const toggleFullscreen = () => {
+  window.electron.ipcRenderer.invoke("toggle-fullscreen");
+};
 
   // Convert bytes to human-readable
   function formatBytes(a, b = 2) {
@@ -528,8 +534,10 @@ useEffect(() => {
                   <button
                     className="settings-normal-button"
                     onClick={() => getUsageData()}
+                    disabled={isFetchingUsage}
+                    style={isFetchingUsage ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
-                    Fetch Usage
+                    {isFetchingUsage ? "Loading..." : "Fetch Usage"}
                   </button>
                   {storageUsage.app !== 0 && (
                   <div className="storage-bar-container">
@@ -541,7 +549,7 @@ useEffect(() => {
                           : "0 Bytes"}
                       </span>
                       <span className="storage-legend-text">
-                        <div className="storage-legend-index"></div>Indexed files:{" "}
+                        <div className="storage-legend-index"></div>Database:{" "}
                         {storageUsage.index > 0
                           ? formatBytes(storageUsage.index)
                           : "0 Bytes"}
@@ -613,6 +621,15 @@ useEffect(() => {
                     onClick={openAppLocation}
                   >
                     Open in File Explorer
+                  </button>
+                </div>
+                <div className="settings-content-item">
+                  <span>Window:</span>
+                  <button
+                    className="settings-normal-button"
+                    onClick={toggleFullscreen}
+                  >
+                    Toggle Fullscreen
                   </button>
                 </div>
               </div>
