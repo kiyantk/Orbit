@@ -38,7 +38,8 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
   });
 
   const [shuffleSettings, setShuffleSettings] = useState({
-    shuffleInterval: 8
+    shuffleInterval: 8,
+    hideInfo: false
   });
 
   const [shuffleFilters, setShuffleFilters] = useState({
@@ -53,6 +54,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     year: "",
     tag: null,
     age: "",
+    ids: null
   });
 
   // Fetch options from database on mount
@@ -74,10 +76,6 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       setSortBy(settings.defaultSort)
     }
   }, [settings]);
-
-    useEffect(() => {
-    console.log(filters)
-  }, [filters]);
 
   useEffect(() => {
     if(activeView === "explore") {
@@ -223,6 +221,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       year: "",
       tag: null,
       age: "",
+      ids: null
     });
   }
 
@@ -461,6 +460,12 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
 
       {type === "shuffle-filter" && (
         <div className="filter-panel">
+          {shuffleFilters.ids && (
+            <div>
+              <label>Selection</label>
+              <span className="filter-static">{shuffleFilters.ids.length + " items"}</span>
+            </div>
+          )}
           <div>
             <label>Year</label>
             <select value={shuffleFilters.year} onChange={e => handleYearShuffleChange(e.target.value)}>
@@ -553,23 +558,40 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       )}
 
       {type === "shuffle-settings" && (
-  <div className="shuffle-settings-panel">
-    <label>Shuffle Interval: </label>
-    <input
-      type="number"
-      min="1"
-      value={shuffleSettings.shuffleInterval || 8}
-      onChange={e => {
-        const value = Number(e.target.value);
-        setShuffleSettings({ 
-          shuffleInterval: isNaN(value) || value < 1 ? 1 : value 
-        });
-      }}
-      style={{ width: "80px" }}
-    />
-    <span> seconds</span>
-  </div>
-)}
+        <div className="shuffle-settings-panel">
+          <div>
+            <label>Shuffle Interval: </label>
+            <input
+              type="number"
+              min="1"
+              value={shuffleSettings.shuffleInterval || 8}
+              onChange={e => {
+                const value = Number(e.target.value);
+                setShuffleSettings({ 
+                  ...shuffleSettings,
+                  shuffleInterval: isNaN(value) || value < 1 ? 1 : value 
+                });
+              }}
+              style={{ width: "80px" }}
+            />
+            <span> seconds</span>
+          </div>
+          <div>
+            <label>Hide Metadata: </label>
+            <input
+              type="checkbox"
+              checked={shuffleSettings.hideInfo}
+              onChange={e => {
+                const value = e.target.checked;
+                setShuffleSettings({ 
+                  ...shuffleSettings,
+                  hideInfo: value
+                });
+              }}
+            />
+          </div>
+        </div>
+      )}
 
     </div>
   );

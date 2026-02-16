@@ -246,13 +246,32 @@ const App = () => {
             />
           )}
           {activeView === "shuffle" && (
-            <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} />
+            <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} hideMetadata={shuffleSettings.hideInfo} />
           )}
           {activeView === "memories" && (
             <MemoriesView switchMemoryMode={setMemoryMode} memoryMode={memoryMode}
               onViewMemory={(ids) => {
-                setFilters({ ids });
-                setActiveView("explore");
+                if(!settings) {
+                  setFilters({ ids });
+                  setActiveView("explore");
+                }
+                switch(settings.openMemoriesIn) {
+                  case 'explorer':
+                    setFilters({ ids });
+                    setActiveView("explore");
+                    break
+                  case 'shuffle':
+                    setShuffleFilters({ ids });
+                    setActiveView("shuffle");
+                    break
+                  case 'map':
+                    setActiveView("map");
+                    break
+                  default:
+                    setFilters({ ids });
+                    setActiveView("explore");
+                    break
+                }
               }}
               onAddMedia={(memory) => {
                 setExplorerMode({enabled: true, value: memory.id, type: "memory"})

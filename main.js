@@ -192,7 +192,8 @@ const defaultConfig = {
   indexedFolders: [],
   birthDate: null,
   adjustHeicColors: true,
-  defaultSort: "media_id"
+  defaultSort: "media_id",
+  openMemoriesIn: "explorer"
 };
 
 // Database
@@ -428,7 +429,7 @@ function applyIdsFilter(db, ids) {
 // Fetch paginated files for the UI
 // Args: { offset: number, limit: number }
 // Returns: array of rows [{ id, filename, thumbnail_path, path, width, height, file_type }]
-ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters = {}, settings = {} }) => {
+ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters = {}, settings = {}, idsOnly = false }) => {
   try {
     initDatabase();
 
@@ -529,6 +530,12 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     }
 
     const whereSQL = whereClauses.length ? "WHERE " + whereClauses.join(" AND ") : "";
+
+    if (idsOnly) {
+      const stmt = db.prepare(`SELECT id FROM files ${whereSQL} ${orderSQL}`);
+      const rows = stmt.all(...params);
+      return { success: true, rows, totalCount: rows.length };
+    }
 
     const countStmt = db.prepare(`SELECT COUNT(*) as count FROM files ${whereSQL}`);
     const totalCount = countStmt.get(...params).count;
@@ -2013,14 +2020,12 @@ ipcMain.handle("fetch-memories", async () => {
   try {
     initDatabase();
 
-    // 1. Get all memories
     const memories = db.prepare(`
       SELECT *
       FROM memories
       ORDER BY created DESC
     `).all();
 
-    // 2. For each memory, fetch thumbnails from files
     const results = memories.map((m) => {
       let mediaIds = [];
       try {
@@ -2029,22 +2034,37 @@ ipcMain.handle("fetch-memories", async () => {
         console.error("Invalid media_ids JSON for memory:", m.id, err);
       }
 
-      const thumbnails = mediaIds.length
-        ? db.prepare(`
-            SELECT id, thumbnail_path
-            FROM files
-            WHERE id IN (${mediaIds.map(() => "?").join(",")})
-              AND file_type = 'image'
-              AND thumbnail_path IS NOT NULL
-            ORDER BY RANDOM()
-            LIMIT 20
-          `).all(...mediaIds)
-        : [];
+      if (!mediaIds.length) return { ...m, thumbnails: [], total: 0 };
 
-      return {
-        ...m,
-        thumbnails,
-      };
+      // Chunk into batches of 999 to stay under SQLite's variable limit
+      const chunkSize = 999;
+      const chunks = [];
+      for (let i = 0; i < mediaIds.length; i += chunkSize) {
+        chunks.push(mediaIds.slice(i, i + chunkSize));
+      }
+
+      const thumbnails = [];
+      for (const chunk of chunks) {
+        if (thumbnails.length >= 20) break;
+      
+        const remaining = 20 - thumbnails.length;
+        const rows = db.prepare(`
+          SELECT id, thumbnail_path
+          FROM files
+          WHERE id IN (${chunk.map(() => "?").join(",")})
+            AND file_type = 'image'
+            AND thumbnail_path IS NOT NULL
+          ORDER BY RANDOM()
+          LIMIT ?
+        `).all(...chunk, remaining);
+        
+        thumbnails.push(...rows);
+      }
+
+      // Shuffle and limit to 20 in JS since we're merging chunks
+      const shuffled = thumbnails.sort(() => Math.random() - 0.5).slice(0, 20);
+
+      return { ...m, thumbnails: shuffled, total: mediaIds.length };
     });
 
     return results;

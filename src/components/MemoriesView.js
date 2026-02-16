@@ -94,12 +94,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     try {
       setLoading(true);
       const rows = await window.electron.ipcRenderer.invoke("fetch-memories");
-      setCustomMemories(
-        rows.map((m) => ({
-          ...m,
-          thumbnails: JSON.parse(m.media_ids || "[]").map((id) => ({ id })), // generate thumbnails
-        }))
-      );
+      setCustomMemories(rows);
       setLoading(false);
     } catch (err) {
       console.error("Failed to fetch custom memories:", err);
@@ -212,8 +207,11 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
       {customMemories.map((m) => (
         <div key={m.id} className="memory-box"
            onClick={() => {
-            if (memoryMode !== "edit") {
-              onViewMemory(m.media_ids)
+            const mediaIds = JSON.parse(m.media_ids || "[]")
+            if (memoryMode !== "edit" && mediaIds.length > 0) {
+              onViewMemory(mediaIds)
+              return;
+            } else if(memoryMode !== "edit") {
               return;
             }
         
@@ -232,7 +230,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
             <div className="description">{m.description}</div>
           </div>
           <ThumbnailStrip thumbnails={m.thumbnails} />
-          <div className="memory-count">{m.thumbnails.length} items</div>
+          <div className="memory-count">{m.total} items</div>
         </div>
       ))}
     </div>

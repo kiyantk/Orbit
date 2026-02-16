@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import "./ShuffleView.css"; // <- add this
 
-const ShuffleView = ({ preloadCount = 3, interval = 8000, filters = {} }) => {
+const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, filters = {} }) => {
   const [images, setImages] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showMetadata, setShowMetadata] = useState(true);
   const [loading, setLoading] = useState(true);
   const timerRef = useRef(null);
+  const preloadedUrls = useRef(new Set());
+  const [displayedIndex, setDisplayedIndex] = useState(0);
 
   function formatDate(timestamp) {
       if(!timestamp) return ''
@@ -35,6 +36,23 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, filters = {} }) => {
     return `${day}-${month}-${year}${timePart ? ' ' + timePart : ''}`;
   }
 
+  const preloadImageBytes = useCallback((imgRecords) => {
+    const toLoad = imgRecords.filter((f) => !preloadedUrls.current.has(f.url));
+    if (toLoad.length === 0) return Promise.resolve();
+
+    return Promise.all(
+      toLoad.map(
+        (f) =>
+          new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => { preloadedUrls.current.add(f.url); resolve(); };
+            img.onerror = () => { preloadedUrls.current.add(f.url); resolve(); };
+            img.src = f.url;
+          })
+      )
+    );
+  }, []);
+
   const fetchRandom = useCallback(async (count = preloadCount) => {
     try {
       const result = await window.electron.ipcRenderer.invoke("fetch-files", {
@@ -56,7 +74,7 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, filters = {} }) => {
     return [];
   }, [preloadCount, filters]);
 
-const preloadImages = async () => {
+const preloadImages = useCallback(async () => {
   let newImgs = [];
   // Keep fetching until we have at least preloadCount new images
   while (newImgs.length < preloadCount) {
@@ -66,33 +84,38 @@ const preloadImages = async () => {
   }
 
   if (newImgs.length > 0) {
-    setImages((prev) => [...prev, ...newImgs]); // append to existing images
+    await preloadImageBytes(newImgs);
+    setImages((prev) => [...prev, ...newImgs]);
   }
   setLoading(false);
-};
+}, [fetchRandom, preloadCount, preloadImageBytes]);
 
-const nextImage = () => {
+useEffect(() => {
+  if (images.length === 0) return;
+  const upcoming = images.slice(currentIndex + 1, currentIndex + 3);
+  if (upcoming.length > 0) preloadImageBytes(upcoming);
+}, [currentIndex, images, preloadImageBytes]);
+
+const nextImage = useCallback(() => {
   setCurrentIndex((prev) => {
     const next = prev + 1;
     if (next >= images.length) {
-      preloadImages(); // Fetch more images if we're at the end
-      return prev; // Stay on last image until new ones arrive
+      preloadImages();
+      return prev;
     }
     return next;
   });
-};
+}, [images.length, preloadImages]);
 
   useEffect(() => {
     setImages([]);
     setCurrentIndex(0);
     setLoading(true);
     clearInterval(timerRef.current);
+    setDisplayedIndex(0);
+    preloadedUrls.current = new Set();
     preloadImages();
   }, [filters]);
-
-  useEffect(() => {
-    preloadImages();
-  }, []);
 
   useEffect(() => {
     if (images.length === 0) return;
@@ -109,35 +132,38 @@ const nextImage = () => {
   }
 
   const current = images[currentIndex];
+  const displayed = images[displayedIndex];
   if (!current) return null;
 
   return (
     <div className="shuffle-view">
-      <img
-        src={current.url}
-        alt={current.filename}
-        className="shuffle-image"
-      />
+    <img
+      key={current.url}
+      src={current.url}
+      style={{ display: "none" }}
+      onLoad={() => setDisplayedIndex(currentIndex)}
+    />
 
-      {showMetadata && (
-        <div className="shuffle-metadata">
-          <div>{current.filename}</div>
-          {(current.create_date_local || current.create_date) && (
-            <div>
-              {current.create_date_local
-                ? formatLocalDateString(current.create_date_local)
-                : formatDate(current.create_date)}
-            </div>
-          )}
-        </div>
-      )}
+    <img
+      src={images[displayedIndex]?.url}
+      alt={images[displayedIndex]?.filename}
+      className="shuffle-image"
+    />
 
-      <button
-        onClick={() => setShowMetadata((s) => !s)}
-        className="shuffle-toggle"
-      >
-        {showMetadata ? "Hide Info" : "Show Info"}
-      </button>
+
+
+    {!hideMetadata && (
+      <div className="shuffle-metadata">
+        <div>{displayed.filename}</div>
+        {(displayed.create_date_local || displayed.create_date) && (
+          <div>
+            {displayed.create_date_local
+              ? formatLocalDateString(displayed.create_date_local)
+              : formatDate(displayed.create_date)}
+          </div>
+        )}
+      </div>
+    )}
     </div>
   );
 };

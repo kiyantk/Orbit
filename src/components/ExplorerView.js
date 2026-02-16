@@ -144,6 +144,17 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   // is item loaded
   const isItemLoaded = (index) => !!itemsRef.current[index];
 
+  const fetchAllIds = useCallback(async () => {
+    const res = await window.electron.ipcRenderer.invoke("fetch-files", {
+      offset: 0,
+      limit: totalCount,
+      filters: filters || {},
+      settings: currentSettings || {},
+      idsOnly: true, // <-- flag so backend can do a lightweight SELECT id only
+    });
+    return res?.rows?.map(r => r.id) ?? [];
+  }, [filters, currentSettings, totalCount]);
+
   // react-window-infinite-loader required functions
   // const loadMoreItems = useCallback(
   //   (startIndex, stopIndex) => {
@@ -339,15 +350,29 @@ const tagCurrentlySelected = async (item) => {
 
   // --- Keyboard navigation (use idToIndex map) ---
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = async (e) => {
       if (actionPanelType) return;
+      if ((e.key === "A" || e.key === "a") && e.ctrlKey) {
+        const isAddMode = explorerMode?.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory");
+        if (!isAddMode) return;
+
+        e.preventDefault();
+
+        if (addModeSelected.size === totalCount) {
+          setAddModeSelected(new Set());
+        } else {
+          const ids = await fetchAllIds();
+          setAddModeSelected(new Set(ids));
+        }
+        return;
+      }
+
       if (!selectedItem) return;
       const idx = idToIndex.current.get(selectedItem.id);
       if (idx == null) return;
       if(e.key === "T" || e.key === "t") {
         tagCurrentlySelected(itemsRef.current[idx])
       }
-
       let nextIndex = idx;
       if (e.key === "ArrowRight") nextIndex = idx + 1;
       else if (e.key === "ArrowLeft") nextIndex = idx - 1;
@@ -370,7 +395,7 @@ const tagCurrentlySelected = async (item) => {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedItem, totalCount, onSelect]);
+  }, [selectedItem, totalCount, explorerMode, fetchAllIds, onSelect]);
 
   function formatTimestamp(timestamp) {
       if(!timestamp) return ''
@@ -781,7 +806,7 @@ onContextMenu={(e) => {
     }}
   >
     {/* Tagging Mode Text */}
-    <span style={{lineHeight: "1"}}>Add Mode active</span>
+    <span style={{lineHeight: "1"}}>Add Mode</span>
 
     {/* Attach Tag Button */}
     <button

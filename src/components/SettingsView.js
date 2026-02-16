@@ -7,6 +7,7 @@ import {
   faArrowUp,
   faHardDrive,
   faKeyboard,
+  faPanorama,
   faPhotoFilm,
   faTableCells,
   faToolbox,
@@ -140,6 +141,11 @@ const SettingsView = ({
     setSettings((prev) => ({ ...prev, defaultSort: newValue }));
   };
 
+  const handleOpenMemoriesInChange = (event) => {
+    const newValue = event.target.value;
+    setSettings((prev) => ({ ...prev, openMemoriesIn: newValue }));
+  };
+
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
@@ -214,6 +220,7 @@ const SettingsView = ({
     User: faUser,
     Media: faPhotoFilm,
     Explorer: faTableCells,
+    Memories: faPanorama,
     Storage: faHardDrive,
     Controls: faKeyboard,
     App: faToolbox,
@@ -385,7 +392,7 @@ useEffect(() => {
           <div className="settings-list">
             <h2>Settings</h2>
             <ul>
-              {["User", "Media", "Explorer", "Storage", "Controls", "App"].map(
+              {["User", "Media", "Explorer", "Memories", "Storage", "Controls", "App"].map(
                 (tab) => (
                   <li
                     key={tab}
@@ -444,12 +451,28 @@ useEffect(() => {
                     onChange={(e) => handleDefaultSortChange(e)}
                     className="settings-itemstyle-select"
                   >
-                    <option value="media_id">ID (Default)</option>
+                    <option value="media_id">ID (default)</option>
                     <option value="name">Name</option>
                     <option value="create_date">Date Taken</option>
                     <option value="created">Date Created</option>
                     <option value="size">File Size</option>
                     <option value="random">Random</option>
+                  </select>
+                </div>
+              </div>
+            )}
+            {selectedTab === "Memories" && (
+              <div>
+                <div className="settings-content-item">
+                  <span>Open memories in:</span>
+                  <select
+                    value={settings?.openMemoriesIn}
+                    onChange={(e) => handleOpenMemoriesInChange(e)}
+                    className="settings-itemstyle-select"
+                  >
+                    <option value="explorer">Explorer (default)</option>
+                    <option value="shuffle">Shuffle</option>
+                    <option value="map">Map</option>
                   </select>
                 </div>
               </div>
