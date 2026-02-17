@@ -104,7 +104,6 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   }, [item]);
   
   useEffect(() => {
-    console.log(item)
     setCurrentTime(0);
     setIsPlaying(true);
     setIsLoading(true);

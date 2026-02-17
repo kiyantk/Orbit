@@ -193,7 +193,9 @@ const defaultConfig = {
   birthDate: null,
   adjustHeicColors: true,
   defaultSort: "media_id",
-  openMemoriesIn: "explorer"
+  openMemoriesIn: "explorer", // "explorer", "shuffle" or "map" 
+  itemText: "filename", // "filename", "datetime" or "none"
+  noGutters: false,
 };
 
 // Database

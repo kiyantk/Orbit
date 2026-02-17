@@ -142,6 +142,7 @@ const App = () => {
 
     const setNewActiveView = (view) => {
       setActiveView(view)
+      setMapViewType("cluster")
     }
 
     // Apply new settings from Settings popup
@@ -298,6 +299,7 @@ const App = () => {
                 itemDeleted={handleItemDeleted}
                 explorerMode={explorerMode}
                 setExplorerMode={setExplorerMode}
+                explorerScale={explorerScale}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (

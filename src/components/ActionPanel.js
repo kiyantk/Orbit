@@ -5,7 +5,7 @@ import React, { useState, useEffect } from "react";
 const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, activeView, activeShuffleFilters }) => {
   const [sortBy, setSortBy] = useState("media_id");
   const [sortOrder, setSortOrder] = useState("desc");
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState(activeFilters || {
     dateExact: "",
     dateFrom: "",
     dateTo: "",

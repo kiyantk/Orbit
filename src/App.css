@@ -652,6 +652,7 @@ select:disabled {
   outline: 1px solid dimgray;
   -webkit-user-select: none;
   user-select: none;
+  z-index: 1;
 }
 
 /* width */
@@ -1154,11 +1155,13 @@ select:focus {
 .thumb-selected-addmode {
   background-color: rgba(255, 255, 0, 0.268);
   border: 1px solid #0f0f12;
+  z-index: 1;
 }
 
 .thumb-selected-removemode {
   background-color: rgba(255, 0, 0, 0.268);
   border: 1px solid #af3a3a;
+  z-index: 1;
 }
 
 
@@ -1659,4 +1662,14 @@ input[type="checkbox"] {
   height: calc(100% - 95px - 23px - 26px);
   overflow-y: auto;
   padding-bottom: 20px;
+}
+
+.leaflet-interactive:focus {
+  outline: none;
+}
+
+.thumb-no-gutter.thumb-selected-addmode .thumb-card,
+.thumb-no-gutter.thumb-selected-removemode .thumb-card,
+.thumb-no-gutter.thumb-selected .thumb-card {
+  scale: 0.9;
 }

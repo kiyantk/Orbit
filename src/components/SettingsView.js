@@ -145,6 +145,11 @@ const SettingsView = ({
     setSettings((prev) => ({ ...prev, defaultSort: newValue }));
   };
 
+  const handleItemTextChange = (event) => {
+    const newValue = event.target.value;
+    setSettings((prev) => ({ ...prev, itemText: newValue }));
+  };
+
   const handleOpenMemoriesInChange = (event) => {
     const newValue = event.target.value;
     setSettings((prev) => ({ ...prev, openMemoriesIn: newValue }));
@@ -483,6 +488,26 @@ const toggleFullscreen = () => {
                     <option value="size">File Size</option>
                     <option value="random">Random</option>
                   </select>
+                </div>
+                <div className="settings-content-item">
+                  <span>Item text:</span>
+                  <select
+                    value={settings?.itemText}
+                    onChange={(e) => handleItemTextChange(e)}
+                    className="settings-itemstyle-select"
+                  >
+                    <option value="filename">Filename (default)</option>
+                    <option value="datetime">Date</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+                <div className="settings-content-item">
+                  <input
+                    type="checkbox"
+                    checked={settings?.noGutters}
+                    onChange={handleCheckboxChange('noGutters')}
+                  />
+                  <span>No gutters</span>
                 </div>
               </div>
             )}

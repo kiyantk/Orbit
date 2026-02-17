@@ -15,10 +15,10 @@ const PAGE_SIZE = 200; // fetch 200 items per page
 const FIRST_PAGE_SIZE = 200; // smaller batch for fast first render
 
 const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect, onTagAssign, onScale, filters, filteredCountUpdated,
-  scrollPosition, setScrollPosition, actionPanelType, resetFilters, itemDeleted, explorerMode, setExplorerMode }) => {
+  scrollPosition, setScrollPosition, actionPanelType, resetFilters, itemDeleted, explorerMode, setExplorerMode, explorerScale }) => {
   const [totalCount, setTotalCount] = useState(null);
   const loadingPages = useRef(new Set());
-  const [scale, setScale] = useState(1); // 1 = 100%, 2 = 200%, etc.
+  const [scale, setScale] = useState(Number(explorerScale) || 1); // 1 = 100%, 2 = 200%, etc.
   const [selectedItem, setSelectedItem] = useState(null);
   const itemsRef = useRef({});
   const idToIndex = useRef(new Map());
@@ -30,6 +30,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const [itemToReveal, setItemToReveal] = useState(null);
   const anchorIndexRef = useRef(0);
   const isRestoringScrollRef = useRef(false);
+  const [noGutters, setNoGutters] = useState(false);
 
   // --- Fetch pages into refs ---
   const addItems = (rows, offset) => {
@@ -80,6 +81,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
     window.electron.ipcRenderer.invoke("get-indexed-files-count").then((count) => {
       setTotalCount(Number(count || 0));
     });
+    if(currentSettings) setNoGutters(currentSettings.noGutters)
   }, [currentSettings]);
 
   // Helper: fetch a page containing the given index
@@ -314,6 +316,42 @@ const getTags = async () => {
   return freshTags; // <-- return the data so callers can use it immediately
 };
 
+const getItemName = (item) => {
+  if (!currentSettings || !currentSettings.itemText) {
+    return item.filename
+  }
+
+  switch (currentSettings.itemText) {
+    case 'filename':
+      return item.filename
+
+    case 'datetime': {
+      if (item.create_date_local) {
+        return formatLocalDateString(item.create_date_local)
+      }
+
+      if (item.create_date) {
+        return formatTimestamp(item.create_date)
+      }
+
+      if (item.created || item.modified) {
+        const earliest = Math.min(
+          ...( [item.created, item.modified].filter(Boolean) )
+        )
+        return formatTimestamp(earliest)
+      }
+
+      return
+    }
+
+    case 'none':
+      return
+
+    default:
+      return item.filename
+  }
+}
+
 const tagCurrentlySelected = async (item) => {
   const freshTags = await getTags(); // Make getTags return tags
   const tag = freshTags?.[0];
@@ -345,7 +383,7 @@ const tagCurrentlySelected = async (item) => {
 
   const columnWidth = BASE_COLUMN_WIDTH * scale;
   const rowHeight = BASE_ROW_HEIGHT * scale;
-  const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + GUTTER)));
+  const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + (noGutters ? 0 : GUTTER))));
   const rowCount = totalCount ? Math.ceil(totalCount / columnCount) : 0;
 
   // --- Keyboard navigation (use idToIndex map) ---
@@ -451,10 +489,10 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
 
   if (!item) {
     return (
-      <div style={{ ...style, padding: 8 }}>
+      <div style={{ ...style, padding: noGutters ? 0 : 8 }}>
         <div
           className="thumb-skeleton"
-          style={{ width: "100%", height: rowHeight - 16, borderRadius: 6 }}
+          style={{ width: "100%", height: rowHeight - 16, borderRadius: noGutters ? 0 : 6 }}
         />
       </div>
     );
@@ -465,8 +503,8 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
   const thumbSrc = item.thumbnail_path ? `orbit://thumbs/${item.id}_thumb.jpg` : null;
 
   return (
-    <div style={{ ...style, padding: 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
-      className={
+    <div style={{ ...style, padding: noGutters ? 0 : 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
+      className={`${noGutters && currentSettings && currentSettings.itemText === "none" ? 'thumb-no-gutter' : ''} ${
         explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory") && addModeSelected.has(item.id)
           ? "thumb-selected-addmode"          // highlighted in Add Mode
           : explorerMode && explorerMode.enabled && (explorerMode.type === "remove") && removeModeSelected.has(item.id)
@@ -474,7 +512,7 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
           : selectedItem && item.id === selectedItem.id
           ? "thumb-selected"                  // normal selected
           : "thumb-item"                      // default thumbnail
-      }
+      }`}
 
       onClick={(e) => {
   if (!folderAvailable) return;
@@ -498,13 +536,13 @@ onContextMenu={(e) => {
       <div
         className="thumb-card"
         title={`${item.filename}\n${formatLocalDateString(item.create_date_local) || formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
-        style={{ width: "100%", height: scale === 0.5 ? '100%' : rowHeight - 36 }} // leave space for filename
+        style={{ width: "100%", height: scale === 0.5 || (noGutters && currentSettings && currentSettings.itemText === "none") ? '100%' : rowHeight - 36, borderRadius: noGutters ? 0 : 6 }} // leave space for filename
       >
         {thumbSrc ? (
           <img
             alt={item.filename}
             src={thumbSrc}
-            style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 6 }}
+            style={{ width: "100%", height: "100%", objectFit: noGutters ? "cover" : "contain", borderRadius: noGutters ? 0 : 6 }}
             onError={(e) => {
               e.currentTarget.onerror = null;
               e.currentTarget.src = ""; // optional fallback
@@ -529,8 +567,8 @@ onContextMenu={(e) => {
       </div>
       {/* Filename under the thumbnail */}
       <div
-        className={`thumb-filename ${!folderAvailable ? 'thumb-filename-unavailable' : ''} ${scale === 0.5 ? 'thumb-hidden' : ''}`}
-        title={item.filename}
+        className={`thumb-filename ${!folderAvailable ? 'thumb-filename-unavailable' : ''} ${scale === 0.5 || (currentSettings && currentSettings.itemText === "none") ? 'thumb-hidden' : ''}`}
+        title={getItemName(item)}
         style={{
           marginTop: 4,
           fontSize: 12,
@@ -539,7 +577,7 @@ onContextMenu={(e) => {
           textOverflow: "ellipsis",
         }}
       >
-        {item.filename}
+        {getItemName(item)}
       </div>
     </div>
   );
@@ -609,7 +647,7 @@ onContextMenu={(e) => {
     
       // Compute columnCount locally
       const columnWidth = BASE_COLUMN_WIDTH * scale;
-      const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + GUTTER)));
+      const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + (noGutters ? 0 : GUTTER))));
     
       const rowIndex = Math.floor(itemIndex / columnCount);
       const columnIndex = itemIndex % columnCount;
@@ -707,7 +745,7 @@ onContextMenu={(e) => {
                 gridRef.current = grid;
               }}
               columnCount={columnCount}
-              columnWidth={columnWidth + GUTTER}
+              columnWidth={columnWidth + (noGutters ? 0 : GUTTER)}
               height={gridHeight}
               rowCount={rowCount}
               rowHeight={rowHeight}
