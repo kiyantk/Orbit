@@ -492,7 +492,7 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
       <div style={{ ...style, padding: noGutters ? 0 : 8 }}>
         <div
           className="thumb-skeleton"
-          style={{ width: "100%", height: rowHeight - 16, borderRadius: noGutters ? 0 : 6 }}
+          style={{ height: rowHeight - 16, borderRadius: noGutters ? 0 : 6 }}
         />
       </div>
     );
@@ -503,8 +503,8 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
   const thumbSrc = item.thumbnail_path ? `orbit://thumbs/${item.id}_thumb.jpg` : null;
 
   return (
-    <div style={{ ...style, padding: noGutters ? 0 : 8, boxSizing: "border-box", textAlign: "center", cursor: "pointer" }} 
-      className={`${noGutters && currentSettings && currentSettings.itemText === "none" ? 'thumb-no-gutter' : ''} ${
+    <div style={{ ...style, padding: noGutters ? 0 : 8 }} 
+      className={`thumb-cell ${noGutters && currentSettings && currentSettings.itemText === "none" ? 'thumb-no-gutter' : ''} ${
         explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory") && addModeSelected.has(item.id)
           ? "thumb-selected-addmode"          // highlighted in Add Mode
           : explorerMode && explorerMode.enabled && (explorerMode.type === "remove") && removeModeSelected.has(item.id)
@@ -513,25 +513,21 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
           ? "thumb-selected"                  // normal selected
           : "thumb-item"                      // default thumbnail
       }`}
-
       onClick={(e) => {
-  if (!folderAvailable) return;
+        if (!folderAvailable) return;
 
-  if (explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory")) {
-    handleAddModeClick(item);
-  } else if (explorerMode && explorerMode.enabled && (explorerMode.type === "remove")) {
-    handleRemoveModeClick(item);
-  } else {
-    handleClick(e, item);
-  }
-}}
-
-onContextMenu={(e) => {
-  e.preventDefault();
-  setContextMenu({ x: e.clientX, y: e.clientY, item });
-}}
-
-
+        if (explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory")) {
+          handleAddModeClick(item);
+        } else if (explorerMode && explorerMode.enabled && (explorerMode.type === "remove")) {
+          handleRemoveModeClick(item);
+        } else {
+          handleClick(e, item);
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setContextMenu({ x: e.clientX, y: e.clientY, item });
+      }}
       onDoubleClick={() => folderAvailable && handleSelect(item, "double")}>
       <div
         className="thumb-card"
@@ -542,7 +538,8 @@ onContextMenu={(e) => {
           <img
             alt={item.filename}
             src={thumbSrc}
-            style={{ width: "100%", height: "100%", objectFit: noGutters ? "cover" : "contain", borderRadius: noGutters ? 0 : 6 }}
+            className="thumb-img"
+            style={{ objectFit: noGutters ? "cover" : "contain", borderRadius: noGutters ? 0 : 6 }}
             onError={(e) => {
               e.currentTarget.onerror = null;
               e.currentTarget.src = ""; // optional fallback

@@ -1673,3 +1673,18 @@ input[type="checkbox"] {
 .thumb-no-gutter.thumb-selected .thumb-card {
   scale: 0.9;
 }
+
+.thumb-cell {
+   box-sizing: border-box;
+   text-align: center;
+   cursor: pointer;
+}
+
+.thumb-img {
+  width: 100%;
+  height: 100%;
+}
+
+.thumb-skeleton {
+  width: 100%;
+}
