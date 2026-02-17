@@ -4,30 +4,73 @@
 
 # Orbit
 
-Orbit is a feature-rich desktop photo viewer built with Electron and React. It provides a modern interface to browse your media collection with ease.
+**Orbit** is a high-performance desktop photo and video viewer built with **Electron** and **React**. It’s designed to scale effortlessly—from small personal libraries to **millions of files**—while staying fast, intuitive, and visually clean.
 
-## Features
-- 🖼️ A unified grid of your content
-- 👀 Fast previews and full-size media viewing
-- 💾 View file properties
-- ⚡ Lightning-fast performance, even with millions of files
-- 🗺️ View photo locations on a map
-- 📊 View statistics about your collection
+Browse, explore, and rediscover your media without friction.
 
-## Installation
+---
+
+## ✨ Features
+
+- 🖼️ **Unified media grid**  
+  View content from multiple folders in one seamless, chronological grid.
+
+- 👀 **Instant previews & full-size viewing**  
+  Open photos and videos instantly with smooth navigation.
+
+- 💾 **Detailed file information**  
+  Inspect metadata and file properties with ease.
+
+- ⚡ **Blazing-fast performance**  
+  Optimized for massive libraries without slowdowns.
+
+- 🗺️ **Map view**  
+  Explore photos by location on an interactive map.
+
+- 📊 **Library statistics**  
+  Gain insights into your collection: file types, counts, storage usage, and more.
+
+- 🔀 **Shuffle mode**  
+  Randomly surface photos and videos to rediscover forgotten moments.
+
+- 🏷️ **Tags**  
+  Organize your media with custom tags for powerful filtering and quick access.
+
+- ✨ **Memories**  
+  Automatically curated highlights from your library—bringing meaningful moments back into focus.
+
+---
+
+## 🚀 Installation
+
 ### Windows
+
 1. Download the latest Windows release from the [Releases](https://github.com/kiyantk/orbit/releases) page.
 2. Run the installer and follow the setup wizard.
-3. You can now launch Orbit from the Start Menu or by opening `Orbit.exe`.
+3. Launch Orbit from the Start Menu or by opening `Orbit.exe`.
 
-## Why Orbit?
-Many media viewers are limited in their functionality or simply don't scale well. Orbit offers a unified grid based on as many folders as you want, unbeatable performance 
+---
 
-## Screenshots
-WIP
+## 🤔 Why Orbit?
 
-## Supported files
-All files can be indexed, but only the following file types can be viewed:
+Most media viewers struggle with performance, scalability, or modern organization features.  
+Orbit is built from the ground up to handle **huge libraries**, multiple folders, and advanced browsing—without compromising speed or simplicity.
+
+If your photo library has outgrown traditional viewers, Orbit is built for you.
+
+---
+
+## 🖼️ Screenshots
+
+_WIP_
+
+---
+
+## 📁 Supported Files
+
+All files can be indexed, but viewing is supported for:
+
+### Images
 - **.jpg** / **.jpeg**
 - **.png**
 - **.gif**
@@ -35,6 +78,8 @@ All files can be indexed, but only the following file types can be viewed:
 - **.tiff** / **.tif**
 - **.webp**
 - **.heic**
+
+### Videos
 - **.mp4**
 - **.mov**
 - **.avi**
