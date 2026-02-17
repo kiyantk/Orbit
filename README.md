@@ -4,7 +4,7 @@
 
 # Orbit
 
-**Orbit** is a high-performance desktop photo and video viewer built with **Electron** and **React**. It’s designed to scale effortlessly—from small personal libraries to **millions of files**—while staying fast, intuitive, and visually clean.
+**Orbit** is a high-performance desktop photo and video viewer built with **Electron** and **React**. It’s designed to scale effortlessly - from small personal libraries to **millions of files**—while staying fast, intuitive, and visually clean.
 
 Browse, explore, and rediscover your media without friction.
 
@@ -37,7 +37,7 @@ Browse, explore, and rediscover your media without friction.
   Organize your media with custom tags for powerful filtering and quick access.
 
 - ✨ **Memories**  
-  Automatically curated highlights from your library—bringing meaningful moments back into focus.
+  Automatically curated highlights from your library, bringing meaningful moments back into focus.
 
 ---
 
