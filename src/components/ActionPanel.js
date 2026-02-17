@@ -15,7 +15,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     mediaType: "",
     country: "",
     year: "",
-    tag: null,
+    tag: "",
     age: "",
     ids: null
   });
@@ -52,7 +52,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     mediaType: "",
     country: "",
     year: "",
-    tag: null,
+    tag: "",
     age: "",
     ids: null
   });
@@ -202,7 +202,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       mediaType: "",
       country: "",
       year: "",
-      tag: null,
+      tag: "",
       age: "",
       ids: null
     });
@@ -219,7 +219,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       mediaType: "",
       country: "",
       year: "",
-      tag: null,
+      tag: "",
       age: "",
       ids: null
     });
@@ -429,7 +429,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
           </div>
           <div>
             <label>Tag</label>
-            <select value={filters.tag}onChange={e => applyFilterChange(prev => ({...prev, tag: e.target.value}))}>
+            <select value={filters.tag} onChange={e => applyFilterChange(prev => ({...prev, tag: e.target.value}))}>
               <option value="">All</option>
               {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
             </select>

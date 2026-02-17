@@ -456,7 +456,9 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   {(item.create_date_local || item.create_date) && (
     <div className="metadata-row">
       <span className="metadata-label">Taken</span>
-      <span className="metadata-value">
+      <span className="metadata-value" title={item.create_date_local
+          ? formatLocalDateString(item.create_date_local)
+          : formatTimestamp(item.create_date)}>
         {item.create_date_local
           ? formatLocalDateString(item.create_date_local)
           : formatTimestamp(item.create_date)}
