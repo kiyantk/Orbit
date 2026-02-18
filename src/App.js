@@ -36,7 +36,7 @@ const App = () => {
   const [mapViewType, setMapViewType] = useState("cluster");
   const [memoryMode, setMemoryMode] = useState(null);
   const [showTagPopup, setShowTagPopup] = useState({value: false, type: ""});
-  const [explorerMode, setExplorerMode] = useState({enabled: false, value: null, type: ""});
+  const [explorerMode, setExplorerMode] = useState({enabled: false, value: null, type: "", existing: null});
 
   const handleActionPanelApply = (data) => {
     if (actionPanelType === "filter" || actionPanelType === "sort" || actionPanelType === "search") {
@@ -241,7 +241,7 @@ const App = () => {
                 setActiveView("explore");
               }}
               onAddMedia={(tag) => {
-                setExplorerMode({enabled: true, value: tag.id, type: "tag"})
+                setExplorerMode({ enabled: true, value: tag.id, type: "tag", existing: tag.media_ids || [] })
                 // setFilters({ tagId: tag.id, addMode: true });
                 setActiveView("explore");
               }} 
@@ -279,7 +279,7 @@ const App = () => {
                 }
               }}
               onAddMedia={(memory) => {
-                setExplorerMode({enabled: true, value: memory.id, type: "memory"})
+                setExplorerMode({ enabled: true, value: memory.id, type: "memory", existing: memory.existing || [] })
                 setActiveView("explore");
               }}
             />

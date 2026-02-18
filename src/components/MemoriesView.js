@@ -33,6 +33,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     description: "",
     color: "#ffffff",
     quickAddQuery: "",
+    existing: null
   });
 
   useEffect(() => {
@@ -43,6 +44,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
       description: "",
       color: "#ffffff",
       quickAddQuery: "",
+      existing: null
     })
 
     if (memoryMode === "new") setShowAddMemory(true);
@@ -219,7 +221,8 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
               id: m.id,
               title: m.title,
               description: m.description,
-              color: m.color
+              color: m.color,
+              existing: mediaIds
             });
             setShowAddMemory(true);
           }}
@@ -406,7 +409,7 @@ const handleDeleteMemory = async () => {
                     className="btn btn-primary"
                     onClick={() => {setShowAddMemory(false); switchMemoryMode(null); onAddMedia(newMemory)}}
                   >
-                    Add Media
+                    Select Media
                   </button>
               )}
               <button className="btn btn-primary" onClick={handleSaveMemory}>

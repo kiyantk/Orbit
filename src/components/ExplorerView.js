@@ -32,6 +32,17 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const isRestoringScrollRef = useRef(false);
   const [noGutters, setNoGutters] = useState(false);
 
+  // Pre-populate addModeSelected with items already in the tag/memory
+  useEffect(() => {
+    if (!explorerMode?.enabled) {
+      setAddModeSelected(new Set());
+      return;
+    }
+    if (explorerMode.existing?.length) {
+      setAddModeSelected(new Set(explorerMode.existing));
+    }
+  }, [explorerMode?.enabled, explorerMode?.value]);
+
   // --- Fetch pages into refs ---
   const addItems = (rows, offset) => {
     rows.forEach((row, i) => {
@@ -840,9 +851,6 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
       boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
     }}
   >
-    {/* Tagging Mode Text */}
-    <span style={{lineHeight: "1"}}>Add Mode</span>
-
     {/* Attach Tag Button */}
     <button
       style={{
@@ -854,21 +862,21 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
         cursor: "pointer",
       }}
       onClick={() => {
-        setExplorerMode({enabled: false, value: null, type: ""})
-        if(explorerMode.type === "tag") {
-          window.electron.ipcRenderer.invoke("tag-selected-items", {
+        setExplorerMode({enabled: false, value: null, type: ""});
+        if (explorerMode.type === "tag") {
+          window.electron.ipcRenderer.invoke("tag:set-items", {
             tagId: explorerMode.value,
             mediaIds: Array.from(addModeSelected),
           });
-        } else if(explorerMode.type === "memory") {
-          window.electron.ipcRenderer.invoke("add-items-to-memory", {
+        } else if (explorerMode.type === "memory") {
+          window.electron.ipcRenderer.invoke("memory:set-items", {
             memoryId: explorerMode.value,
             mediaIds: Array.from(addModeSelected),
           });
         }
       }}
     >
-      Add to {explorerMode.type} ({addModeSelected.size})
+      Save {explorerMode.type} ({addModeSelected.size} items)
     </button>
 
     {/* Close Button */}

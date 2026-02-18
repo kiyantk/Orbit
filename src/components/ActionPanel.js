@@ -112,6 +112,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
         setMapFilters(prev => ({ ...prev, ...activeMapFilters }))
       }
     }
+    console.log(filters, activeFilters)
   }, [activeView]);
 
   // Auto-apply filters or sort whenever they change

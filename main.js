@@ -808,40 +808,6 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
   }
 });
 
-ipcMain.handle("tag-selected-items", async (event, { tagId, mediaIds }) => {
-  try {
-    initDatabase();
-
-    if (!tagId || !Array.isArray(mediaIds)) {
-      throw new Error("Invalid parameters: tagId and mediaIds are required.");
-    }
-
-    // Fetch the existing media_ids for the tag
-    const tagRow = db.prepare("SELECT media_ids FROM tags WHERE id = ?").get(tagId);
-    if (!tagRow) throw new Error(`Tag with id ${tagId} not found`);
-
-    let existingIds = [];
-    try {
-      existingIds = JSON.parse(tagRow.media_ids || "[]");
-    } catch {
-      existingIds = [];
-    }
-
-    // Merge and deduplicate IDs
-    const updatedIds = Array.from(new Set([...existingIds, ...mediaIds]));
-
-    // Update the tag + set last_used timestamp
-    const now = Date.now();
-    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
-      .run(JSON.stringify(updatedIds), now, tagId);
-
-    return { success: true, updatedIds };
-  } catch (err) {
-    console.error("save-selected-items error:", err);
-    return { success: false, error: err.message };
-  }
-});
-
 ipcMain.handle("tag:add-item", async (event, { tagId, mediaId }) => {
   try {
     initDatabase();
@@ -882,53 +848,6 @@ ipcMain.handle("tag:remove-item", async (event, { tagId, mediaId }) => {
     return { success: false, error: err.message };
   }
 });
-
-// Indexing
-// ipcMain.handle("index-files", async (event, folders) => {
-//   try {
-//     initDatabase();
-
-//     for (const folder of folders) {
-//       const existing = db.prepare("SELECT * FROM folders WHERE path = ?").get(folder);
-//       if (!existing) {
-//         db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)").run(folder);
-        
-//         // Count total files for progress tracking
-//         const totalFiles = countTotalFiles(folder);
-//         let processedFiles = 0;
-        
-//         // Send initial progress with total files
-//         if (mainWindow) {
-//           mainWindow.webContents.send("indexing-progress", {
-//             filename: "",
-//             processed: 0,
-//             total: totalFiles,
-//             percentage: 0
-//           });
-//         }
-        
-//         await indexFilesRecursively(folder, folder, totalFiles, (processed) => {
-//           processedFiles = processed;
-//           const percentage = totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0;
-          
-//           if (mainWindow) {
-//             mainWindow.webContents.send("indexing-progress", {
-//               filename: "",
-//               processed: processedFiles,
-//               total: totalFiles,
-//               percentage: percentage
-//             });
-//           }
-//         });
-//       }
-//     }
-
-//     return { success: true, message: "Files indexed successfully" };
-//   } catch (err) {
-//     console.error(err);
-//     return { success: false, error: err.message };
-//   }
-// });
 
 ipcMain.handle("index-files", async (event, folders) => {
   try {
@@ -977,34 +896,6 @@ ipcMain.handle("index-files", async (event, folders) => {
     return { success: false, error: err.message };
   }
 });
-
-
-// Thumbnail generation using sharp
-// async function generateThumbnail(filePath, id) {
-//   const ext = path.extname(filePath).toLowerCase();
-//   const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".heic", ".webp"];
-//   if (!imageExtensions.includes(ext)) return null;
-
-//   try {
-//     const thumbnailsDir = path.join(dataDir, "thumbnails");
-//     if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true });
-
-//     // Use ID for unique filename
-//     const thumbnailFilename = `${id}_thumb.jpg`;
-//     const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
-
-//     await sharp(filePath, { failOnError: false })
-//       .rotate()
-//       .resize(200, 200, { fit: "inside", withoutEnlargement: true })
-//       .jpeg({ quality: 80 })
-//       .toFile(thumbnailPath);
-
-//     return thumbnailPath;
-//   } catch (err) {
-//     console.error(`Error generating thumbnail for ${filePath}:`, err.message);
-//     return null;
-//   }
-// }
 
 async function generateThumbnail(filePath, id) {
   const ext = path.extname(filePath).toLowerCase();
@@ -2192,39 +2083,6 @@ ipcMain.handle("delete-memory", async (event, { id }) => {
   }
 });
 
-ipcMain.handle("add-items-to-memory", async (event, { memoryId, mediaIds }) => {
-  try {
-    initDatabase();
-
-    if (!memoryId || !Array.isArray(mediaIds)) {
-      throw new Error("Invalid parameters: memoryId and mediaIds are required.");
-    }
-
-    // Fetch the existing media_ids for the tag
-    const memoryRow = db.prepare("SELECT media_ids FROM memories WHERE id = ?").get(memoryId);
-    if (!memoryRow) throw new Error(`Memory with id ${memoryId} not found`);
-
-    let existingIds = [];
-    try {
-      existingIds = JSON.parse(memoryRow.media_ids || "[]");
-    } catch {
-      existingIds = [];
-    }
-
-    // Merge and deduplicate IDs
-    const updatedIds = Array.from(new Set([...existingIds, ...mediaIds]));
-
-    // Update the tag + set last_used timestamp
-    db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?")
-      .run(JSON.stringify(updatedIds), memoryId);
-
-    return { success: true, updatedIds };
-  } catch (err) {
-    console.error("add-items-to-memory:", err);
-    return { success: false, error: err.message };
-  }
-});
-
 ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
   try {
     initDatabase();
@@ -2491,6 +2349,39 @@ ipcMain.handle("cleanup-thumbnails", async () => {
     return { success: true, message: `Removed ${removed} thumbnail(s).`, removed };
   } catch (err) {
     console.error("cleanup-thumbnails error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Overwrite a tag's media_ids entirely (enables removing items)
+ipcMain.handle("tag:set-items", async (event, { tagId, mediaIds }) => {
+  try {
+    initDatabase();
+    if (!tagId || !Array.isArray(mediaIds)) {
+      throw new Error("Invalid parameters: tagId and mediaIds are required.");
+    }
+    const now = Date.now();
+    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
+      .run(JSON.stringify(mediaIds), now, tagId);
+    return { success: true, mediaIds };
+  } catch (err) {
+    console.error("tag:set-items error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Overwrite a memory's media_ids entirely (enables removing items)
+ipcMain.handle("memory:set-items", async (event, { memoryId, mediaIds }) => {
+  try {
+    initDatabase();
+    if (!memoryId || !Array.isArray(mediaIds)) {
+      throw new Error("Invalid parameters: memoryId and mediaIds are required.");
+    }
+    db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?")
+      .run(JSON.stringify(mediaIds), memoryId);
+    return { success: true, mediaIds };
+  } catch (err) {
+    console.error("memory:set-items error:", err);
     return { success: false, error: err.message };
   }
 });
