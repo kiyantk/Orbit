@@ -177,6 +177,26 @@ body {
   height: 100%
 }
 
+@media (max-height: 780px) {
+  .side-bar {
+    gap: 4px !important;;
+    padding: 30px 0px 18px 0px;
+  }
+
+  .side-bar-bottom {
+    gap: 4px !important;
+    bottom: 20px;
+  }
+
+  .side-bar button {
+    font-size: 20px;
+  }
+
+  .side-bar-btn .tooltip {
+    font-size: 11px;
+  }
+}
+
 .action-panel {
   position: fixed;
   bottom: 30px;
