@@ -28,6 +28,7 @@ const App = () => {
   const [filters, setFilters] = useState(null);
   const [filteredCount, setFilteredCount] = useState(null)
   const [shuffleFilters, setShuffleFilters] = useState({});
+  const [mapFilters, setMapFilters] = useState({});
   const [shuffleSettings, setShuffleSettings] = useState({ shuffleInterval: 8 });
   const [explorerScroll, setExplorerScroll] = useState(0);
   const [previewPanelKey, setPreviewPanelKey] = useState(0);
@@ -44,6 +45,8 @@ const App = () => {
       setShuffleFilters(data);
     } else if (actionPanelType === "shuffle-settings") {
       setShuffleSettings(prev => ({ ...prev, ...data }));
+    } else if (actionPanelType === "map-filter") {
+      setMapFilters(data);
     }
   };
 
@@ -229,7 +232,7 @@ const App = () => {
             <StatsView birthDate={settings.birthDate} />
           )}
           {activeView === "map" && (
-            <MapView mapViewType={mapViewType} />
+            <MapView mapViewType={mapViewType} filters={mapFilters} />
           )}
           {activeView === "tags" && (
             <TagsView
@@ -266,6 +269,7 @@ const App = () => {
                     setActiveView("shuffle");
                     break
                   case 'map':
+                    setMapFilters({ ids });
                     setActiveView("map");
                     break
                   default:
@@ -320,8 +324,8 @@ const App = () => {
             </div>
           )}
         </div>
-        {(activeView === "explore" || activeView === "shuffle") && (
-          <ActionPanel settings={settings} type={actionPanelType} activeView={activeView} activeFilters={filters} activeShuffleFilters={shuffleFilters} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
+        {(activeView === "explore" || activeView === "shuffle" || activeView === "map") && (
+          <ActionPanel settings={settings} type={actionPanelType} activeView={activeView} activeFilters={filters} activeShuffleFilters={shuffleFilters} activeMapFilters={mapFilters} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
         )}
         <div>
           {showWelcomePopup && (

@@ -475,7 +475,7 @@ const toggleFullscreen = () => {
                   <span className="settings-hint">Recommended. Improves color accuracy for HEIC photos.</span>
                 </div>
                 <div className="settings-content-item">
-                  <span>Default Sort:</span>
+                  <span>Default sort:</span>
                   <select
                     value={settings?.defaultSort}
                     onChange={(e) => handleDefaultSortChange(e)}

@@ -277,6 +277,7 @@ function initDatabase() {
   `);
 
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_files_create_date_local ON files(create_date_local);
     CREATE INDEX IF NOT EXISTS idx_files_create_date ON files(create_date);
     CREATE INDEX IF NOT EXISTS idx_files_filename ON files(filename);
     CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
@@ -559,22 +560,85 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
   }
 });
 
-ipcMain.handle("fetch-map-data", async () => {
+ipcMain.handle("fetch-map-data", async (event, { filters = {}, settings = {} } = {}) => {
   try {
     initDatabase();
 
-    // Only select what the map actually needs
+    let whereClauses = ["latitude IS NOT NULL", "longitude IS NOT NULL"];
+    const params = [];
+
+    filters = filters ?? {};
+
+    if (Array.isArray(filters.ids) && filters.ids.length > 0) {
+      whereClauses.push(applyIdsFilter(db, filters.ids));
+    }
+
+    const localDateExpr = `
+      CASE
+        WHEN create_date_local IS NOT NULL
+          THEN date(create_date_local)
+        WHEN create_date IS NOT NULL
+          THEN date(datetime(create_date, 'unixepoch', 'localtime'))
+        ELSE
+          date(datetime(MIN(created, modified), 'unixepoch', 'localtime'))
+      END
+    `;
+
+    if (filters.dateFrom) {
+      whereClauses.push(`${localDateExpr} >= date(?)`);
+      params.push(filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      whereClauses.push(`${localDateExpr} <= date(?)`);
+      params.push(filters.dateTo);
+    }
+    if (filters.dateExact) {
+      whereClauses.push(`${localDateExpr} = date(?)`);
+      params.push(filters.dateExact);
+    }
+    if (filters.device) {
+      whereClauses.push("device_model = ?");
+      params.push(filters.device);
+    }
+    if (filters.folder) {
+      whereClauses.push("folder_path = ?");
+      params.push(filters.folder);
+    }
+    if (filters.filetype) {
+      whereClauses.push("extension = ?");
+      params.push(filters.filetype);
+    }
+    if (filters.mediaType) {
+      whereClauses.push("file_type = ?");
+      params.push(filters.mediaType);
+    }
+    if (filters.country) {
+      whereClauses.push("country = ?");
+      params.push(filters.country);
+    }
+    if (filters.tag && !filters.addMode) {
+      whereClauses.push(`
+        id IN (
+          SELECT value
+          FROM tags, json_each(tags.media_ids)
+          WHERE tags.name = ?
+        )
+      `);
+      params.push(filters.tag);
+    }
+
+    const whereSQL = "WHERE " + whereClauses.join(" AND ");
+
     const rows = db.prepare(`
       SELECT latitude, longitude, altitude, country, create_date, filename, device_model
       FROM files
-      WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-    `).all();
+      ${whereSQL}
+    `).all(...params);
 
     const points = [];
     const heat = [];
     const countryCounts = {};
     const countryBounds = {};
-
     let lineSegments = [];
     let currentSegment = [];
     let lastPoint = null;
@@ -586,18 +650,14 @@ ipcMain.handle("fetch-map-data", async () => {
       const dLon = toRad(b[1] - a[1]);
       const lat1 = toRad(a[0]);
       const lat2 = toRad(b[0]);
-
       const h =
         Math.sin(dLat / 2) ** 2 +
         Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-
       return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
     };
 
     for (const item of rows) {
       const latlng = [item.latitude, item.longitude];
-
-      // markers
       points.push({
         lat: item.latitude,
         lng: item.longitude,
@@ -609,15 +669,10 @@ ipcMain.handle("fetch-map-data", async () => {
           altitude: item.altitude,
         },
       });
-
-      // heatmap
       heat.push([item.latitude, item.longitude, 1]);
-
-      // country stats (only low altitude)
       if (item.altitude && item.altitude <= 1500 && item.country) {
         countryCounts[item.country] = (countryCounts[item.country] || 0) + 1;
         (countryBounds[item.country] ||= []).push(latlng);
-
         if (lastPoint) {
           const dist = haversineDistance(lastPoint, latlng);
           if (dist > 200) {

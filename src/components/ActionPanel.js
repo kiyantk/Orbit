@@ -2,7 +2,7 @@ import { faUndo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
-const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, activeView, activeShuffleFilters }) => {
+const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, activeMapFilters, activeView, activeShuffleFilters }) => {
   const [sortBy, setSortBy] = useState("media_id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState(activeFilters || {
@@ -57,6 +57,21 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     ids: null
   });
 
+  const [mapFilters, setMapFilters] = useState({
+    dateExact: "",
+    dateFrom: "",
+    dateTo: "",
+    device: "",
+    folder: "",
+    filetype: "",
+    mediaType: "",
+    country: "",
+    year: "",
+    tag: "",
+    age: "",
+    ids: null
+  });
+
   // Fetch options from database on mount
   useEffect(() => {
     async function fetchOptions() {
@@ -92,6 +107,10 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
       if(activeShuffleFilters) {
         setShuffleFilters(prev => ({ ...prev, ...activeShuffleFilters }))
       }
+    } else if(activeView === "map") {
+      if(activeMapFilters) {
+        setMapFilters(prev => ({ ...prev, ...activeMapFilters }))
+      }
     }
   }, [activeView]);
 
@@ -102,7 +121,8 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     if (type === "shuffle-filter") onApply(shuffleFilters);
     if (type === "shuffle-settings") onApply(shuffleSettings);
     if (type === "search") onApply({ searchBy, searchTerm });
-  }, [sortBy, sortOrder, filters, searchBy, searchTerm, shuffleFilters, shuffleSettings]);
+    if (type === "map-filter") onApply(mapFilters);
+  }, [sortBy, sortOrder, filters, searchBy, searchTerm, shuffleFilters, mapFilters, shuffleSettings]);
 
   // Handle date linking
   const handleDateChange = (field, value) => {
@@ -138,9 +158,38 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     resetSearch();
   };
 
-    // Handle date linking
+  // Handle date linking
   const handleDateShuffleChange = (field, value) => {
     setShuffleFilters(prev => {
+      let newFilters = { ...prev, [field]: value };
+
+      if (field === "dateExact") {
+        newFilters.dateExact = value;
+        // Clear the from/to dates if exact date is set
+        if (value) {
+          newFilters.dateFrom = "";
+          newFilters.dateTo = "";
+        }
+      } else if (field === "dateFrom" || field === "dateTo") {
+        newFilters[field] = value;
+        // Clear exact date if from/to is set
+        if (value) {
+          newFilters.dateExact = "";
+        }
+      }
+    
+      if (field === "dateFrom" && newFilters.dateTo && value > newFilters.dateTo) {
+        newFilters.dateTo = value;
+      } else if (field === "dateTo" && newFilters.dateFrom && value < newFilters.dateFrom) {
+        newFilters.dateFrom = value;
+      }
+      return newFilters;
+    });
+  };
+
+  // Handle date linking
+  const handleDateMapChange = (field, value) => {
+    setMapFilters(prev => {
       let newFilters = { ...prev, [field]: value };
 
       if (field === "dateExact") {
@@ -180,9 +229,20 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     resetSearch();
   };
 
-    // Handle year change
+  // Handle year change
   const handleYearShuffleChange = (year) => {
     setShuffleFilters(prev => {
+      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
+
+      const dateFrom = `${year}-01-01`;
+      const dateTo = `${year}-12-31`;
+      return { ...prev, year, dateFrom, dateTo };
+    });
+  };
+
+  // Handle year change
+  const handleYearMapChange = (year) => {
+    setMapFilters(prev => {
       if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
 
       const dateFrom = `${year}-01-01`;
@@ -210,6 +270,23 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
 
   const resetShuffleFilters = () => {
     setShuffleFilters({
+      dateFrom: "",
+      dateTo: "",
+      dateExact: "",
+      device: "",
+      folder: "",
+      filetype: "",
+      mediaType: "",
+      country: "",
+      year: "",
+      tag: "",
+      age: "",
+      ids: null
+    });
+  }
+
+  const resetMapFilters = () => {
+    setMapFilters({
       dateFrom: "",
       dateTo: "",
       dateExact: "",
@@ -270,6 +347,37 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
 
   const handleShuffleAgeChange = (age) => {
     setShuffleFilters(prev => {
+      if (!age || !settings.birthDate) {
+        return {
+          ...prev,
+          age: "",
+          dateFrom: "",
+          dateTo: ""
+        };
+      }
+
+      const birth = new Date(settings.birthDate);
+
+      const dateFrom = new Date(birth);
+      dateFrom.setFullYear(birth.getFullYear() + Number(age));
+
+      const dateTo = new Date(birth);
+      dateTo.setFullYear(birth.getFullYear() + Number(age) + 1);
+      dateTo.setDate(dateTo.getDate() - 1);
+
+      return {
+        ...prev,
+        age,
+        year: "",
+        dateExact: "",
+        dateFrom: dateFrom.toISOString().slice(0, 10),
+        dateTo: dateTo.toISOString().slice(0, 10)
+      };
+    });
+  };
+
+  const handleMapAgeChange = (age) => {
+    setMapFilters(prev => {
       if (!age || !settings.birthDate) {
         return {
           ...prev,
@@ -589,6 +697,105 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
                 });
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {type === "map-filter" && (
+        <div className="filter-panel">
+          {mapFilters.ids && (
+            <div>
+              <label>Selection</label>
+              <span className="filter-static">{mapFilters.ids.length + " items"}</span>
+            </div>
+          )}
+          <div>
+            <label>Year</label>
+            <select value={mapFilters.year} onChange={e => handleYearMapChange(e.target.value)}>
+              <option value="">All</option>
+              {options.years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Date</label>
+            <input type="date" 
+                   value={mapFilters.dateExact} 
+                   min={options.minDate} 
+                   max={options.maxDate}
+                   disabled={!!mapFilters.dateFrom || !!mapFilters.dateTo}
+                   onChange={e => handleDateMapChange("dateExact", e.target.value)}/>
+          </div>
+          <div>
+            <label>Date From</label>
+            <input type="date" 
+                   value={mapFilters.dateFrom} 
+                   min={options.minDate} 
+                   max={options.maxDate}
+                   disabled={!!mapFilters.dateExact} 
+                   onChange={e => handleDateMapChange("dateFrom", e.target.value)}/>
+          </div>
+          <div>
+            <label>Date To</label>
+            <input type="date" 
+                   value={mapFilters.dateTo} 
+                   min={options.minDate} 
+                   max={options.maxDate}
+                   disabled={!!mapFilters.dateExact}
+                   onChange={e => handleDateMapChange("dateTo", e.target.value)}/>
+          </div>
+          <div>
+            <label>Device</label>
+            <select value={mapFilters.device} onChange={e => setMapFilters(f => ({ ...f, device: e.target.value }))}>
+              <option value="">All</option>
+              {options.devices.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Source</label>
+            <select value={mapFilters.folder} onChange={e => setMapFilters(f => ({ ...f, folder: e.target.value }))}>
+              <option value="">All</option>
+              {options.folders.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Filetype</label>
+            <select value={mapFilters.filetype} onChange={e => setMapFilters(f => ({ ...f, filetype: e.target.value }))}>
+              <option value="">All</option>
+              {options.filetypes.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Media Type</label>
+            <select value={mapFilters.mediaType} onChange={e => setMapFilters(f => ({ ...f, mediaType: e.target.value }))}>
+              <option value="">All</option>
+              {options.mediaTypes.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Country</label>
+            <select value={mapFilters.country} onChange={e => setMapFilters(f => ({ ...f, country: e.target.value }))}>
+              <option value="">All</option>
+              {options.countries.map(c => c !== "" ? <option key={c} value={c}>{c}</option> : "")}
+            </select>
+          </div>
+          <div>
+            <label>Tag</label>
+            <select value={mapFilters.tag} onChange={e => setMapFilters(f => ({ ...f, tag: e.target.value }))}>
+              <option value="">All</option>
+              {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          {settings && settings.birthDate && (
+            <div>
+              <label>Age</label>
+              <select value={mapFilters.age} onChange={e => handleMapAgeChange(e.target.value)}>
+                <option value="">All</option>
+                {options.ages.map(d => <option key={d} value={d}>{d}</option>).reverse()}
+              </select>
+            </div>
+          )}
+          <div className="action-panel-reset" onClick={resetMapFilters}>
+            <button><FontAwesomeIcon icon={faUndo}/></button>
           </div>
         </div>
       )}

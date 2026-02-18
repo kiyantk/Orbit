@@ -113,6 +113,10 @@ const SideBar = ({
             <FontAwesomeIcon icon={faGlobe} />
             <span className="tooltip">Country Mode</span>
           </button>
+          <button className={`side-bar-btn ${actionPanelType === "map-filter" ? 'side-bar-active' : '' }`} onClick={() => openActionPanel("map-filter")}>
+            <FontAwesomeIcon icon={faFilter} />
+            <span className="tooltip">Filter</span>
+          </button>
         </div>
       )}
       {activeView === "memories" && (
