@@ -29,7 +29,7 @@ const App = () => {
   const [filteredCount, setFilteredCount] = useState(null)
   const [shuffleFilters, setShuffleFilters] = useState({});
   const [mapFilters, setMapFilters] = useState({});
-  const [shuffleSettings, setShuffleSettings] = useState({ shuffleInterval: 8 });
+  const [shuffleSettings, setShuffleSettings] = useState({ shuffleInterval: 8, hideInfo: false, smoothTransition: false });
   const [explorerScroll, setExplorerScroll] = useState(0);
   const [previewPanelKey, setPreviewPanelKey] = useState(0);
   const [actionPanelKey, setActionPanelKey] = useState(0);
@@ -250,7 +250,8 @@ const App = () => {
             />
           )}
           {activeView === "shuffle" && (
-            <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} hideMetadata={shuffleSettings.hideInfo} />
+            <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} hideMetadata={shuffleSettings.hideInfo}
+              smoothTransition={shuffleSettings.smoothTransition} />
           )}
           {activeView === "memories" && (
             <MemoriesView switchMemoryMode={setMemoryMode} memoryMode={memoryMode}
@@ -325,7 +326,7 @@ const App = () => {
           )}
         </div>
         {(activeView === "explore" || activeView === "shuffle" || activeView === "map") && (
-          <ActionPanel settings={settings} type={actionPanelType} activeView={activeView} activeFilters={filters} activeShuffleFilters={shuffleFilters} activeMapFilters={mapFilters} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
+          <ActionPanel settings={settings} type={actionPanelType} activeView={activeView} activeFilters={filters} activeShuffleFilters={shuffleFilters} activeMapFilters={mapFilters} activeShuffleSettings={shuffleSettings} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
         )}
         <div>
           {showWelcomePopup && (

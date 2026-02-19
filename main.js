@@ -2167,7 +2167,19 @@ ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
       FROM files
       WHERE folder_path IS NOT NULL
       GROUP BY folder_path
-      ORDER BY last DESC
+      ORDER BY first DESC
+    `).all();
+
+    const devices = db.prepare(`
+      SELECT
+        device_model AS device,
+        MIN(${datePart('%Y-%m-%d')}) AS first,
+        MAX(${datePart('%Y-%m-%d')}) AS last,
+        COUNT(*) AS count
+      FROM files
+      WHERE device_model IS NOT NULL
+      GROUP BY device_model
+      ORDER BY first DESC
     `).all();
 
     let perAge = [];
@@ -2204,7 +2216,7 @@ ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
       byType, byDevice, byCountry,
       totalFiles: totals.totalFiles,
       totalStorage: totals.totalStorage || 0,
-      sources, perAge
+      sources, perAge, devices
     };
   } catch (err) {
     console.error("fetch-stats error:", err);

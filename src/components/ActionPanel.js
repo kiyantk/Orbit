@@ -2,7 +2,7 @@ import { faUndo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
-const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, activeMapFilters, activeView, activeShuffleFilters }) => {
+const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, activeMapFilters, activeView, activeShuffleFilters, activeShuffleSettings }) => {
   const [sortBy, setSortBy] = useState("media_id");
   const [sortOrder, setSortOrder] = useState("desc");
   const [filters, setFilters] = useState(activeFilters || {
@@ -39,7 +39,8 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
 
   const [shuffleSettings, setShuffleSettings] = useState({
     shuffleInterval: 8,
-    hideInfo: false
+    hideInfo: false,
+    smoothTransition: false
   });
 
   const [shuffleFilters, setShuffleFilters] = useState({
@@ -106,6 +107,9 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
     } else if(activeView === "shuffle") {
       if(activeShuffleFilters) {
         setShuffleFilters(prev => ({ ...prev, ...activeShuffleFilters }))
+      }
+      if(activeShuffleSettings) {
+        setShuffleSettings(prev => ({ ...prev, ...activeShuffleSettings }))
       }
     } else if(activeView === "map") {
       if(activeMapFilters) {
@@ -695,6 +699,20 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
                 setShuffleSettings({ 
                   ...shuffleSettings,
                   hideInfo: value
+                });
+              }}
+            />
+          </div>
+          <div>
+            <label>Smooth Transition: </label>
+            <input
+              type="checkbox"
+              checked={shuffleSettings.smoothTransition}
+              onChange={e => {
+                const value = e.target.checked;
+                setShuffleSettings({ 
+                  ...shuffleSettings,
+                  smoothTransition: value
                 });
               }}
             />

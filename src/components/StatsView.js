@@ -291,9 +291,22 @@ const StatsView = ({ birthDate }) => {
           <div className="stats-grid">
             <div className="stats-card-wrapper">
               <div className="stats-card">
+                <h3>Devices</h3>
+                <table>
+                  <thead><tr><th>Device</th><th>First Date</th><th>Last Date</th><th>Count</th></tr></thead>
+                  <tbody>
+                    {stats.devices.map((s, idx) => (
+                      <tr key={idx}><td>{s.device}</td><td>{s.first}</td><td>{s.last}</td><td>{s.count}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="stats-card-wrapper">
+              <div className="stats-card">
                 <h3>Sources</h3>
                 <table>
-                  <thead><tr><th>Folder</th><th>First Date</th><th>Last Date</th><th>Files</th></tr></thead>
+                  <thead><tr><th>Folder</th><th>First Date</th><th>Last Date</th><th>Count</th></tr></thead>
                   <tbody>
                     {stats.sources.map((s, idx) => (
                       <tr key={idx}><td>{s.folder}</td><td>{s.first}</td><td>{s.last}</td><td>{s.count}</td></tr>

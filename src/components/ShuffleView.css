@@ -62,3 +62,37 @@
     transform: rotate(360deg);
   }
 }
+
+.shuffle-image-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.shuffle-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.shuffle-image-prev {
+  z-index: 1;
+  animation: fadeOut 1s ease-in-out forwards;
+}
+
+.shuffle-image-next {
+  z-index: 2;
+  animation: fadeIn 1s ease-in-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}

@@ -1,30 +1,25 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import "./ShuffleView.css"; // <- add this
+import "./ShuffleView.css";
 
-const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, filters = {} }) => {
+const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, smoothTransition = false, filters = {} }) => {
   const [images, setImages] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const timerRef = useRef(null);
   const preloadedUrls = useRef(new Set());
   const [displayedIndex, setDisplayedIndex] = useState(0);
+  const [prevIndex, setPrevIndex] = useState(null);
 
   function formatDate(timestamp) {
       if(!timestamp) return ''
-      // Convert seconds to milliseconds
       const date = new Date(timestamp * 1000);
-
-      // Pad function to add leading zeros
       const pad = (n) => n.toString().padStart(2, '0');
-
       const day = pad(date.getDate());
-      const month = pad(date.getMonth() + 1); // Months are 0-indexed
+      const month = pad(date.getMonth() + 1);
       const year = date.getFullYear();
-
       const hours = pad(date.getHours());
       const minutes = pad(date.getMinutes());
       const seconds = pad(date.getSeconds());
-
       return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
   }
 
@@ -61,7 +56,6 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
         filters: { sortBy: "random", ...filters }
       });
       if (result?.success) {
-        // Filter only images
         const imagesOnly = result.rows.filter(f => f.file_type === "image");
         return imagesOnly.map((f) => ({
           ...f,
@@ -74,38 +68,38 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
     return [];
   }, [preloadCount, filters]);
 
-const preloadImages = useCallback(async () => {
-  let newImgs = [];
-  // Keep fetching until we have at least preloadCount new images
-  while (newImgs.length < preloadCount) {
-    const fetched = await fetchRandom(preloadCount - newImgs.length);
-    if (fetched.length === 0) break; // Stop if no more images are available
-    newImgs = [...newImgs, ...fetched];
-  }
-
-  if (newImgs.length > 0) {
-    await preloadImageBytes(newImgs);
-    setImages((prev) => [...prev, ...newImgs]);
-  }
-  setLoading(false);
-}, [fetchRandom, preloadCount, preloadImageBytes]);
-
-useEffect(() => {
-  if (images.length === 0) return;
-  const upcoming = images.slice(currentIndex + 1, currentIndex + 3);
-  if (upcoming.length > 0) preloadImageBytes(upcoming);
-}, [currentIndex, images, preloadImageBytes]);
-
-const nextImage = useCallback(() => {
-  setCurrentIndex((prev) => {
-    const next = prev + 1;
-    if (next >= images.length) {
-      preloadImages();
-      return prev;
+  const preloadImages = useCallback(async () => {
+    let newImgs = [];
+    while (newImgs.length < preloadCount) {
+      const fetched = await fetchRandom(preloadCount - newImgs.length);
+      if (fetched.length === 0) break;
+      newImgs = [...newImgs, ...fetched];
     }
-    return next;
-  });
-}, [images.length, preloadImages]);
+
+    if (newImgs.length > 0) {
+      await preloadImageBytes(newImgs);
+      setImages((prev) => [...prev, ...newImgs]);
+    }
+    setLoading(false);
+  }, [fetchRandom, preloadCount, preloadImageBytes]);
+
+  useEffect(() => {
+    if (images.length === 0) return;
+    const upcoming = images.slice(currentIndex + 1, currentIndex + 3);
+    if (upcoming.length > 0) preloadImageBytes(upcoming);
+  }, [currentIndex, images, preloadImageBytes]);
+
+  const nextImage = useCallback(() => {
+    setCurrentIndex((prev) => {
+      const next = prev + 1;
+      if (next >= images.length) {
+        preloadImages();
+        return prev;
+      }
+      setPrevIndex(prev);
+      return next;
+    });
+  }, [images.length, preloadImages]);
 
   useEffect(() => {
     setImages([]);
@@ -113,6 +107,7 @@ const nextImage = useCallback(() => {
     setLoading(true);
     clearInterval(timerRef.current);
     setDisplayedIndex(0);
+    setPrevIndex(null);
     preloadedUrls.current = new Set();
     preloadImages();
   }, [filters]);
@@ -137,33 +132,46 @@ const nextImage = useCallback(() => {
 
   return (
     <div className="shuffle-view">
-    <img
-      key={current.url}
-      src={current.url}
-      style={{ display: "none" }}
-      onLoad={() => setDisplayedIndex(currentIndex)}
-    />
+      {/* Hidden preloader */}
+      <img
+        key={current.url}
+        src={current.url}
+        style={{ display: "none" }}
+        onLoad={() => {
+          if (smoothTransition) setPrevIndex((p) => p); // no-op, prev already set in nextImage
+          setDisplayedIndex(currentIndex);
+        }}
+      />
 
-    <img
-      src={images[displayedIndex]?.url}
-      alt={images[displayedIndex]?.filename}
-      className="shuffle-image"
-    />
-
-
-
-    {!hideMetadata && (
-      <div className="shuffle-metadata">
-        <div>{displayed.filename}</div>
-        {(displayed.create_date_local || displayed.create_date) && (
-          <div>
-            {displayed.create_date_local
-              ? formatLocalDateString(displayed.create_date_local)
-              : formatDate(displayed.create_date)}
-          </div>
+      <div className="shuffle-image-container">
+        {smoothTransition && prevIndex !== null && (
+          <img
+            key={`prev-${images[prevIndex]?.url}`}
+            src={images[prevIndex]?.url}
+            alt=""
+            className="shuffle-image shuffle-image-prev"
+          />
         )}
+        <img
+          key={images[displayedIndex]?.url}
+          src={images[displayedIndex]?.url}
+          alt={images[displayedIndex]?.filename}
+          className={`shuffle-image${smoothTransition ? " shuffle-image-next" : ""}`}
+        />
       </div>
-    )}
+
+      {!hideMetadata && (
+        <div className="shuffle-metadata">
+          <div>{displayed.filename}</div>
+          {(displayed.create_date_local || displayed.create_date) && (
+            <div>
+              {displayed.create_date_local
+                ? formatLocalDateString(displayed.create_date_local)
+                : formatDate(displayed.create_date)}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
