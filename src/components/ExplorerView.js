@@ -31,6 +31,7 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   const anchorIndexRef = useRef(0);
   const isRestoringScrollRef = useRef(false);
   const [noGutters, setNoGutters] = useState(false);
+  const prefetchTimer = useRef(null);
 
   // Pre-populate addModeSelected with items already in the tag/memory
   useEffect(() => {
@@ -129,6 +130,24 @@ const ExplorerView = ({ currentSettings, folderStatuses, openSettings, onSelect,
   //   },
   //   [filters]
   // );
+
+  const handleMouseEnter = useCallback((item) => {
+    if (!currentSettings?.preloadHeic) return;
+    if (item.extension !== '.heic') return;
+    if (!folderStatuses[item.folder_path]) return;
+
+    // Only prefetch if user hovers for 300ms — filters out quick mouse sweeps
+    prefetchTimer.current = setTimeout(() => {
+      fetch(`http://localhost:54055/prefetch-heic/${encodeURIComponent(item.path)}`).catch(() => {});
+    }, 300);
+  }, [folderStatuses]);
+
+  const handleMouseLeave = useCallback((item) => {
+    if (!currentSettings?.preloadHeic) return;
+    clearTimeout(prefetchTimer.current);
+    if (!item || item.extension !== '.heic') return;
+    fetch(`http://localhost:54055/cancel-heic/${encodeURIComponent(item.path)}`).catch(() => {});
+  }, []);
 
   const fetchPageForIndex = useCallback(async (index, isFirst = false) => {
     const pageIndex = Math.floor(index / PAGE_SIZE);
@@ -514,7 +533,8 @@ const handleScroll = ({ scrollTop, scrollUpdateWasRequested }) => {
   const thumbSrc = item.thumbnail_path ? `orbit://thumbs/${item.id}_thumb.jpg` : null;
 
   return (
-    <div style={{ ...style, padding: noGutters ? 0 : 8 }} 
+    <div style={{ ...style, padding: noGutters ? 0 : 8 }}
+      onMouseEnter={() => item && handleMouseEnter(item)} onMouseLeave={() => item && handleMouseLeave(item)}
       className={`thumb-cell ${noGutters && currentSettings && currentSettings.itemText === "none" ? 'thumb-no-gutter' : ''} ${
         explorerMode && explorerMode.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory") && addModeSelected.has(item.id)
           ? "thumb-selected-addmode"          // highlighted in Add Mode

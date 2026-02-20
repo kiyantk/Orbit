@@ -62,12 +62,33 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     setTrips([]);
     setVacations([]);
     setCustomMemories([]);
+    if (selectedTab === "All") fetchAll();
     if (selectedTab === "Years") fetchYears();
     if (selectedTab === "Months") fetchMonths();
     if (selectedTab === "Vacations") fetchVacations();
     if (selectedTab === "Trips") fetchTrips();
     if (selectedTab === "Custom") fetchCustomMemories();
   }, [selectedTab]);
+
+  const fetchAll = async () => {
+    try {
+      setLoading(true);
+      const [yearRows, monthRows, tripRows, memoryRows] = await Promise.all([
+        window.electron.ipcRenderer.invoke("fetch-years"),
+        window.electron.ipcRenderer.invoke("fetch-months"),
+        window.electron.ipcRenderer.invoke("fetch-trips", { minTripPhotos: 10 }),
+        window.electron.ipcRenderer.invoke("fetch-memories"),
+      ]);
+      const convertedTrips = await convertTripCountries(tripRows);
+      setYears(yearRows);
+      setMonths(monthRows);
+      setTrips(convertedTrips);
+      setCustomMemories(memoryRows);
+      setLoading(false);
+    } catch (err) {
+      console.error("Failed to fetch all memories:", err);
+    }
+  };
 
   const fetchYears = async () => {
     try {
@@ -239,45 +260,127 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     </div>
   );
 
-  // --- HANDLE SAVE MEMORY ---
-const handleSaveMemory = async () => {
-  try {
-    if (memoryMode === "edit") {
-      await window.electron.ipcRenderer.invoke("update-memory", newMemory);
-    } else {
-      await window.electron.ipcRenderer.invoke("add-memory", newMemory);
+  const renderAllBoxes = () => {
+    const items = [
+      ...customMemories.map((m) => ({ type: "custom", data: m, ts: m.created * 1000 })),
+      ...years.map((y) => ({ type: "year", data: y, ts: new Date(`${y.year}-12-01`).getTime() })),
+      ...months.map((m) => ({ type: "month", data: m, ts: new Date(`${m.year}-${m.month}-01`).getTime() })),
+      ...trips.map((t) => ({ type: "trip", data: t, ts: new Date(t.start).getTime() })),
+    ].sort((a, b) => b.ts - a.ts);
+
+    return (
+      <div className="memories-grid">
+        {items.map((item) => {
+          if (item.type === "custom") {
+            const m = item.data;
+            return (
+              <div key={`custom-${m.id}`} className="memory-box"
+                onClick={() => {
+                  const mediaIds = JSON.parse(m.media_ids || "[]");
+                  if (memoryMode !== "edit" && mediaIds.length > 0) { onViewMemory(mediaIds); return; }
+                  else if (memoryMode !== "edit") return;
+                  setNewMemory({ id: m.id, title: m.title, description: m.description, color: m.color, existing: mediaIds });
+                  setShowAddMemory(true);
+                }}
+              >
+                <div className="memory-color" style={{ backgroundColor: m.color }}></div>
+                <div className="memory-text">
+                  <div className="title">{m.title}</div>
+                  <div className="description">{m.description}</div>
+                </div>
+                <ThumbnailStrip thumbnails={m.thumbnails} />
+                <div className="memory-count">{m.total} items</div>
+              </div>
+            );
+          }
+          if (item.type === "year") {
+            const y = item.data;
+            return (
+              <div key={`year-${y.year}`} className="memory-box" onClick={() => onViewMemory(y.ids)}>
+                <div className="memory-text">
+                  <div className="title">{y.year}</div>
+                  <div className="description">All media from {y.year}</div>
+                </div>
+                <ThumbnailStrip thumbnails={y.thumbnails} />
+                <div className="memory-count">{y.total} items</div>
+              </div>
+            );
+          }
+          if (item.type === "month") {
+            const m = item.data;
+            const date = new Date(`${m.year}-${m.month}-01`);
+            const label = date.toLocaleString("en-US", { month: "long", year: "numeric" });
+            return (
+              <div key={`month-${m.year}-${m.month}`} className="memory-box" onClick={() => onViewMemory(m.ids)}>
+                <div className="memory-text">
+                  <div className="title">{label}</div>
+                  <div className="description">All media from {label}</div>
+                </div>
+                <ThumbnailStrip thumbnails={m.thumbnails} />
+                <div className="memory-count">{m.total} items</div>
+              </div>
+            );
+          }
+          if (item.type === "trip") {
+            const t = item.data;
+            return (
+              <div key={`trip-${t.id}`} className="memory-box" onClick={() => onViewMemory(t.ids)}>
+                <div className="memory-text">
+                  <div className="title">{t.title}</div>
+                  <div className="description">
+                    {t.start.slice(0, 10)} <FontAwesomeIcon icon={faArrowRight} /> {t.end.slice(0, 10)}
+                  </div>
+                </div>
+                <ThumbnailStrip thumbnails={t.thumbnails} />
+                <div className="memory-count">{t.total} items</div>
+              </div>
+            );
+          }
+          return null;
+        })}
+      </div>
+    );
+  };
+
+    // --- HANDLE SAVE MEMORY ---
+  const handleSaveMemory = async () => {
+    try {
+      if (memoryMode === "edit") {
+        await window.electron.ipcRenderer.invoke("update-memory", newMemory);
+      } else {
+        await window.electron.ipcRenderer.invoke("add-memory", newMemory);
+      }
+
+      setShowAddMemory(false);
+      switchMemoryMode(null);
+      fetchCustomMemories();
+    } catch (err) {
+      console.error("Failed to save memory:", err);
     }
+  };
 
-    setShowAddMemory(false);
-    switchMemoryMode(null);
-    fetchCustomMemories();
-  } catch (err) {
-    console.error("Failed to save memory:", err);
-  }
-};
+  const handleDeleteMemory = async () => {
+    if (!newMemory.id) return;
 
-const handleDeleteMemory = async () => {
-  if (!newMemory.id) return;
+    try {
+      await window.electron.ipcRenderer.invoke("delete-memory", {
+        id: newMemory.id
+      });
 
-  try {
-    await window.electron.ipcRenderer.invoke("delete-memory", {
-      id: newMemory.id
-    });
-
-    setShowAddMemory(false);
-    switchMemoryMode(null);
-    fetchCustomMemories();
-  } catch (err) {
-    console.error("Failed to delete memory:", err);
-  }
-};
+      setShowAddMemory(false);
+      switchMemoryMode(null);
+      fetchCustomMemories();
+    } catch (err) {
+      console.error("Failed to delete memory:", err);
+    }
+  };
 
   return (
     <div className="memories-view">
       <div className="memories-main">
         <div className="settings-list">
           <ul>
-            {["Custom", "Years", "Months", "Vacations", "Trips"].map((tab) => (
+            {["All", "Custom", "Years", "Months", "Vacations", "Trips"].map((tab) => (
               <li
                 key={tab}
                 className={`settings-list-item ${
@@ -298,6 +401,7 @@ const handleDeleteMemory = async () => {
 
         <div className="memories-content">
           {loading && <div className="memories-loading"><div className="loader"></div></div>}
+          {!loading && selectedTab === "All" && renderAllBoxes()}
           {!loading && selectedTab === "Years" && renderYearBoxes()}
           {!loading && selectedTab === "Months" && renderMonthBoxes()}
           {!loading && selectedTab === "Custom" && renderCustomMemories()}

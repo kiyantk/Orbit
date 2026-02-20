@@ -17,6 +17,7 @@ const ffmpegPath = require("ffmpeg-static");
 const lookup = require("coordinate_to_country");
 const fsPromises = fs.promises;
 const heicDecode = require("heic-decode");
+const { Worker } = require("worker_threads");
 
 
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
@@ -102,10 +103,107 @@ app.whenReady().then(() => {
       return new Response("Not Found", { status: 404 });
     }
   });
+  
 
   const express = require("express");
   const appServer = express();
   const serverPort = 54055;
+
+  appServer.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+  next();
+});
+
+const heicCache = new Map();
+const HEIC_CACHE_MAX = 15;
+let activeWorkers = 0;
+const MAX_WORKERS = 2; // only 2 decodes at a time
+const prefetchQueue = [];
+const activeWorkerMap = new Map();
+
+function decodeHeic(filePath) {
+  if (heicCache.has(filePath)) return heicCache.get(filePath);
+
+  if (heicCache.size >= HEIC_CACHE_MAX) {
+    heicCache.delete(heicCache.keys().next().value);
+  }
+
+  const promise = new Promise((resolve, reject) => {
+    const run = () => {
+      activeWorkers++;
+      const worker = new Worker(path.join(__dirname, "heic-worker.js"), {
+        workerData: { filePath }
+      });
+      activeWorkerMap.set(filePath, worker);
+
+      worker.on("message", (msg) => {
+        activeWorkers--;
+        activeWorkerMap.delete(filePath);
+        if (prefetchQueue.length > 0) prefetchQueue.shift()();
+        if (msg.success) resolve(Buffer.from(msg.buffer));
+        else reject(new Error(msg.error));
+      });
+      worker.on("error", (err) => {
+        activeWorkers--;
+        activeWorkerMap.delete(filePath);
+        if (prefetchQueue.length > 0) prefetchQueue.shift()();
+        reject(err);
+      });
+    };
+
+    if (activeWorkers < MAX_WORKERS) {
+      run();
+    } else {
+      run.filePath = filePath;
+      prefetchQueue.push(run);
+    }
+  });
+
+  promise.catch(() => heicCache.delete(filePath));
+  heicCache.set(filePath, promise);
+  return promise;
+}
+
+appServer.get("/cancel-heic/*", (req, res) => {
+  const filePath = decodeURIComponent(req.path.replace("/cancel-heic/", ""));
+  
+  const worker = activeWorkerMap.get(filePath);
+  if (worker) {
+    worker.terminate();
+    activeWorkerMap.delete(filePath);
+    activeWorkers--;
+    heicCache.delete(filePath); // remove incomplete cache entry
+    if (prefetchQueue.length > 0) prefetchQueue.shift()(); // let next in queue run
+  } else {
+    // Still in queue, just remove it
+    const idx = prefetchQueue.findIndex(fn => fn.filePath === filePath);
+    if (idx !== -1) prefetchQueue.splice(idx, 1);
+  }
+
+  res.sendStatus(204);
+});
+
+appServer.get("/prefetch-heic/*", (req, res) => {
+  const filePath = decodeURIComponent(req.path.replace("/prefetch-heic/", ""));
+  if (fs.existsSync(filePath)) decodeHeic(filePath); // fire and forget, starts caching
+  res.sendStatus(204);
+});
+
+function getSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch {
+    return defaultConfig;
+  }
+}
+
+async function decodeHeicSimple(filePath) {
+  const inputBuffer = fs.readFileSync(filePath);
+  const heicImage = await heicDecode({ buffer: inputBuffer });
+  return sharp(heicImage.data, {
+    raw: { width: heicImage.width, height: heicImage.height, channels: 4 },
+  }).jpeg({ quality: 80 }).toBuffer();
+}
 
   // Serve files from any path on disk
 appServer.get("/files/*", async (req, res) => {
@@ -119,25 +217,14 @@ appServer.get("/files/*", async (req, res) => {
 
   try {
     if (ext === ".heic") {
-      // 1. Read the HEIC file into a buffer
-      const inputBuffer = fs.readFileSync(filePath);
-    
-      // 2. Decode HEIC into raw RGBA pixels
-      const heicImage = await heicDecode({ buffer: inputBuffer });
-    
-      // 3. Convert raw RGBA to JPEG using sharp
-      const outputBuffer = await sharp(heicImage.data, {
-        raw: {
-          width: heicImage.width,
-          height: heicImage.height,
-          channels: 4, // RGBA
-        },
-      })
-        .jpeg({ quality: 80 })
-        .toBuffer();
-    
-      // 4. Send the JPEG response
-      res.type("jpeg").send(outputBuffer);
+      const settings = getSettings();
+      if (settings.preloadHeic) {
+        const outputBuffer = await decodeHeic(filePath); // worker + cache path
+        return res.type("jpeg").send(outputBuffer);
+      } else {
+        const outputBuffer = await decodeHeicSimple(filePath); // old simple path
+        return res.type("jpeg").send(outputBuffer);
+      }
     } else if (ext === ".tif" || ext === ".tiff") {
       const outputBuffer = await sharp(filePath)
         .jpeg({ quality: 80 })
@@ -196,6 +283,7 @@ const defaultConfig = {
   openMemoriesIn: "explorer", // "explorer", "shuffle" or "map" 
   itemText: "filename", // "filename", "datetime" or "none"
   noGutters: false,
+  preloadHeic: false
 };
 
 // Database

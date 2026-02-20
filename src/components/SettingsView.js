@@ -475,6 +475,15 @@ const toggleFullscreen = () => {
                   <span className="settings-hint">Recommended. Improves color accuracy for HEIC photos.</span>
                 </div>
                 <div className="settings-content-item">
+                  <input
+                    type="checkbox"
+                    checked={settings?.preloadHeic}
+                    onChange={handleCheckboxChange('preloadHeic')}
+                  />
+                  <span>Preload HEIC on hover</span>
+                  <span className="settings-hint">Experimental. Can significantly reduce loading times for HEIC files by decoding them in the background while hovering.</span>
+                </div>
+                <div className="settings-content-item">
                   <span>Default sort:</span>
                   <select
                     value={settings?.defaultSort}
