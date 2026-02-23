@@ -237,7 +237,7 @@ const App = () => {
           {activeView === "tags" && (
             <TagsView
               onViewTag={(tag) => {
-                setFilters({ tag: tag.name });
+                setFilters({ tagId: String(tag.id) });
                 setActiveView("explore");
               }}
               onAddMedia={(tag) => {

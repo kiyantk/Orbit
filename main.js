@@ -585,16 +585,15 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
       whereClauses.push("country = ?");
       params.push(filters.country);
     }
-    if (filters.tag && !filters.addMode) {
-      // Join files with tags where media_ids contains the file's media_id
+    if (filters.tagId) {
       whereClauses.push(`
         id IN (
           SELECT value
           FROM tags, json_each(tags.media_ids)
-          WHERE tags.name = ?
+          WHERE tags.id = ?
         )
       `);
-      params.push(filters.tag);
+      params.push(Number(filters.tagId));
     }
 
 
@@ -713,15 +712,15 @@ ipcMain.handle("fetch-map-data", async (event, { filters = {}, settings = {} } =
       whereClauses.push("country = ?");
       params.push(filters.country);
     }
-    if (filters.tag && !filters.addMode) {
+    if (filters.tagId) {
       whereClauses.push(`
         id IN (
           SELECT value
           FROM tags, json_each(tags.media_ids)
-          WHERE tags.name = ?
+          WHERE tags.id = ?
         )
       `);
-      params.push(filters.tag);
+      params.push(Number(filters.tagId));
     }
 
     const whereSQL = "WHERE " + whereClauses.join(" AND ");
@@ -871,15 +870,15 @@ ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
         conditions.push("country = ?");
         params.push(filters.country);
       }
-      if (filters.tag && !filters.addMode) {
+      if (filters.tagId) {
         conditions.push(`
           id IN (
             SELECT value
             FROM tags, json_each(tags.media_ids)
-            WHERE tags.name = ?
+            WHERE tags.id = ?
           )
         `);
-        params.push(filters.tag);
+        params.push(Number(filters.tagId));
       }
       if (filters.searchBy && filters.searchTerm) {
         if (filters.searchBy === "media_id") {
@@ -1176,17 +1175,61 @@ async function extractMetadata(filePath) {
 
   const ext = path.extname(filePath).toLowerCase();
   const imageExtensions = [
+    // Common images
     ".jpg",
     ".jpeg",
     ".png",
     ".gif",
     ".bmp",
+    ".webp",
+
+    // High quality / professional
     ".tiff",
     ".tif",
     ".heic",
-    ".webp",
+    ".heif",
+
+    // RAW camera formats
+    ".dng",
+    ".cr2",   // Canon
+    ".nef",   // Nikon
+    ".arw",   // Sony
+    ".orf",   // Olympus
+    ".rw2",   // Panasonic
+
+    // Vector / other
+    ".svg",
+    ".ico",
   ];
-  const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".3gp"];
+
+  const videoExtensions = [
+    // Common formats
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+    ".wmv",
+  
+    // Mobile / older
+    ".3gp",
+    ".3g2",
+  
+    // Flash / legacy
+    ".flv",
+    ".f4v",
+  
+    // Professional / streaming
+    ".m4v",
+    ".mpeg",
+    ".mpg",
+    ".ts",
+    ".mts",
+    ".m2ts",
+  
+    // Open / less common
+    ".ogv",
+  ];
 
   if (imageExtensions.includes(ext)) metadata.file_type = "image";
   else if (videoExtensions.includes(ext)) metadata.file_type = "video";
@@ -1374,10 +1417,10 @@ ipcMain.handle("fetch-options", async (event, {birthDate = null}) => {
     const mediaTypes = db.prepare("SELECT DISTINCT file_type FROM files WHERE file_type IS NOT NULL").all().map(r => r.file_type);
     const countries = db.prepare("SELECT DISTINCT country FROM files WHERE country IS NOT NULL").all().map(r => r.country);
     const tags = db.prepare(`
-      SELECT *
-      FROM tags 
-      WHERE media_ids IS NOT NULL
-    `).all().map(r => r.name);
+      SELECT id, name
+      FROM tags
+      WHERE media_ids IS NOT NULL AND json_array_length(media_ids) > 0
+    `).all();
 
     const dateRange = db.prepare(`
       SELECT

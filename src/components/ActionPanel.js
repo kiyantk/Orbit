@@ -14,7 +14,7 @@ const EMPTY_FILTERS = {
   mediaType: "",
   country: "",
   year: "",
-  tag: "",
+  tagId: "",
   age: "",
   ids: null,
 };
@@ -142,7 +142,6 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
         ["Source",     "folder",    options.folders],
         ["Filetype",   "filetype",  options.filetypes],
         ["Media Type", "mediaType", options.mediaTypes],
-        ["Tag",        "tag",       options.tags ?? []],
       ].map(([label, key, opts]) => (
         <div key={key}>
           <label>{label}</label>
@@ -152,6 +151,19 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
           </select>
         </div>
       ))}
+
+      <div>
+        <label>Tag</label>
+        <select
+          value={filters.tagId}
+          onChange={e => setFilters(prev => ({ ...prev, tagId: e.target.value }))}
+        >
+          <option value="">All</option>
+          {(options.tags ?? []).map(t => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+      </div>
 
       <div>
         <label>Country</label>

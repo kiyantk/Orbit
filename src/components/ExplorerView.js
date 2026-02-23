@@ -550,7 +550,7 @@ const ExplorerView = ({
       .join(" ");
 
     const handleCellClick = (e) => {
-      if (!folderAvailable) return;
+      if (!folderAvailable && !isInAddMode && !isInRemoveMode) return;
       if (isInAddMode) handleAddModeClick(item);
       else if (isInRemoveMode) handleRemoveModeClick(item);
       else handleClick(e, item);
