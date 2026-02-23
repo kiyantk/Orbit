@@ -1039,7 +1039,7 @@ select:disabled {
   border-radius: 3px;
 }
 
-.welcome-popup-remove-folder:hover:not(:disabled) {
+.welcome-popup-remove-folder:hover:not(:disabled):not(.welcome-popup-folder-action) {
   background-color: #ff3b3b20;
 }
 

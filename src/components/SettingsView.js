@@ -9,7 +9,6 @@ import {
 import FolderList from "./FolderList";
 import HeicPopup from "./HeicPopup";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const TABS = ["User", "Media", "Explorer", "Memories", "Storage", "Controls", "App"];
 
 const TAB_ICONS = {
@@ -22,7 +21,6 @@ const TAB_ICONS = {
   App: faToolbox,
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function formatBytes(bytes, decimals = 2) {
   if (!+bytes) return "0 Bytes";
   const k = 1024;
@@ -39,13 +37,64 @@ function normalizePath(path) {
   return p;
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+export function resolvePathWithDriveMap(filePath, driveLetterMap) {
+  if (!filePath || !driveLetterMap || Object.keys(driveLetterMap).length === 0) return filePath;
+  for (const [originalFolder, customLetter] of Object.entries(driveLetterMap)) {
+    const originalDrive = originalFolder.match(/^([A-Za-z]:)/)?.[1]?.toUpperCase();
+    if (!originalDrive || !customLetter) continue;
+    const normalizedCustom = customLetter.replace(/:?$/, ":").toUpperCase();
+    if (filePath.toUpperCase().startsWith(originalDrive)) {
+      return normalizedCustom + filePath.slice(originalDrive.length);
+    }
+  }
+  return filePath;
+}
+
 const ShortcutKey = ({ children }) => (
   <span className="settings-shortcut-key">{children}</span>
 );
 
 const SettingsRow = ({ children }) => (
   <div className="settings-content-item">{children}</div>
+);
+
+// ─── Confirm Popup ────────────────────────────────────────────────────────────
+const ConfirmPopup = ({ message, subMessage, onConfirm, onCancel }) => (
+  <div className="welcome-popup-overlay">
+          <div className="confirm-popup" style={{ maxWidth: 420 }}>
+            <div className="welcome-popup-top">
+              <div className="welcome-popup-inline">
+                <h2>Remove source(s)</h2>
+              </div>
+            </div>
+
+            <div className="welcome-popup-content">
+              <span style={{ color: "#ccc" }}>
+                {message}
+                <br /><br />
+                <strong>{subMessage}</strong>
+              </span>
+            </div>
+
+            <div className="settings-bottom-bar" style={{ gap: 8 }}>
+              <button
+                className="settings-cancel-btn"
+                style={{ backgroundColor: "#2d2a35" }}
+                onClick={onCancel}
+              >
+                No
+              </button>
+
+              <button
+                className="settings-save-btn"
+                style={{ backgroundColor: "#ff6b6b" }}
+                onClick={onConfirm}
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
 );
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -58,7 +107,7 @@ const SettingsView = ({
   enterRemoveMode,
 }) => {
   const [selectedTab, setSelectedTab] = useState("User");
-  const [settings, setSettings] = useState(currentSettings);
+  const [settings, setSettings] = useState({ driveLetterMap: {}, ...currentSettings });
   const [isIndexing, setIsIndexing] = useState(false);
   const [indexingStatus, setIndexingStatus] = useState(null);
   const [missingHeicFiles, setMissingHeicFiles] = useState([]);
@@ -67,13 +116,14 @@ const SettingsView = ({
   const [isFetchingUsage, setIsFetchingUsage] = useState(false);
   const [storageUsage, setStorageUsage] = useState({ app: 0, index: 0, thumbnails: 0 });
 
-  // ─── IPC wrappers ───────────────────────────────────────────────────────────
+  // confirmPopup: null | { message, subMessage, onConfirm }
+  const [confirmPopup, setConfirmPopup] = useState(null);
+
   const ipc = useCallback(
     (channel, ...args) => window.electron.ipcRenderer.invoke(channel, ...args),
     []
   );
 
-  // ─── Settings persistence ───────────────────────────────────────────────────
   const saveSettings = useCallback(
     async (next) => {
       applySettings(next);
@@ -91,10 +141,7 @@ const SettingsView = ({
     setSettings((prev) => ({ ...prev, ...patch }));
   }, []);
 
-  // Generic checkbox handler
   const handleCheckbox = (key) => (e) => updateSettings({ [key]: e.target.checked });
-
-  // Generic select handler
   const handleSelect = (key) => (e) => updateSettings({ [key]: e.target.value });
 
   const handleUsernameChange = (e) => {
@@ -106,33 +153,41 @@ const SettingsView = ({
     updateSettings({ username: v });
   };
 
+  const handleSetDriveLetter = useCallback((folder, customLetter) => {
+    setSettings((prev) => {
+      const next = { ...(prev.driveLetterMap || {}) };
+      if (customLetter === null || customLetter === undefined) {
+        delete next[folder];
+      } else {
+        next[folder] = customLetter;
+      }
+      return { ...prev, driveLetterMap: next };
+    });
+  }, []);
+
   // ─── Effects ────────────────────────────────────────────────────────────────
 
-  // Load settings on mount
   useEffect(() => {
-    ipc("get-settings").then((loaded) => { if (loaded) setSettings(loaded); });
-    // Preload logo
+    ipc("get-settings").then((loaded) => {
+      if (loaded) setSettings({ driveLetterMap: {}, ...loaded });
+    });
     new Image().src = `${process.env.PUBLIC_URL}/logo-v2-orbit-bright-white-shadow-small.png`;
   }, [ipc]);
 
-  // Sync tab from parent
   useEffect(() => {
     if (newTab) setSelectedTab(newTab);
   }, [newTab]);
 
-  // Auto-save on settings change
   useEffect(() => {
     saveSettings(settings);
   }, [settings]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Check for missing HEIC thumbnails when indexed folders change
   useEffect(() => {
     ipc("fetch-heic-missing-thumbnails").then((res) => {
       if (res.success) setMissingHeicFiles(res.files);
     });
   }, [settings.indexedFolders, ipc]);
 
-  // Indexing progress listener
   useEffect(() => {
     const handleProgress = (data) => {
       if (data && typeof data === "object") {
@@ -150,7 +205,8 @@ const SettingsView = ({
     return () => window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
   }, []);
 
-  // ─── Indexing actions ────────────────────────────────────────────────────────
+  // ─── Folder actions ──────────────────────────────────────────────────────────
+
   const startIndex = async (folders) => {
     if (!folders.length) { setIndexingStatus("Please select at least one folder to index"); return; }
     setIsIndexing(true);
@@ -180,8 +236,16 @@ const SettingsView = ({
     }
   };
 
-  const removeFolder = async (folderPath) => {
-    updateSettings({ indexedFolders: settings.indexedFolders.filter((f) => f !== folderPath) });
+  const doRemoveFolder = async (folderPath) => {
+    setSettings((prev) => {
+      const nextMap = { ...(prev.driveLetterMap || {}) };
+      delete nextMap[folderPath];
+      return {
+        ...prev,
+        indexedFolders: prev.indexedFolders.filter((f) => f !== folderPath),
+        driveLetterMap: nextMap,
+      };
+    });
     try {
       const res = await ipc("remove-folder-data", folderPath);
       if (!res.success) console.error("Failed to remove folder data:", res.error);
@@ -190,8 +254,18 @@ const SettingsView = ({
     }
   };
 
-  const handleRemoveAll = async () => {
-    if (!window.confirm("Are you sure you want to remove ALL indexed folders and their data? This cannot be undone.")) return;
+  const removeFolder = (folderPath) => {
+    setConfirmPopup({
+      message: `Remove this source?`,
+      subMessage: folderPath,
+      onConfirm: () => {
+        setConfirmPopup(null);
+        doRemoveFolder(folderPath);
+      },
+    });
+  };
+
+  const doRemoveAll = async () => {
     for (const folder of settings.indexedFolders) {
       try {
         const res = await ipc("remove-folder-data", folder);
@@ -200,10 +274,22 @@ const SettingsView = ({
         console.error("Error removing folder:", err);
       }
     }
-    updateSettings({ indexedFolders: [] });
+    updateSettings({ indexedFolders: [], driveLetterMap: {} });
   };
 
-  // ─── Tool actions ─────────────────────────────────────────────────────────────
+  const handleRemoveAll = () => {
+    setConfirmPopup({
+      message: "Remove ALL indexed sources?",
+      subMessage: "This will delete all index data and thumbnails. This cannot be undone.",
+      onConfirm: () => {
+        setConfirmPopup(null);
+        doRemoveAll();
+      },
+    });
+  };
+
+  // ─── Tool actions ────────────────────────────────────────────────────────────
+
   const runTool = useCallback(
     async (channel, label) => {
       setIndexingStatus(`${label}...`);
@@ -225,7 +311,6 @@ const SettingsView = ({
   const fixIDs = () => runTool("fix-media-ids", "Fixing media IDs");
   const cleanupThumbnails = () => runTool("cleanup-thumbnails", "Scanning for orphaned thumbnails");
 
-  // ─── Storage ──────────────────────────────────────────────────────────────────
   const getUsageData = async () => {
     setIsFetchingUsage(true);
     try {
@@ -236,16 +321,15 @@ const SettingsView = ({
     }
   };
 
-  // ─── Misc ─────────────────────────────────────────────────────────────────────
   const openAppLocation = () => ipc("open-orbit-location");
   const toggleFullscreen = () => ipc("toggle-fullscreen");
 
-  // ─── Render ───────────────────────────────────────────────────────────────────
+  // ─── Render ──────────────────────────────────────────────────────────────────
+
   return (
     <div className="settings-view">
       <div className="settings-main">
 
-        {/* Sidebar */}
         <div className="settings-list">
           <h2>Settings</h2>
           <ul>
@@ -262,10 +346,8 @@ const SettingsView = ({
           </ul>
         </div>
 
-        {/* Content */}
         <div className="settings-content">
 
-          {/* User */}
           {selectedTab === "User" && (
             <div>
               <SettingsRow>
@@ -279,7 +361,6 @@ const SettingsView = ({
             </div>
           )}
 
-          {/* Explorer */}
           {selectedTab === "Explorer" && (
             <div>
               <SettingsRow>
@@ -318,7 +399,6 @@ const SettingsView = ({
             </div>
           )}
 
-          {/* Memories */}
           {selectedTab === "Memories" && (
             <div>
               <SettingsRow>
@@ -332,11 +412,16 @@ const SettingsView = ({
             </div>
           )}
 
-          {/* Media */}
           {selectedTab === "Media" && (
             <div>
               <h3>Indexed Sources</h3>
-              <FolderList folders={settings.indexedFolders} onRemoveFolder={removeFolder} folderStatuses={folderStatuses} />
+              <FolderList
+                folders={settings.indexedFolders}
+                onRemoveFolder={removeFolder}
+                folderStatuses={folderStatuses}
+                driveLetterMap={settings.driveLetterMap || {}}
+                onSetDriveLetter={handleSetDriveLetter}
+              />
               <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="welcome-popup-select-folders-btn" onClick={selectFolders} disabled={isIndexing}>Add Source</button>
                 <button className="welcome-popup-select-folders-btn" onClick={handleRemoveAll} disabled={isIndexing || !settings.indexedFolders.length}>Remove All</button>
@@ -355,7 +440,6 @@ const SettingsView = ({
             </div>
           )}
 
-          {/* Storage */}
           {selectedTab === "Storage" && (
             <div>
               <SettingsRow>
@@ -387,7 +471,6 @@ const SettingsView = ({
             </div>
           )}
 
-          {/* Controls */}
           {selectedTab === "Controls" && (
             <div>
               <h3>General</h3>
@@ -429,7 +512,6 @@ const SettingsView = ({
             </div>
           )}
 
-          {/* App */}
           {selectedTab === "App" && (
             <div>
               <SettingsRow>
@@ -479,6 +561,15 @@ const SettingsView = ({
             </div>
           </div>
         </div>
+      )}
+
+      {confirmPopup && (
+        <ConfirmPopup
+          message={confirmPopup.message}
+          subMessage={confirmPopup.subMessage}
+          onConfirm={confirmPopup.onConfirm}
+          onCancel={() => setConfirmPopup(null)}
+        />
       )}
     </div>
   );

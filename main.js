@@ -164,8 +164,19 @@ function decodeHeic(filePath) {
   return promise;
 }
 
+function getSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(configPath, "utf8"));
+  } catch {
+    return defaultConfig;
+  }
+}
+
 appServer.get("/cancel-heic/*", (req, res) => {
-  const filePath = decodeURIComponent(req.path.replace("/cancel-heic/", ""));
+  const filePath = applyDriveLetterMap(
+    decodeURIComponent(req.path.replace("/cancel-heic/", "")),
+    getDriveLetterMap()
+  );
   
   const worker = activeWorkerMap.get(filePath);
   if (worker) {
@@ -184,18 +195,13 @@ appServer.get("/cancel-heic/*", (req, res) => {
 });
 
 appServer.get("/prefetch-heic/*", (req, res) => {
-  const filePath = decodeURIComponent(req.path.replace("/prefetch-heic/", ""));
+  const filePath = applyDriveLetterMap(
+    decodeURIComponent(req.path.replace("/prefetch-heic/", "")),
+    getDriveLetterMap()
+  );
   if (fs.existsSync(filePath)) decodeHeic(filePath); // fire and forget, starts caching
   res.sendStatus(204);
 });
-
-function getSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(configPath, "utf8"));
-  } catch {
-    return defaultConfig;
-  }
-}
 
 async function decodeHeicSimple(filePath) {
   const inputBuffer = fs.readFileSync(filePath);
@@ -207,7 +213,8 @@ async function decodeHeicSimple(filePath) {
 
   // Serve files from any path on disk
 appServer.get("/files/*", async (req, res) => {
-  const filePath = decodeURIComponent(req.path.replace("/files/", ""));
+  const rawPath = decodeURIComponent(req.path.replace("/files/", ""));
+  const filePath = applyDriveLetterMap(rawPath, getDriveLetterMap());
 
   if (!fs.existsSync(filePath)) {
     return res.status(404).send("Not found");
@@ -283,7 +290,8 @@ const defaultConfig = {
   openMemoriesIn: "explorer", // "explorer", "shuffle" or "map" 
   itemText: "filename", // "filename", "datetime" or "none"
   noGutters: false,
-  preloadHeic: false
+  preloadHeic: false,
+  driveLetterMap: {}
 };
 
 // Database
@@ -493,8 +501,9 @@ ipcMain.handle("open-orbit-location", () => {
   shell.openPath(appPath);
 });
 
-ipcMain.handle('open-in-default-viewer', async (event, filePath) => {
+ipcMain.handle('open-in-default-viewer', async (event, rawPath) => {
   try {
+    const filePath = applyDriveLetterMap(rawPath, getDriveLetterMap());
     await shell.openPath(filePath);
     return { success: true };
   } catch (err) {
@@ -649,7 +658,14 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     
     const rows = stmt.all(...params, limit, offset);
 
-    return { success: true, rows, totalCount };
+    const map = getDriveLetterMap();
+    const mappedRows = rows.map(r => ({
+      ...r,
+      path: applyDriveLetterMap(r.path, map),
+      folder_path: applyDriveLetterMap(r.folder_path, map),
+    }));
+
+    return { success: true, rows: mappedRows, totalCount };
   } catch (err) {
     console.error("fetch-files error:", err);
     return { success: false, error: err.message, rows: [], totalCount: 0 };
@@ -1210,15 +1226,15 @@ async function extractMetadata(filePath) {
     ".mkv",
     ".webm",
     ".wmv",
-  
+
     // Mobile / older
     ".3gp",
     ".3g2",
-  
+
     // Flash / legacy
     ".flv",
     ".f4v",
-  
+
     // Professional / streaming
     ".m4v",
     ".mpeg",
@@ -1226,7 +1242,7 @@ async function extractMetadata(filePath) {
     ".ts",
     ".mts",
     ".m2ts",
-  
+
     // Open / less common
     ".ogv",
   ];
@@ -2395,13 +2411,17 @@ ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
         .sort((a, b) => b.age - a.age);
     }
 
+    const map = getDriveLetterMap();
+    const mappedSources = sources.map(s => ({ ...s, folder: applyDriveLetterMap(s.folder, map) }));
+
+
     return {
       success: true,
       perYear, perMonth, topDays, allDays,
       byType, byDevice, byCountry,
       totalFiles: totals.totalFiles,
       totalStorage: totals.totalStorage || 0,
-      sources, perAge, devices
+      sources: mappedSources, perAge, devices
     };
   } catch (err) {
     console.error("fetch-stats error:", err);
@@ -2582,6 +2602,77 @@ ipcMain.handle("memory:set-items", async (event, { memoryId, mediaIds }) => {
     return { success: false, error: err.message };
   }
 });
+
+// ─── Drive Letter Map (stored in config.json under "driveLetterMap") ──────────
+// Add "driveLetterMap": {} to your defaultConfig object.
+// Format: { "D:/Photos": "E:", "C:/OldDrive/Media": "F:" }
+
+ipcMain.handle("get-drive-letter-map", () => {
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return config.driveLetterMap || {};
+  } catch {
+    return {};
+  }
+});
+
+ipcMain.handle("save-drive-letter-map", (event, map) => {
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    config.driveLetterMap = map;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+    return { success: true };
+  } catch (err) {
+    console.error("save-drive-letter-map error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Helper for use in Express routes and open-in-default-viewer:
+function getDriveLetterMap() {
+  // Use getSettings if it exists, otherwise fall back to reading directly
+  const settings =
+    typeof getSettings === "function"
+      ? getSettings()
+      : (() => {
+          try {
+            return JSON.parse(fs.readFileSync(configPath, "utf8"));
+          } catch {
+            return defaultConfig;
+          }
+        })();
+
+  return settings.driveLetterMap || {};
+}
+
+function applyDriveLetterMap(filePath, map) {
+  if (!filePath || !map || Object.keys(map).length === 0) return filePath;
+
+  const normalizedPath = filePath.replace(/\//g, "\\"); // normalize slashes for matching
+
+  for (const [originalFolder, customLetter] of Object.entries(map)) {
+    if (!originalFolder || !customLetter) continue;
+
+    // Remove trailing slashes from the map path
+    const trimmedOriginal = originalFolder.replace(/[\\/]+$/, "");
+
+    // Compare case-insensitively
+    if (normalizedPath.toUpperCase().startsWith(trimmedOriginal.toUpperCase())) {
+      // Ensure custom drive ends with colon only (no double backslash)
+      const normalizedCustom = customLetter.replace(/:?$/, ":");
+
+      // Keep the full path after the original drive (do not slice the folder)
+      const remainder = filePath.slice(2); // remove original drive letter only
+
+      // Avoid double backslash if remainder starts with \
+      const cleanRemainder = remainder.startsWith("\\") ? remainder : "\\" + remainder;
+
+      return normalizedCustom + cleanRemainder;
+    }
+  }
+
+  return filePath;
+}
 
 ipcMain.handle("toggle-fullscreen", () => {
   if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());

@@ -94,7 +94,7 @@ const ExplorerView = ({
   const gutterSize = noGutters ? 0 : GUTTER;
   const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + gutterSize)));
   const rowCount = totalCount ? Math.ceil(totalCount / columnCount) : 0;
-  const gridHeight = Math.max(400, window.innerHeight);
+  const gridHeight = Math.max(400, window.innerHeight - 71);
 
   // Cell size including gutter (what react-window uses as stride)
   const cellStride = columnWidth + gutterSize;

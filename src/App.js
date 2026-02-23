@@ -61,20 +61,52 @@ const App = () => {
       });
   }, []);
 
-  const checkFolderStatuses = useCallback(async () => {
-    if (!settings?.indexedFolders?.length) return;
+const checkFolderStatuses = useCallback(async () => {
+  if (!settings?.indexedFolders?.length) return;
 
-    try {
-      const statuses = await window.electron.ipcRenderer.invoke(
-        "check-folders",
-        settings.indexedFolders
-      );
-      // Expecting { "C:/path": true, "D:/external": false }
-      setFolderStatuses(statuses);
-    } catch (error) {
-      console.error("Error checking folder statuses:", error);
-    }
-  }, [settings]);
+  try {
+    const map = settings.driveLetterMap || {};
+
+    // Helper function to apply the drive-letter map
+    const applyDriveLetterMap = (filePath) => {
+      if (!filePath || !map || Object.keys(map).length === 0) return filePath;
+
+      const normalizedPath = filePath.replace(/\//g, "\\"); // normalize slashes
+
+      for (const [originalFolder, customLetter] of Object.entries(map)) {
+        if (!originalFolder || !customLetter) continue;
+
+        // Remove trailing slashes from the map path
+        const trimmedOriginal = originalFolder.replace(/[\\/]+$/, "");
+
+        // Case-insensitive comparison
+        if (normalizedPath.toUpperCase().startsWith(trimmedOriginal.toUpperCase())) {
+          const normalizedCustom = customLetter.replace(/:?$/, ":");
+          const remainder = filePath.slice(2); // remove original drive letter
+          const cleanRemainder = remainder.startsWith("\\") ? remainder : "\\" + remainder;
+          return normalizedCustom + cleanRemainder;
+        }
+      }
+
+      return filePath;
+    };
+
+    // Map all indexed folders
+    const mappedFolders = settings.indexedFolders.map(folder =>
+      applyDriveLetterMap(folder)
+    );
+
+    // Send mapped folders to Electron IPC
+    const statuses = await window.electron.ipcRenderer.invoke(
+      "check-folders",
+      mappedFolders
+    );
+    // Expecting { "X:/Phone/...": true, ... }
+    setFolderStatuses(statuses);
+  } catch (error) {
+    console.error("Error checking folder statuses:", error);
+  }
+}, [settings]);
 
   // Run check every minute
   useEffect(() => {
