@@ -653,7 +653,7 @@ select:disabled {
   font-style: italic;
 }
 
-.thumb-item {
+.thumb-item, .thumb-selected-addmode, .thumb-selected-removemode {
   user-select: none;
 }
 

@@ -13,6 +13,7 @@ const BASE_COLUMN_WIDTH = 130;
 const BASE_ROW_HEIGHT = 130;
 const GUTTER = 10;
 const PAGE_SIZE = 200;
+const DRAG_THRESHOLD = 6;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function formatLocalDateString(str) {
@@ -59,10 +60,12 @@ const ExplorerView = ({
   const [addModeSelected, setAddModeSelected] = useState(new Set());
   const [removeModeSelected, setRemoveModeSelected] = useState(new Set());
   const [contextMenu, setContextMenu] = useState(null);
-  const [tags, setTags] = useState([]);
   const [itemToReveal, setItemToReveal] = useState(null);
   const [noGutters, setNoGutters] = useState(false);
   const [, forceUpdate] = useState(0);
+
+  // ─── Drag-select state ────────────────────────────────────────────────────
+  const [dragContentRect, setDragContentRect] = useState(null); // { left, top, width, height } in content coords (drives visual)
 
   const itemsRef = useRef({});
   const idToIndex = useRef(new Map());
@@ -74,13 +77,28 @@ const ExplorerView = ({
   const prefetchTimer = useRef(null);
   const loadMoreTimeout = useRef(null);
 
+  // ─── Drag-select refs ─────────────────────────────────────────────────────
+  const dragStartRef = useRef(null);         // { x, y } viewport coords at mousedown
+  const dragScrollTopRef = useRef(0);        // live scrollTop during drag
+  const dragStartScrollTop = useRef(0);      // scrollTop captured at mousedown
+  const dragPreExisting = useRef(new Set()); // selection snapshot before drag started
+  const isDraggingRef = useRef(false);
+  const dragRectRef = useRef(null);          // mirrors dragRect without triggering re-renders mid-drag
+  const lastMouseY = useRef(0);
+  const dragPendingRef = useRef(null); // { x, y, addModeSelected snapshot } while waiting to confirm drag
+  const dragJustFinishedRef = useRef(false);
+
   // ─── Derived layout values ────────────────────────────────────────────────
   const columnWidth = BASE_COLUMN_WIDTH * scale;
   const rowHeight = BASE_ROW_HEIGHT * scale;
   const gutterSize = noGutters ? 0 : GUTTER;
   const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + gutterSize)));
   const rowCount = totalCount ? Math.ceil(totalCount / columnCount) : 0;
-  const gridHeight = Math.max(400, window.innerHeight - 160);
+  const gridHeight = Math.max(400, window.innerHeight);
+
+  // Cell size including gutter (what react-window uses as stride)
+  const cellStride = columnWidth + gutterSize;
+  const rowStride  = rowHeight;   // react-window rowHeight already accounts for the cell height
 
   // ─── Item text label ──────────────────────────────────────────────────────
   const getItemName = useCallback(
@@ -181,7 +199,6 @@ const ExplorerView = ({
   const getTags = useCallback(async () => {
     const res = await window.electron.ipcRenderer.invoke("tags:get-all");
     const freshTags = res || [];
-    setTags(freshTags);
     return freshTags;
   }, []);
 
@@ -276,12 +293,240 @@ const ExplorerView = ({
   // ─── Scroll handling ──────────────────────────────────────────────────────
   const handleScroll = useCallback(
     ({ scrollTop, scrollUpdateWasRequested }) => {
+      // Keep drag scroll tracker in sync
+      dragScrollTopRef.current = scrollTop;
+
       if (scrollUpdateWasRequested || isRestoringScrollRef.current) return;
       anchorIndexRef.current = Math.max(0, Math.floor(scrollTop / rowHeight) * columnCount);
       if (scrollTop !== 0) setScrollPosition(scrollTop);
     },
     [rowHeight, columnCount, setScrollPosition]
   );
+
+  // ─── Drag-select: compute which indices are within a rect ─────────────────
+  /**
+   * Given a selection rectangle in grid-content coordinates (i.e. scrollTop already
+   * factored in), return all item indices that intersect it.
+   *
+   * rect: { left, top, right, bottom } — in grid-content space
+   */
+  const getIndicesInRect = useCallback(
+    (rect) => {
+      if (!totalCount) return [];
+      const { left, top, right, bottom } = rect;
+
+      // Which columns are touched?
+      const colStart = Math.max(0, Math.floor(left / cellStride));
+      const colEnd   = Math.min(columnCount - 1, Math.floor((right - 1) / cellStride));
+
+      // Which rows are touched?
+      const rowStart = Math.max(0, Math.floor(top / rowStride));
+      const rowEnd   = Math.min(Math.ceil(totalCount / columnCount) - 1, Math.floor((bottom - 1) / rowStride));
+
+      const indices = [];
+      for (let r = rowStart; r <= rowEnd; r++) {
+        for (let c = colStart; c <= colEnd; c++) {
+          const idx = r * columnCount + c;
+          if (idx < totalCount) indices.push(idx);
+        }
+      }
+      return indices;
+    },
+    [totalCount, columnCount, cellStride, rowStride]
+  );
+
+  // ─── Drag-select: apply rect to selection ────────────────────────────────
+  const applyDragRect = useCallback(
+    (viewportRect) => {
+      if (!nodeRef.current) return;
+
+    const gridEl = nodeRef.current.querySelector(".explorer-grid");
+    const gridBounds = (gridEl ?? nodeRef.current).getBoundingClientRect();
+        
+    const gridOriginX = gridBounds.left;
+    const gridOriginY = gridBounds.top;
+
+      // Convert the two viewport anchor points to container-relative coords.
+      // x1/y1 is where the drag started, x2/y2 is the current mouse position.
+      const relStartX = viewportRect.x1 - gridOriginX;
+      const relStartY = viewportRect.y1 - gridOriginY;
+      const relCurX   = viewportRect.x2 - gridOriginX;
+      const relCurY   = viewportRect.y2 - gridOriginY;
+
+      // Convert both points to content-space using their respective scrollTops.
+      // The start point is anchored to the scrollTop captured at mousedown; the
+      // current point uses live scrollTop. Scrolling therefore expands/contracts
+      // the content rect naturally without flickering previously-covered rows.
+      const startContentY = relStartY + dragStartScrollTop.current;
+      const curContentY   = relCurY   + dragScrollTopRef.current;
+
+      const contentRect = {
+        left:   Math.min(relStartX, relCurX),
+        top:    Math.min(startContentY, curContentY),
+        right:  Math.max(relStartX, relCurX),
+        bottom: Math.max(startContentY, curContentY),
+      };
+
+      // Update the visual overlay in content-space coords
+      setDragContentRect({
+        left:   contentRect.left,
+        top:    contentRect.top,
+        width:  contentRect.right  - contentRect.left,
+        height: contentRect.bottom - contentRect.top,
+      });
+
+      const indices = getIndicesInRect(contentRect);
+
+      // XOR semantics:
+      //   Items in rect that were NOT pre-selected  → select them
+      //   Items in rect that WERE pre-selected      → deselect them
+      //   Items outside rect                        → restore pre-existing state
+      setAddModeSelected(() => {
+        const next = new Set(dragPreExisting.current);
+        indices.forEach((idx) => {
+          const item = itemsRef.current[idx];
+          if (!item) return;
+          if (dragPreExisting.current.has(item.id)) {
+            next.delete(item.id);
+          } else {
+            next.add(item.id);
+          }
+        });
+        return next;
+      });
+    },
+    [getIndicesInRect]
+  );
+
+  // ─── Drag-select mouse handlers ───────────────────────────────────────────
+  const isAddModeActive = useCallback(() => {
+    return explorerMode?.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory");
+  }, [explorerMode]);
+
+  const handleGridMouseDown = useCallback(
+    (e) => {
+      if (!isAddModeActive()) return;
+      if (e.button !== 0) return;
+
+      e.preventDefault();
+      dragPendingRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        scrollTop: dragScrollTopRef.current,
+        selection: new Set(addModeSelected),
+      };
+    },
+    [isAddModeActive, addModeSelected]
+  );
+
+  // Global mousemove / mouseup during drag (attached to window)
+  useEffect(() => {
+    const onMouseMove = (e) => {
+      // Confirm pending drag once mouse moves enough
+      if (dragPendingRef.current && !isDraggingRef.current) {
+        const dx = e.clientX - dragPendingRef.current.x;
+        const dy = e.clientY - dragPendingRef.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+          // Commit the drag
+          isDraggingRef.current = true;
+          dragStartRef.current = { x: dragPendingRef.current.x, y: dragPendingRef.current.y };
+          dragStartScrollTop.current = dragPendingRef.current.scrollTop;
+          dragPreExisting.current = dragPendingRef.current.selection;
+          dragPendingRef.current = null;
+        }
+      }
+    
+      if (!isDraggingRef.current || !dragStartRef.current) return;
+    
+      const rect = {
+        x1: dragStartRef.current.x,
+        y1: dragStartRef.current.y,
+        x2: e.clientX,
+        y2: e.clientY,
+      };
+      dragRectRef.current = rect;
+      applyDragRect(rect);
+    };
+
+    const onMouseUp = () => {
+      dragPendingRef.current = null; // cancel pending drag → treat as click
+      if (!isDraggingRef.current) return;
+      if (isDraggingRef.current) dragJustFinishedRef.current = true;
+      isDraggingRef.current = false;
+      dragStartRef.current = null;
+      dragRectRef.current = null;
+      setDragContentRect(null);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [applyDragRect]);
+
+  // Re-apply rect when scroll changes while dragging (handles scroll-during-drag)
+  useEffect(() => {
+    // This effect watches dragScrollTopRef changes via handleScroll.
+    // We hook into the Grid's onScroll indirectly — applyDragRect uses dragScrollTopRef
+    // directly, so calling it on each scroll event covers us.
+    // The actual wiring is: handleScroll updates dragScrollTopRef, then we need to
+    // re-apply. We do this by registering a scroll listener on the grid outer element.
+    const gridOuter = nodeRef.current?.querySelector(".explorer-grid");
+    if (!gridOuter) return;
+
+    const onScroll = () => {
+      if (isDraggingRef.current && dragRectRef.current) {
+        applyDragRect(dragRectRef.current);
+      }
+    };
+
+    gridOuter.addEventListener("scroll", onScroll, { passive: true });
+    return () => gridOuter.removeEventListener("scroll", onScroll);
+  }, [applyDragRect, totalCount]); // re-bind when grid mounts or totalCount changes
+
+  useEffect(() => {
+    const EDGE_SIZE = 60;    // px from edge that triggers scroll
+    const MAX_SPEED = 12;    // px per frame at the very edge
+    let rafId = null;
+
+    const tick = () => {
+  if (isDraggingRef.current) {
+    const gridOuter = nodeRef.current?.querySelector("#explorer-grid-outer");
+    if (gridOuter) {
+      const bounds = gridOuter.getBoundingClientRect();
+      const mouseY = lastMouseY.current;
+      const distFromTop    = mouseY - bounds.top;
+      const distFromBottom = bounds.bottom - mouseY;
+      let speed = 0;
+if (distFromTop < EDGE_SIZE) {
+  speed = -MAX_SPEED * (1 - Math.max(0, distFromTop) / EDGE_SIZE);
+} else if (distFromBottom < EDGE_SIZE) {
+  speed = MAX_SPEED * (1 - Math.max(0, distFromBottom) / EDGE_SIZE);
+}
+      if (speed !== 0) {
+        const newScrollTop = Math.max(0, dragScrollTopRef.current + speed);
+        gridRef.current?.scrollTo({ scrollTop: newScrollTop });
+        dragScrollTopRef.current = newScrollTop;
+        if (dragRectRef.current) applyDragRect(dragRectRef.current);
+      }
+    }
+  }
+  rafId = requestAnimationFrame(tick); // always keep the loop alive
+};
+
+    const onMouseMove = (e) => {
+      lastMouseY.current = e.clientY;
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      cancelAnimationFrame(rafId);
+    };
+  }, [applyDragRect]);
 
   // ─── Reveal item (from context menu) ────────────────────────────────────
   const revealFromContextMenu = useCallback(
@@ -295,7 +540,7 @@ const ExplorerView = ({
   // ─── Container ref / resize ───────────────────────────────────────────────
   const containerRef = useCallback((node) => {
     nodeRef.current = node;
-    if (node) setContainerWidth(node.offsetWidth - 30);
+    if (node) setContainerWidth(node.offsetWidth - 10);
   }, []);
 
   // ─── Effects ──────────────────────────────────────────────────────────────
@@ -311,7 +556,7 @@ const ExplorerView = ({
   // Container resize
   useEffect(() => {
     const updateWidth = () => {
-      if (nodeRef.current) setContainerWidth(nodeRef.current.offsetWidth - 30);
+      if (nodeRef.current) setContainerWidth(nodeRef.current.offsetWidth - 10);
     };
     updateWidth();
     window.addEventListener("resize", updateWidth);
@@ -550,6 +795,11 @@ const ExplorerView = ({
       .join(" ");
 
     const handleCellClick = (e) => {
+      // Suppress click if it was a drag operation
+      if (dragJustFinishedRef.current) {
+        dragJustFinishedRef.current = false;
+        return;
+      }
       if (!folderAvailable && !isInAddMode && !isInRemoveMode) return;
       if (isInAddMode) handleAddModeClick(item);
       else if (isInRemoveMode) handleRemoveModeClick(item);
@@ -611,6 +861,34 @@ const ExplorerView = ({
     );
   });
 
+  // ─── Drag selection rectangle overlay ────────────────────────────────────
+  // Rendered as a child of the grid outer div (position: absolute in content space).
+  const DragSelectOverlay = () => {
+    if (!dragContentRect) return null;
+    const { left, top, width, height } = dragContentRect;
+    if (width < 4 && height < 4) return null;
+
+    // Shift by -scrollTop so the rect visually tracks its content-space position
+    const visualTop = top - dragScrollTopRef.current;
+
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left,
+          top: visualTop,
+          width,
+          height,
+          border: "1px solid rgba(255, 255, 0, 0.268)",
+          backgroundColor: "rgba(255, 255, 107, 0.1)",
+          borderRadius: 3,
+          pointerEvents: "none",
+          zIndex: 10,
+        }}
+      />
+    );
+  };
+
   // ─── Empty / loading states ───────────────────────────────────────────────
   const hasActiveFilters = filters
     ? Object.values(filters).some((v) => v !== "" && v != null)
@@ -658,8 +936,13 @@ const ExplorerView = ({
   const isRemoveMode = explorerMode?.enabled && explorerMode.type === "remove";
 
   return (
-    <div className="explorer-view" ref={containerRef} style={{ height: "100%", width: "100%" }}>
-      <div className="explorer-main" style={{ height: "100%", padding: 12 }}>
+    <div
+      className="explorer-view"
+      ref={containerRef}
+      style={{ height: "100%", width: "100%" }}
+      onMouseDown={handleGridMouseDown}
+    >
+      <div className="explorer-main" style={{ height: "100%", padding: "12px 0px" }}>
         <InfiniteLoader
           isItemLoaded={isItemLoaded}
           itemCount={totalCount}
@@ -667,30 +950,33 @@ const ExplorerView = ({
           threshold={columnCount * 4}
         >
           {({ onItemsRendered, ref }) => (
-            <Grid
-              key={filters ? JSON.stringify(filters) : "nofilter"}
-              ref={(grid) => { ref(grid); gridRef.current = grid; }}
-              columnCount={columnCount}
-              columnWidth={columnWidth + gutterSize}
-              height={gridHeight}
-              rowCount={rowCount}
-              rowHeight={rowHeight}
-              width={containerWidth}
-              onScroll={handleScroll}
-              className="explorer-grid"
-              onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex, visibleColumnStartIndex, visibleColumnStopIndex }) => {
-                const startIndex = visibleRowStartIndex * columnCount + visibleColumnStartIndex;
-                const stopIndex = visibleRowStopIndex * columnCount + visibleColumnStopIndex;
-                onItemsRendered({
-                  overscanStartIndex: startIndex,
-                  overscanStopIndex: stopIndex,
-                  visibleStartIndex: startIndex,
-                  visibleStopIndex: stopIndex,
-                });
-              }}
-            >
-              {Cell}
-            </Grid>
+            <div id="explorer-grid-outer" style={{ position: "relative" }}>
+              <Grid
+                key={filters ? JSON.stringify(filters) : "nofilter"}
+                ref={(grid) => { ref(grid); gridRef.current = grid; }}
+                columnCount={columnCount}
+                columnWidth={columnWidth + gutterSize}
+                height={gridHeight}
+                rowCount={rowCount}
+                rowHeight={rowHeight}
+                width={containerWidth}
+                onScroll={handleScroll}
+                className="explorer-grid"
+                onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex, visibleColumnStartIndex, visibleColumnStopIndex }) => {
+                  const startIndex = visibleRowStartIndex * columnCount + visibleColumnStartIndex;
+                  const stopIndex = visibleRowStopIndex * columnCount + visibleColumnStopIndex;
+                  onItemsRendered({
+                    overscanStartIndex: startIndex,
+                    overscanStopIndex: stopIndex,
+                    visibleStartIndex: startIndex,
+                    visibleStopIndex: stopIndex,
+                  });
+                }}
+              >
+                {Cell}
+              </Grid>
+              <DragSelectOverlay />
+            </div>
           )}
         </InfiniteLoader>
       </div>

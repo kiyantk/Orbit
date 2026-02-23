@@ -12,5 +12,5 @@
     padding: 0px !important;
     height: calc(100vh - 23px - 26px - 22px) !important;
     width: 100% !important;
-    overflow-x: hidden !important;
+    overflow: hidden !important;
 }
