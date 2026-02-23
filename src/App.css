@@ -1684,9 +1684,6 @@ input[type="checkbox"] {
   .custom-cluster--xlarge { width: 52px; height: 52px; font-size: 14px; background: radial-gradient(circle, #c0392b, #7b0e0e); z-index: 4 }
 
 /* Cursor hint while hovering custom memory cards */
-.memories-grid .memory-box {
-  cursor: grab;
-}
 .memories-grid .memory-box:active {
   cursor: grabbing;
 }
