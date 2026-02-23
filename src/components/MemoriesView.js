@@ -1,6 +1,6 @@
 import { faArrowRight } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { SnackbarProvider, enqueueSnackbar } from "notistack";
 
 const ThumbnailStrip = React.memo(({ thumbnails = [] }) => (
@@ -26,6 +26,12 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
   const [loading, setLoading] = useState(true);
   const [customMemories, setCustomMemories] = useState([]);
 
+  // All drag state lives in a single ref — no stale closure issues
+  const drag = useRef({ active: false, fromIndex: null, toIndex: null });
+  const [dragIndex, setDragIndex] = useState(null);
+  // dropEdge: { index, edge: 'top' | 'bottom' } — which card + which side to show the indicator
+  const [dropEdge, setDropEdge] = useState(null);
+
   // --- ADD MEMORY POPUP STATE ---
   const [showAddMemory, setShowAddMemory] = useState(false);
   const [newMemory, setNewMemory] = useState({
@@ -33,20 +39,12 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     description: "",
     color: "#ffffff",
     quickAddQuery: "",
-    existing: null
+    existing: null,
   });
 
   useEffect(() => {
-    setSelectedTab("Custom")
-
-    setNewMemory({
-      title: "",
-      description: "",
-      color: "#ffffff",
-      quickAddQuery: "",
-      existing: null
-    })
-
+    setSelectedTab("Custom");
+    setNewMemory({ title: "", description: "", color: "#ffffff", quickAddQuery: "", existing: null });
     if (memoryMode === "new") setShowAddMemory(true);
     if (memoryMode === "edit") {
       setShowAddMemory(false);
@@ -112,7 +110,6 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     }
   };
 
-  // --- FETCH CUSTOM MEMORIES ---
   const fetchCustomMemories = async () => {
     try {
       setLoading(true);
@@ -153,11 +150,102 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     setLoading(false);
   };
 
+  // --- DRAG: whole card is the handle ---
+  const handleCardMouseDown = useCallback((e, index) => {
+    if (e.button !== 0) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let didDrag = false;
+
+    const onMouseMove = (ev) => {
+      const dist = Math.sqrt(
+        Math.pow(ev.clientX - startX, 2) + Math.pow(ev.clientY - startY, 2)
+      );
+
+      if (!didDrag) {
+        if (dist < 6) return;
+        didDrag = true;
+        drag.current.active = true;
+        drag.current.fromIndex = index;
+        drag.current.toIndex = index;
+        setDragIndex(index);
+        setDropEdge(null);
+      }
+
+      // Find which card the cursor is over and which half
+      const grid = document.querySelector(".memories-grid");
+      if (!grid) return;
+      const cards = Array.from(grid.querySelectorAll(".memory-box"));
+
+      let toIndex = cards.length - 1;
+      let edge = "bottom";
+
+      for (let i = 0; i < cards.length; i++) {
+        const rect = cards[i].getBoundingClientRect();
+        if (ev.clientY < rect.top + rect.height / 2) {
+          toIndex = i;
+          edge = "top";
+          break;
+        } else if (ev.clientY < rect.bottom) {
+          toIndex = i;
+          edge = "bottom";
+          break;
+        }
+      }
+
+      // Convert visual edge into the actual insertion index
+      // "top of card i" means insert before i → insertAt = i
+      // "bottom of card i" means insert after i → insertAt = i + 1
+      const insertAt = edge === "top" ? toIndex : toIndex + 1;
+      // Clamp to valid range accounting for the removed dragged item
+      const maxInsert = cards.length - 1;
+      const clampedInsert = Math.min(insertAt, maxInsert);
+
+      drag.current.toIndex = clampedInsert;
+
+      // Show indicator: if inserting before toIndex show top border on that card,
+      // if inserting after toIndex show bottom border on that card
+      if (edge === "top") {
+        setDropEdge({ index: toIndex, edge: "top" });
+      } else {
+        setDropEdge({ index: toIndex, edge: "bottom" });
+      }
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+
+      if (didDrag) {
+        const from = drag.current.fromIndex;
+        const to = drag.current.toIndex;
+        if (from !== null && to !== null && from !== to) {
+          setCustomMemories((prev) => {
+            const next = [...prev];
+            const [moved] = next.splice(from, 1);
+            next.splice(to, 0, moved);
+            const order = next.map((m, i) => ({ id: m.id, sort_order: next.length - i }));
+            window.electron.ipcRenderer.invoke("memory:reorder", { order });
+            return next;
+          });
+        }
+      }
+
+      drag.current = { active: false, fromIndex: null, toIndex: null };
+      setDragIndex(null);
+      setDropEdge(null);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
+
   // --- MEMORY BOX RENDERING ---
   const renderYearBoxes = () => (
     <div className="memories-grid">
       {years.map((y) => (
-        <div key={y.year} className="memory-box" onClick={() => {onViewMemory(y.ids)}}>
+        <div key={y.year} className="memory-box" onClick={() => { onViewMemory(y.ids); }}>
           <div className="memory-text">
             <div className="title">{y.year}</div>
             <div className="description">All media from {y.year}</div>
@@ -173,12 +261,9 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     <div className="memories-grid">
       {months.map((m) => {
         const date = new Date(`${m.year}-${m.month}-01`);
-        const label = date.toLocaleString("en-US", {
-          month: "long",
-          year: "numeric",
-        });
+        const label = date.toLocaleString("en-US", { month: "long", year: "numeric" });
         return (
-          <div key={`${m.year}-${m.month}`} className="memory-box" onClick={() => {onViewMemory(m.ids)}}>
+          <div key={`${m.year}-${m.month}`} className="memory-box" onClick={() => { onViewMemory(m.ids); }}>
             <div className="memory-text">
               <div className="title">{label}</div>
               <div className="description">All media from {label}</div>
@@ -194,7 +279,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
   const renderVacationBoxes = () => (
     <div className="memories-grid">
       {vacations.map((t) => (
-        <div key={t.id} className="memory-box" onClick={() => {onViewMemory(t.ids)}}>
+        <div key={t.id} className="memory-box" onClick={() => { onViewMemory(t.ids); }}>
           <div className="memory-text">
             <div className="title">{t.title}</div>
             <div className="description">
@@ -211,7 +296,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
   const renderTripBoxes = () => (
     <div className="memories-grid">
       {trips.map((t) => (
-        <div key={t.id} className="memory-box" onClick={() => {onViewMemory(t.ids)}}>
+        <div key={t.id} className="memory-box" onClick={() => { onViewMemory(t.ids); }}>
           <div className="memory-text">
             <div className="title">{t.title}</div>
             <div className="description">
@@ -227,36 +312,49 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
 
   const renderCustomMemories = () => (
     <div className="memories-grid">
-      {customMemories.map((m) => (
-        <div key={m.id} className="memory-box"
-           onClick={() => {
-            const mediaIds = JSON.parse(m.media_ids || "[]")
-            if (memoryMode !== "edit" && mediaIds.length > 0) {
-              onViewMemory(mediaIds)
-              return;
-            } else if(memoryMode !== "edit") {
-              return;
-            }
-        
-            setNewMemory({
-              id: m.id,
-              title: m.title,
-              description: m.description,
-              color: m.color,
-              existing: mediaIds
-            });
-            setShowAddMemory(true);
-          }}
-        >
-          <div className="memory-color" style={{ backgroundColor: m.color }}></div>
-          <div className="memory-text">
-            <div className="title">{m.title}</div>
-            <div className="description">{m.description}</div>
+      {customMemories.map((m, index) => {
+        const isDragging = dragIndex === index;
+        const dropClass =
+          dropEdge && dropEdge.index === index && dragIndex !== null && dragIndex !== index
+            ? dropEdge.edge === "top"
+              ? " memory-box--drop-top"
+              : " memory-box--drop-bottom"
+            : "";
+
+        return (
+          <div
+            key={m.id}
+            className={`memory-box${isDragging ? " memory-box--dragging" : ""}${dropClass}`}
+            onMouseDown={(e) => handleCardMouseDown(e, index)}
+            onClick={() => {
+              if (drag.current.active) return;
+              const mediaIds = JSON.parse(m.media_ids || "[]");
+              if (memoryMode !== "edit" && mediaIds.length > 0) {
+                onViewMemory(mediaIds);
+                return;
+              } else if (memoryMode !== "edit") {
+                return;
+              }
+              setNewMemory({
+                id: m.id,
+                title: m.title,
+                description: m.description,
+                color: m.color,
+                existing: mediaIds,
+              });
+              setShowAddMemory(true);
+            }}
+          >
+            <div className="memory-color" style={{ backgroundColor: m.color }}></div>
+            <div className="memory-text">
+              <div className="title">{m.title}</div>
+              <div className="description">{m.description}</div>
+            </div>
+            <ThumbnailStrip thumbnails={m.thumbnails} />
+            <div className="memory-count">{m.total} items</div>
           </div>
-          <ThumbnailStrip thumbnails={m.thumbnails} />
-          <div className="memory-count">{m.total} items</div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -274,7 +372,9 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
           if (item.type === "custom") {
             const m = item.data;
             return (
-              <div key={`custom-${m.id}`} className="memory-box"
+              <div
+                key={`custom-${m.id}`}
+                className="memory-box"
                 onClick={() => {
                   const mediaIds = JSON.parse(m.media_ids || "[]");
                   if (memoryMode !== "edit" && mediaIds.length > 0) { onViewMemory(mediaIds); return; }
@@ -342,7 +442,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     );
   };
 
-    // --- HANDLE SAVE MEMORY ---
+  // --- HANDLE SAVE MEMORY ---
   const handleSaveMemory = async () => {
     try {
       if (memoryMode === "edit") {
@@ -350,7 +450,6 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
       } else {
         await window.electron.ipcRenderer.invoke("add-memory", newMemory);
       }
-
       setShowAddMemory(false);
       switchMemoryMode(null);
       fetchCustomMemories();
@@ -361,12 +460,8 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
 
   const handleDeleteMemory = async () => {
     if (!newMemory.id) return;
-
     try {
-      await window.electron.ipcRenderer.invoke("delete-memory", {
-        id: newMemory.id
-      });
-
+      await window.electron.ipcRenderer.invoke("delete-memory", { id: newMemory.id });
       setShowAddMemory(false);
       switchMemoryMode(null);
       fetchCustomMemories();
@@ -383,15 +478,10 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
             {["All", "Custom", "Years", "Months", "Vacations", "Trips"].map((tab) => (
               <li
                 key={tab}
-                className={`settings-list-item ${
-                  selectedTab === tab ? "settings-list-active" : ""
-                } ${
+                className={`settings-list-item ${selectedTab === tab ? "settings-list-active" : ""} ${
                   memoryMode !== null && tab !== "Custom" ? "settings-list-disabled" : ""
-                }
-                `}
-                onClick={() => {
-                  if(memoryMode === null) setSelectedTab(tab)
-                }}
+                }`}
+                onClick={() => { if (memoryMode === null) setSelectedTab(tab); }}
               >
                 <span>{tab}</span>
               </li>
@@ -441,56 +531,62 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
               />
             </div>
 
-            {/* Quick Add SQL Builder */}
             {memoryMode !== "edit" && (
-            <div className="quick-add-ui">
-              <label>Quick Add</label>
+              <div className="quick-add-ui">
+                <label>Quick Add</label>
 
-              <div className="filter-row">
-                <span>Start Date:</span>
-                <input
-                  type="date"
-                  className="date-input"
-                  value={newMemory.startDate || ""}
-                  onChange={(e) => setNewMemory({ ...newMemory, startDate: e.target.value })}
-                />
-              </div>
+                <div className="filter-row">
+                  <span>Start Date:</span>
+                  <input
+                    type="date"
+                    className="date-input"
+                    value={newMemory.startDate || ""}
+                    onChange={(e) => setNewMemory({ ...newMemory, startDate: e.target.value })}
+                  />
+                </div>
 
-              <div className="filter-row">
-                <span>End Date:</span>
-                <input
-                  type="date"
-                  className="date-input"
-                  value={newMemory.endDate || ""}
-                  onChange={(e) => setNewMemory({ ...newMemory, endDate: e.target.value })}
-                />
-              </div>
+                <div className="filter-row">
+                  <span>End Date:</span>
+                  <input
+                    type="date"
+                    className="date-input"
+                    value={newMemory.endDate || ""}
+                    onChange={(e) => setNewMemory({ ...newMemory, endDate: e.target.value })}
+                  />
+                </div>
 
-              <div className="filter-row">
-                <span>ID from:</span>
-                <input
-                  type="number"
-                  className="input"
-                  value={newMemory.mediaFrom || ""}
-                  onChange={(e) =>
-                    setNewMemory({ ...newMemory, mediaFrom: e.target.value })
-                  }
-                />
+                <div className="filter-row">
+                  <span>ID from:</span>
+                  <input
+                    type="number"
+                    className="input"
+                    value={newMemory.mediaFrom || ""}
+                    onChange={(e) => setNewMemory({ ...newMemory, mediaFrom: e.target.value })}
+                  />
+                </div>
+
+                <div className="filter-row">
+                  <span>ID to:</span>
+                  <input
+                    type="number"
+                    className="input"
+                    value={newMemory.mediaTo || ""}
+                    onChange={(e) => setNewMemory({ ...newMemory, mediaTo: e.target.value })}
+                  />
+                </div>
+
+                <div className="filter-row">
+                  <span>Path starts with:</span>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="/photos/vacation/"
+                    value={newMemory.pathStartsWith || ""}
+                    onChange={(e) => setNewMemory({ ...newMemory, pathStartsWith: e.target.value })}
+                  />
+                </div>
+                <div className="memory-hint">You can manually add photo's after creating the memory</div>
               </div>
-                
-              <div className="filter-row">
-                <span>ID to:</span>
-                <input
-                  type="number"
-                  className="input"
-                  value={newMemory.mediaTo || ""}
-                  onChange={(e) =>
-                    setNewMemory({ ...newMemory, mediaTo: e.target.value })
-                  }
-                />
-              </div>
-              <div className="memory-hint">You can manually add photo's after creating the memory</div>
-            </div>
             )}
 
             <div className="modal-actions">
@@ -501,20 +597,15 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
                 Cancel
               </button>
               {memoryMode === "edit" && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleDeleteMemory}
-                  >
-                    Delete
-                  </button>
+                <button className="btn btn-primary" onClick={handleDeleteMemory}>Delete</button>
               )}
               {memoryMode === "edit" && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => {setShowAddMemory(false); switchMemoryMode(null); onAddMedia(newMemory)}}
-                  >
-                    Select Media
-                  </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => { setShowAddMemory(false); switchMemoryMode(null); onAddMedia(newMemory); }}
+                >
+                  Select Media
+                </button>
               )}
               <button className="btn btn-primary" onClick={handleSaveMemory}>
                 {memoryMode === "edit" ? "Save Changes" : "Add Memory"}

@@ -1682,3 +1682,25 @@ input[type="checkbox"] {
   .custom-cluster--medium { width: 36px; height: 36px; font-size: 12px; background: radial-gradient(circle, #7f54b3, #4e1982); z-index: 2 }
   .custom-cluster--large  { width: 44px; height: 44px; font-size: 13px; background: radial-gradient(circle, #d4783a, #a04a10); z-index: 3 }
   .custom-cluster--xlarge { width: 52px; height: 52px; font-size: 14px; background: radial-gradient(circle, #c0392b, #7b0e0e); z-index: 4 }
+
+/* Cursor hint while hovering custom memory cards */
+.memories-grid .memory-box {
+  cursor: grab;
+}
+.memories-grid .memory-box:active {
+  cursor: grabbing;
+}
+
+/* Card being dragged */
+.memory-box--dragging {
+  opacity: 0.4;
+}
+
+/* Drop insertion point */
+.memory-box--drop-top {
+  box-shadow: inset 0 3px 0 0 rgba(255, 255, 255, 0.6);
+}
+
+.memory-box--drop-bottom {
+  box-shadow: inset 0 -3px 0 0 rgba(255, 255, 255, 0.6);
+}

@@ -1,728 +1,479 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faPlay, faPause, faVolumeMute, faVolumeUp, faXmark, faExpand } from "@fortawesome/free-solid-svg-icons";
-import { MapContainer, TileLayer, Marker } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
+import { MapContainer, TileLayer, Marker } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
-  iconUrl: require('leaflet/dist/images/marker-icon.png'),
-  shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
+  iconRetinaUrl: require("leaflet/dist/images/marker-icon-2x.png"),
+  iconUrl:       require("leaflet/dist/images/marker-icon.png"),
+  shadowUrl:     require("leaflet/dist/images/marker-shadow.png"),
 });
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatBytes(a, b = 2) {
+  if (!+a) return "Unknown";
+  const d = Math.floor(Math.log(a) / Math.log(1000));
+  return `${parseFloat((a / Math.pow(1000, d)).toFixed(b < 0 ? 0 : b))} ${
+    ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"][d]
+  }`;
+}
+
+function formatTimestamp(timestamp) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp * 1000);
+  const pad  = (n) => n.toString().padStart(2, "0");
+  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatLocalDateString(str) {
+  if (!str) return "";
+  const [datePart, timePart] = str.split(" ");
+  if (!datePart) return "";
+  const [year, month, day] = datePart.split("-");
+  return `${day}-${month}-${year}${timePart ? " " + timePart : ""}`;
+}
+
+function formatDuration(seconds) {
+  const total = Math.floor(seconds);
+  const pad   = (n) => n.toString().padStart(2, "0");
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
+}
+
+function calculateAge(birthDate, epochSeconds) {
+  const birth = new Date(birthDate);
+  const date  = new Date(epochSeconds * 1000);
+  let age     = date.getFullYear() - birth.getFullYear();
+  const monthDiff = date.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && date.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+function getContrastColor(hex) {
+  if (!hex) return "#000";
+  const rgb       = parseInt(hex.substring(1), 16);
+  const luminance = 0.299 * ((rgb >> 16) & 0xff) + 0.587 * ((rgb >> 8) & 0xff) + 0.114 * (rgb & 0xff);
+  return luminance > 150 ? "#000" : "#fff";
+}
+
+function getReferenceEpoch(item) {
+  if (item.create_date) return item.create_date;
+  const fallback = Math.min(item.created ?? Infinity, item.modified ?? Infinity);
+  return fallback === Infinity ? null : fallback;
+}
+
+function safePlay(video) {
+  if (!video) return;
+  const p = video.play();
+  if (p !== undefined) {
+    p.catch(err => {
+      if (!err.message.includes("media was removed from the document")) console.error(err);
+    });
+  }
+}
+
+// ─── Metadata row ─────────────────────────────────────────────────────────────
+
+const MetaRow = ({ label, value, title, children }) => {
+  if (value == null && !children) return null;
+  return (
+    <div className="metadata-row">
+      <span className="metadata-label">{label}</span>
+      <span className="metadata-value" title={title ?? String(value)}>{children ?? value}</span>
+    </div>
+  );
+};
+
+// ─── Video controls (shared between normal + fullscreen) ───────────────────────
+
+const VideoControls = React.forwardRef(function VideoControls({ progress, isPlaying, isMuted, isSeeking, onTogglePlay, onToggleMute, onSeekStart, showFullscreen, onFullscreen }, trackRef) {
+  return (
+  <div className="video-overlay">
+    {!isSeeking && (
+      <>
+        <div className="overlay-darken" onClick={onTogglePlay} />
+        <button onClick={onTogglePlay} className="video-control center-control">
+          <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} />
+        </button>
+      </>
+    )}
+    <div className="video-controls-bottom">
+      <div className="video-track-wrapper" ref={trackRef} onMouseDown={onSeekStart}>
+        <div className="video-track-filled" style={{ width: `${progress * 100}%` }} />
+        <div className="video-track-overlay" />
+      </div>
+      <button onClick={(e) => { e.stopPropagation(); onToggleMute(); }} className="video-control mute-control">
+        <FontAwesomeIcon icon={isMuted ? faVolumeMute : faVolumeUp} />
+      </button>
+      {showFullscreen && (
+        <button onClick={(e) => { e.stopPropagation(); onFullscreen(); }} className="video-control fullscreen-control">
+          <FontAwesomeIcon icon={faExpand} />
+        </button>
+      )}
+    </div>
+  </div>
+  );
+});
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey }) {
-    const videoRefNormal = useRef(null);
-    const trackRefNormal = useRef(null);
+  const videoRefNormal     = useRef(null);
+  const trackRefNormal     = useRef(null);
+  const videoRefFullscreen = useRef(null);
+  const trackRefFullscreen = useRef(null);
+  const wasNormalPlayingRef = useRef(false);
+  const imgRef             = useRef(null);
+  const lastMousePos       = useRef(null);
 
-    const videoRefFullscreen = useRef(null);
-    const trackRefFullscreen = useRef(null);
-    const wasNormalPlayingRef = useRef(false);
+  const [isPlaying,    setIsPlaying]    = useState(true);
+  const [isHovered,    setIsHovered]    = useState(false);
+  const [duration,     setDuration]     = useState(0);
+  const [currentTime,  setCurrentTime]  = useState(0);
+  const [isSeeking,    setIsSeeking]    = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isLoading,    setIsLoading]    = useState(true);
+  const [itemCountry,  setItemCountry]  = useState(null);
+  const [zoom,         setZoom]         = useState(1);
+  const [offset,       setOffset]       = useState({ x: 0, y: 0 });
+  const [tags,         setTags]         = useState([]);
 
-    const [isPlaying, setIsPlaying] = useState(true); // autoplay starts
-    const [isHovered, setIsHovered] = useState(false);
-    const [duration, setDuration] = useState(0);
-    const [currentTime, setCurrentTime] = useState(0);
-    const [isSeeking, setIsSeeking] = useState(false);
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    const [isLoading, setIsLoading] = useState(true);
-    const [itemCountry, setItemCountry] = useState(null)
-    const [zoom, setZoom] = useState(1);
-    const [offset, setOffset] = useState({ x: 0, y: 0 });
-    const imgRef = useRef(null);
-    const lastMousePos = useRef(null);
-    const [tags, setTags] = useState([]);
+  const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
+  const currentTrackRef = isFullscreen ? trackRefFullscreen : trackRefNormal;
 
+  // Stable refs so seek mousemove handlers always read live values
+  const liveTrackRef    = useRef(null);
+  const liveVideoRef    = useRef(null);
+  const liveDurationRef = useRef(0);
+  liveTrackRef.current    = currentTrackRef;   // ref object, not .current
+  liveVideoRef.current    = currentVideoRef;   // ref object, not .current
+  liveDurationRef.current = duration;
+  const progress        = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
+  const isVideo         = item?.file_type?.startsWith("video");
+  const fileUrl         = item ? `http://localhost:54055/files/${encodeURIComponent(item.path)}` : null;
+  const heicClass       = currentSettings?.adjustHeicColors && item?.extension === ".heic" ? "heic-color-adjust" : "";
 
-    const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
-    const currentTrackRef = isFullscreen ? trackRefFullscreen : trackRefNormal;
-
-    const getContrastColor = (hex) => {
-    if (!hex) return "#000";
-    const c = hex.substring(1); // remove #
-    const rgb = parseInt(c, 16); 
-    const r = (rgb >> 16) & 0xff;
-    const g = (rgb >> 8) & 0xff;
-    const b = rgb & 0xff;
-    // Luminance formula
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
-    return luminance > 150 ? "#000" : "#fff"; // light bg = black text, dark bg = white text
-  };
-
-  // Sync fullscreen with parent trigger
-  useEffect(() => {
-    if (forceFullscreen) {
-      openFullscreen();
-      setForceFullscreen(false); // reset so it doesn’t auto-trigger again
-    }
-  }, [forceFullscreen, setForceFullscreen]);
+  // ── Video sync ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const video = currentVideoRef.current;
     if (!video) return;
-  
-    const handleLoadedMetadata = () => {
-      if (isFinite(video.duration)) setDuration(video.duration);
-    };
-    const handleTimeUpdate = () => {
-      if (!isSeeking) setCurrentTime(video.currentTime);
-    };
-  
-    video.addEventListener("loadedmetadata", handleLoadedMetadata);
-    video.addEventListener("timeupdate", handleTimeUpdate);
-  
+    const onMetadata   = () => { if (isFinite(video.duration)) setDuration(video.duration); };
+    const onTimeUpdate = () => { if (!isSeeking) setCurrentTime(video.currentTime); };
+    video.addEventListener("loadedmetadata", onMetadata);
+    video.addEventListener("timeupdate", onTimeUpdate);
     return () => {
-      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      video.removeEventListener("timeupdate", handleTimeUpdate);
+      video.removeEventListener("loadedmetadata", onMetadata);
+      video.removeEventListener("timeupdate", onTimeUpdate);
     };
   }, [item, isSeeking, isFullscreen]);
-  
-  useEffect(() => {
-    const handleEsc = (e) => {
-      if (e.key === "Escape" && isFullscreen) {
-        closeFullscreen();
-      }
-      if (e.key === " " || e.code === "Space") {
-        e.preventDefault();
-        togglePlay();
-      }
-    };
-  
-    document.addEventListener("keydown", handleEsc);
-    return () => document.removeEventListener("keydown", handleEsc);
-  }, [isFullscreen, isPlaying]);
-  
-  const convertItemCountry = useCallback(async () => {
-    if (!item.country) return;
-  
-    try {
-      const country = await window.electron.ipcRenderer.invoke('get-country-name', item.country);
-      setItemCountry(country);
-    } catch (error) {
-      console.error("Error converting item country:", error);
-    }
-  }, [item]);
-  
+
+  // ── Item change ────────────────────────────────────────────────────────────
+
   useEffect(() => {
     setCurrentTime(0);
     setIsPlaying(true);
     setIsLoading(true);
-    convertItemCountry();
-    if(isFullscreen && item.file_type === "video") {
-      wasNormalPlayingRef.current = !videoRefNormal.current.paused;
-      videoRefNormal.current.pause();
+
+    if (!item?.country) { setItemCountry(null); return; }
+    window.electron.ipcRenderer.invoke("get-country-name", item.country)
+      .then(setItemCountry)
+      .catch(err => console.error("Error converting country:", err));
+
+    if (isFullscreen && isVideo) {
+      wasNormalPlayingRef.current = !videoRefNormal.current?.paused;
+      videoRefNormal.current?.pause();
     }
   }, [item]);
-  
+
+  // ── Tags ───────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!item?.id) return;
-  
-    const fetchTags = async () => {
-      try {
-        const allTags = await window.electron.ipcRenderer.invoke("tags:get-all");
-        const itemTags = allTags.filter(tag => tag.media_ids.includes(item.id));
-        setTags(itemTags);
-      } catch (err) {
-        console.error("Failed to fetch tags:", err);
-      }
-    };
-  
-    fetchTags();
+    window.electron.ipcRenderer.invoke("tags:get-all")
+      .then(allTags => setTags((allTags || []).filter(tag => tag.media_ids.includes(item.id))))
+      .catch(err => console.error("Failed to fetch tags:", err));
   }, [item, panelKey]);
 
-  if (!item) return null;
+  // ── Keyboard ───────────────────────────────────────────────────────────────
 
-  // Normalize to forward slashes
-  const fileUrl = `http://localhost:54055/files/${encodeURIComponent(item.path)}`;
-  const isVideo = item.file_type?.startsWith("video");
-  
-  const safePlay = (video) => {
-    if (!video) return;
-    const playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.catch((err) => {
-        // Ignore "media removed" errors
-        if (!err.message.includes("media was removed from the document")) {
-          console.error(err);
-        }
-      });
-    }
-  };
-  
-  const handleSeekStart = (e) => {
-    setIsSeeking(true);
-    updateCurrentTime(e); // set time immediately
-  
-    // Listen to mousemove & mouseup globally
-    const handleMouseMove = (eMove) => updateCurrentTime(eMove);
-    const handleMouseUp = () => {
-      setIsSeeking(false);
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && isFullscreen) { closeFullscreen(); return; }
+      if (e.key === " " || e.code === "Space") { e.preventDefault(); togglePlay(); }
     };
-  
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-  };
-  
-  const updateCurrentTime = (e) => {
-    if (!currentVideoRef.current) return;
-    const rect = currentTrackRef.current.getBoundingClientRect();
-    const pos = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const newTime = (pos / rect.width) * duration;
-    setCurrentTime(newTime);
-    currentVideoRef.current.currentTime = newTime;
-  };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isFullscreen, isPlaying]);
 
-  // Convert bytes to human-readable (KB, MB, GB etc.)
-  function formatBytes(a, b = 2) {
-    if (!+a) return "Unknown";
-    const c = b < 0 ? 0 : b;
-    const d = Math.floor(Math.log(a) / Math.log(1000));
-    return `${parseFloat((a / Math.pow(1000, d)).toFixed(c))} ${
-      ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"][d]
-    }`;
-  }
+  // ── Fullscreen trigger from parent ─────────────────────────────────────────
 
-  function formatTimestamp(timestamp) {
-      if(!timestamp) return ''
-      // Convert seconds to milliseconds
-      const date = new Date(timestamp * 1000);
+  useEffect(() => {
+    if (forceFullscreen) { openFullscreen(); setForceFullscreen(false); }
+  }, [forceFullscreen]);
 
-      // Pad function to add leading zeros
-      const pad = (n) => n.toString().padStart(2, '0');
-
-      const day = pad(date.getDate());
-      const month = pad(date.getMonth() + 1); // Months are 0-indexed
-      const year = date.getFullYear();
-
-      const hours = pad(date.getHours());
-      const minutes = pad(date.getMinutes());
-      const seconds = pad(date.getSeconds());
-
-      return `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
-  }
-
-  function formatLocalDateString(str) {
-    if (!str) return '';
-    // str is "2024-12-31 23:59:25"
-    const [datePart, timePart] = str.split(' ');
-    if (!datePart) return '';
-    const [year, month, day] = datePart.split('-');
-    return `${day}-${month}-${year}${timePart ? ' ' + timePart : ''}`;
-  }
+  // ── Playback ───────────────────────────────────────────────────────────────
 
   const togglePlay = () => {
     if (!currentVideoRef.current) return;
-    if (isPlaying) {
-      currentVideoRef.current.pause();
-    } else {
-      safePlay(currentVideoRef.current);
-    }
-    setIsPlaying(!isPlaying);
+    if (isPlaying) currentVideoRef.current.pause();
+    else safePlay(currentVideoRef.current);
+    setIsPlaying(p => !p);
   };
 
-  // Click handlers for fullscreen
+  // ── Seek ───────────────────────────────────────────────────────────────────
+
+  // Reads from stable refs so stale closures in mousemove handlers are never an issue
+  const seekToEvent = useCallback((e) => {
+    const track = liveTrackRef.current?.current;
+    const video = liveVideoRef.current?.current;
+    if (!track || !video) return;
+    const rect    = track.getBoundingClientRect();
+    const pos     = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const newTime = (pos / rect.width) * liveDurationRef.current;
+    setCurrentTime(newTime);
+    video.currentTime = newTime;
+  }, []); // no deps — reads everything from refs
+
+  const handleSeekStart = useCallback((e) => {
+    setIsSeeking(true);
+    seekToEvent(e);
+    const onMove = (eMove) => seekToEvent(eMove);
+    const onUp   = () => {
+      setIsSeeking(false);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [seekToEvent]);
+
+  // ── Fullscreen ─────────────────────────────────────────────────────────────
+
   const openFullscreen = () => {
     setIsFullscreen(true);
     setZoom(1);
     setOffset({ x: 0, y: 0 });
-    if(item.file_type === "video") {
+    if (isVideo && videoRefNormal.current) {
       wasNormalPlayingRef.current = !videoRefNormal.current.paused;
       videoRefNormal.current.pause();
     }
-
-    // small delay so ref exists
     setTimeout(() => {
       if (videoRefNormal.current && videoRefFullscreen.current) {
         videoRefFullscreen.current.currentTime = videoRefNormal.current.currentTime;
-        if (isPlaying) {
-          safePlay(videoRefFullscreen.current);
-        } else {
-          videoRefFullscreen.current.pause();
-        }
+        isPlaying ? safePlay(videoRefFullscreen.current) : videoRefFullscreen.current.pause();
       }
     }, 0);
   };
 
-  function formatDuration(seconds) {
-    // Round down to nearest whole second
-    const totalSeconds = Math.floor(seconds);
-
-    const hrs = Math.floor(totalSeconds / 3600);
-    const mins = Math.floor((totalSeconds % 3600) / 60);
-    const secs = totalSeconds % 60;
-
-    // Pad with leading zeros if needed
-    const formatted = [
-      hrs.toString().padStart(2, '0'),
-      mins.toString().padStart(2, '0'),
-      secs.toString().padStart(2, '0')
-    ].join(':');
-
-    return formatted;
-  }
-
   const closeFullscreen = () => {
     if (videoRefNormal.current && videoRefFullscreen.current) {
       videoRefNormal.current.currentTime = videoRefFullscreen.current.currentTime;
-      if (isPlaying) {
-        safePlay(videoRefNormal.current);
-        setIsPlaying(true);
-      }
+      if (isPlaying) safePlay(videoRefNormal.current);
     }
     setIsFullscreen(false);
+  };
+
+  // ── Image pan/zoom ─────────────────────────────────────────────────────────
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const newZoom = Math.min(Math.max(zoom + (e.deltaY < 0 ? 0.1 : -0.1), 1), 5);
+    setZoom(newZoom);
+    if (newZoom === 1) setOffset({ x: 0, y: 0 });
   };
 
   const handleMouseDown = (e) => {
     e.preventDefault();
     lastMousePos.current = { x: e.clientX, y: e.clientY };
-
-    const handleMouseMove = (eMove) => {
+    const onMove = (eMove) => {
       if (!lastMousePos.current) return;
       const dx = eMove.clientX - lastMousePos.current.x;
       const dy = eMove.clientY - lastMousePos.current.y;
-
-      setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+      setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
       lastMousePos.current = { x: eMove.clientX, y: eMove.clientY };
     };
-
-    const handleMouseUp = () => {
-      lastMousePos.current = null;
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    const onUp = () => { lastMousePos.current = null; document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   };
 
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const scaleFactor = 0.1;
-    let newZoom = zoom + (e.deltaY < 0 ? scaleFactor : -scaleFactor);
-    newZoom = Math.min(Math.max(newZoom, 1), 5); // clamp 1x - 5x
+  // ── Early return ───────────────────────────────────────────────────────────
 
-    setZoom(newZoom);
-      // Reset position if zoom returns to 1
-    if (newZoom === 1) {
-      setOffset({ x: 0, y: 0 });
-    }
-  };
-
-
-  function calculateAge(birthDate, epochSeconds) {
-      const birth = new Date(birthDate);
-      const date = new Date(epochSeconds * 1000); // convert seconds to milliseconds
-
-      let age = date.getFullYear() - birth.getFullYear();
-      const monthDiff = date.getMonth() - birth.getMonth();
-      const dayDiff = date.getDate() - birth.getDate();
-
-      if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
-          age--;
-      }
-
-      return age;
-  }
-
-  const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
-
-  const getReferenceEpoch = item => {
-    if (item.create_date) return item.create_date;
-
-    const fallback = Math.min(
-      item.created ?? Infinity,
-      item.modified ?? Infinity
-    );
-
-    return fallback === Infinity ? null : fallback;
-  };
+  if (!item) return null;
 
   const referenceDate = getReferenceEpoch(item);
+  const takenDisplay  = item.create_date_local
+    ? formatLocalDateString(item.create_date_local)
+    : formatTimestamp(item.create_date);
+
+  const videoControlProps = {
+    progress, isPlaying, isMuted, isSeeking,
+    onTogglePlay: togglePlay,
+    onToggleMute: () => setIsMuted(m => !m),
+    onSeekStart:  handleSeekStart,
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="p-4 space-y- preview-panel-wrapper">
-      <div className="flex justify-center preview-panel-content">
-          {isLoading && (
-            <div className="absolute inset-0 flex justify-center items-center bg-black/50 z-10">
-              <div className="loader"></div>
-            </div>
-          )}
-  {isVideo ? (
-  <div
-    className="video-wrapper"
-    onMouseEnter={() => !isSeeking && setIsHovered(true)}
-    onMouseLeave={() => !isSeeking && setIsHovered(false)}
-  >
-    <video
-      ref={videoRefNormal}
-      src={fileUrl}
-      autoPlay
-      muted={isMuted}
-      loop
-      className={`video-element ${isLoading ? "hidden" : ""}`}
-      onLoadedData={() => setIsLoading(false)}
-    />
 
-    {/* Overlay */}
-    {(isHovered) && (
-      <div className="video-overlay">
-        {/* Dark overlay + center play, hidden while seeking */}
-        {!isSeeking && (
-          <>
-            <div className="overlay-darken" onClick={togglePlay}></div>
-            <button onClick={togglePlay} className="video-control center-control">
-              <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} />
-            </button>
-          </>
+      {/* ── Media preview ── */}
+      <div className="flex justify-center preview-panel-content">
+        {isLoading && (
+          <div className="absolute inset-0 flex justify-center items-center bg-black/50 z-10">
+            <div className="loader" />
+          </div>
         )}
 
-        {/* Bottom controls: track + mute always visible */}
-        <div className="video-controls-bottom">
+        {isVideo ? (
           <div
-            className="video-track-wrapper"
-            ref={trackRefNormal} onMouseDown={handleSeekStart}
+            className="video-wrapper"
+            onMouseEnter={() => !isSeeking && setIsHovered(true)}
+            onMouseLeave={() => !isSeeking && setIsHovered(false)}
           >
-            {/* Filled progress */}
-            <div
-              className="video-track-filled"
-              style={{ width: `${progress * 100}%` }}
-            ></div>
-
-            {/* Clickable track overlay */}
-            <div
-              className="video-track-overlay"
-            ></div>
+            <video
+              ref={videoRefNormal}
+              src={fileUrl}
+              autoPlay muted={isMuted} loop
+              className={`video-element ${isLoading ? "hidden" : ""}`}
+              onLoadedData={() => setIsLoading(false)}
+            />
+            {isHovered && (
+              <VideoControls
+                ref={trackRefNormal}
+                {...videoControlProps}
+                showFullscreen
+                onFullscreen={openFullscreen}
+              />
+            )}
           </div>
-
-          {/* Mute/Unmute */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsMuted(!isMuted);
-            }}
-            className="video-control mute-control"
-          >
-            <FontAwesomeIcon icon={isMuted ? faVolumeMute : faVolumeUp} />
-          </button>
-          {/* Fullscreen */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openFullscreen();
-                    }}
-                    className="video-control fullscreen-control"
-                  >
-                    <FontAwesomeIcon icon={faExpand} />
-                  </button>
-        </div>
-      </div>
-    )}
-  </div>
-) : (
+        ) : (
           <img
             src={fileUrl}
             alt={item.filename}
-            className={`max-h-[500px] object-contain rounded-lg bg-gray-200 ${isLoading ? "hidden" : ""} ${currentSettings.adjustHeicColors && item.extension === ".heic" ? "heic-color-adjust" : ""}`}
+            className={`max-h-[500px] object-contain rounded-lg bg-gray-200 ${isLoading ? "hidden" : ""} ${heicClass}`}
             onClick={openFullscreen}
             onLoad={() => setIsLoading(false)}
           />
         )}
       </div>
 
-<div className="metadata-panel" key={panelKey}>
-  {item.filename && (
-    <div className="metadata-row">
-      <span className="metadata-label">Filename</span>
-      <span className="metadata-value" title={item.filename}>{item.filename}</span>
-    </div>
-  )}
+      {/* ── Metadata ── */}
+      <div className="metadata-panel" key={panelKey}>
+        <MetaRow label="Filename"    value={item.filename} />
+        <MetaRow label="Size"        value={item.size != null ? formatBytes(item.size) : null} />
 
-  {item.size != null && (
-    <div className="metadata-row">
-      <span className="metadata-label">Size</span>
-      <span className="metadata-value" title={formatBytes(item.size)}>{formatBytes(item.size)}</span>
-    </div>
-  )}
+        {(item.extension || item.file_type) && (
+          <MetaRow label="Type" value={`${item.extension}${item.file_type ? ` (${item.file_type})` : ""}`} />
+        )}
 
-  {(item.extension || item.file_type) && (
-    <div className="metadata-row">
-      <span className="metadata-label">Type</span>
-      <span className="metadata-value" title={item.extension + (item.file_type ? ` (${item.file_type})` : '')}>{item.extension + (item.file_type ? ` (${item.file_type})` : '')}</span>
-    </div>
-  )}
+        {takenDisplay && <MetaRow label="Taken" value={takenDisplay} />}
 
-  {(item.create_date_local || item.create_date) && (
-    <div className="metadata-row">
-      <span className="metadata-label">Taken</span>
-      <span className="metadata-value" title={item.create_date_local
-          ? formatLocalDateString(item.create_date_local)
-          : formatTimestamp(item.create_date)}>
-        {item.create_date_local
-          ? formatLocalDateString(item.create_date_local)
-          : formatTimestamp(item.create_date)}
-      </span>
-    </div>
-  )}
+        <MetaRow label="Device"      value={item.device_model} />
 
-  {item.device_model && (
-    <div className="metadata-row">
-      <span className="metadata-label">Device</span>
-      <span className="metadata-value" title={item.device_model}>{item.device_model}</span>
-    </div>
-  )}
+        {item.width && item.height && (
+          <MetaRow label="Resolution" value={`${item.width}x${item.height}`} />
+        )}
 
-  {item.width && item.height && (
-    <div className="metadata-row">
-      <span className="metadata-label">Resolution</span>
-      <span className="metadata-value" title={item.width + 'x' + item.height}>{item.width + 'x' + item.height}</span>
-    </div>
-  )}
+        {isVideo && duration > 0 && (
+          <MetaRow label="Duration" value={formatDuration(duration)} />
+        )}
 
-  {isVideo && duration && (
-    <div className="metadata-row">
-      <span className="metadata-label">Duration</span>
-      <span className="metadata-value" title={formatDuration(duration)}>{formatDuration(duration)}</span>
-    </div>
-  )}
+        {item.latitude != null && item.longitude != null && (
+          <MetaRow label="Location" title={`${item.latitude}, ${item.longitude}${item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : ""}`}>
+            <div style={{ width: "100%", height: 150 }}>
+              <MapContainer key={item.id} center={[item.latitude, item.longitude]} zoom={13} style={{ width: "100%", height: "100%", userSelect: "none", marginTop: 5 }}>
+                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+                <Marker position={[item.latitude, item.longitude]} />
+              </MapContainer>
+            </div>
+            <div style={{ padding: "2px 0", backgroundColor: "#28262d", borderRadius: "0 0 10px 10px" }}>
+              {item.latitude}, {item.longitude}
+              {item.altitude != null && `, ${item.altitude.toFixed(0)} m`}
+            </div>
+          </MetaRow>
+        )}
 
-  {item.latitude != null && item.longitude != null && (
-    <div className="metadata-row">
-      <span className="metadata-label">Location</span>
-      <span className="metadata-value">
-        <div style={{ width: "100%", height: "150px" }}>
-          {/* Using Leaflet for a simple map */}
-          <MapContainer key={item.id} center={[item.latitude, item.longitude]} zoom={13} style={{ width: "100%", height: "100%", userSelect: "none", marginTop: "5px" }}>
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap contributors"
-            />
-            <Marker position={[item.latitude, item.longitude]} />
-          </MapContainer>
-        </div>
-        <div title={item.latitude + ', ' + item.longitude + (item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : '')} style={{ padding: "2px 0px", backgroundColor: "#28262d", borderRadius: "0px 0px 10px 10px" }}>
-          {item.latitude}, {item.longitude}
-          {item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : ''}
-        </div>
-      </span>
-    </div>
-  )}
+        <MetaRow label="Country"      value={item.country ? itemCountry : null} />
+        <MetaRow label="Lens"         value={item.lens_model} />
+        <MetaRow label="ISO"          value={item.iso} />
+        <MetaRow label="Software"     value={item.software} />
+        <MetaRow label="Megapixels"   value={item.megapixels ? item.megapixels.toFixed(0) : null} />
+        <MetaRow label="Exposure"     value={item.exposure_time ? `${item.exposure_time} s` : null} />
+        <MetaRow label="Color Space"  value={item.color_space} />
+        <MetaRow label="Flash"        value={item.flash} />
+        <MetaRow label="Aperture"     value={item.aperture ? `f/${item.aperture}` : null} />
 
-  {item.country && (
-    <div className="metadata-row">
-      <span className="metadata-label">Country</span>
-      <span className="metadata-value" title={itemCountry}>{itemCountry}</span>
-    </div>
-  )}
+        {item.focal_length && (
+          <MetaRow label="Focal Length" value={`${item.focal_length} (${item.focal_length_35mm})`} />
+        )}
 
-  {item.lens_model && (
-    <div className="metadata-row">
-      <span className="metadata-label">Lens</span>
-      <span className="metadata-value" title={item.lens_model}>{item.lens_model}</span>
-    </div>
-  )}
+        <MetaRow label="Time Offset"  value={item.offset_time_original} />
+        <MetaRow label="Make"         value={item.camera_make} />
 
-  {item.iso && (
-    <div className="metadata-row">
-      <span className="metadata-label">ISO</span>
-      <span className="metadata-value" title={item.iso}>{item.iso}</span>
-    </div>
-  )}
+        {(item.create_date || item.created) && birthDate && referenceDate && (
+          <MetaRow label="Age" value={calculateAge(birthDate, referenceDate)} />
+        )}
 
-  {item.software && (
-    <div className="metadata-row">
-      <span className="metadata-label">Software</span>
-      <span className="metadata-value" title={item.software}>{item.software}</span>
-    </div>
-  )}
+        <MetaRow label="Modified At"  value={item.modified ? formatTimestamp(item.modified) : null} />
+        <MetaRow label="Created At"   value={item.created  ? formatTimestamp(item.created)  : null} />
+        <MetaRow label="Path"         value={item.path} />
+        <MetaRow label="ID"           value={item.id ? item.media_id : null} />
 
-  {item.megapixels && (
-    <div className="metadata-row">
-      <span className="metadata-label">Megapixels</span>
-      <span className="metadata-value" title={item.megapixels.toFixed(0)}>{item.megapixels.toFixed(0)}</span>
-    </div>
-  )}
-
-  {item.exposure_time && (
-    <div className="metadata-row">
-      <span className="metadata-label">Exposure</span>
-      <span className="metadata-value" title={item.exposure_time}>{item.exposure_time} s</span>
-    </div>
-  )}
-
-  {item.color_space && (
-    <div className="metadata-row">
-      <span className="metadata-label">Color Space</span>
-      <span className="metadata-value" title={item.color_space}>{item.color_space}</span>
-    </div>
-  )}
-
-  {item.flash && (
-    <div className="metadata-row">
-      <span className="metadata-label">Flash</span>
-      <span className="metadata-value" title={item.flash}>{item.flash}</span>
-    </div>
-  )}
-
-  {item.aperture && (
-    <div className="metadata-row">
-      <span className="metadata-label">Aperture</span>
-      <span className="metadata-value" title={'f/' + item.aperture}>f/{item.aperture}</span>
-    </div>
-  )}
-
-  {item.focal_length && (
-    <div className="metadata-row">
-      <span className="metadata-label">Focal Length</span>
-      <span className="metadata-value" title={item.focal_length + ' (' + item.focal_length_35mm + ')'}>{item.focal_length + ' (' + item.focal_length_35mm + ')'}</span>
-    </div>
-  )}
-
-  {item.offset_time_original && (
-    <div className="metadata-row">
-      <span className="metadata-label">Time Offset</span>
-      <span className="metadata-value" title={item.offset_time_original}>{item.offset_time_original}</span>
-    </div>
-  )}
-
-
-  {item.camera_make && (
-    <div className="metadata-row">
-      <span className="metadata-label">Make</span>
-      <span className="metadata-value" title={item.camera_make}>{item.camera_make}</span>
-    </div>
-  )}
-
-  {(item.create_date || item.created) && birthDate && (
-    <div className="metadata-row">
-      <span className="metadata-label">Age</span>
-      <span className="metadata-value" title={calculateAge(birthDate, referenceDate)}>{calculateAge(birthDate, referenceDate)}</span>
-    </div>
-  )}
-  
-  {item.modified && (
-    <div className="metadata-row">
-      <span className="metadata-label">Modified At</span>
-      <span className="metadata-value" title={formatTimestamp(item.modified)}>{formatTimestamp(item.modified)}</span>
-    </div>
-  )}
-
-  {item.created && (
-    <div className="metadata-row">
-      <span className="metadata-label">Created At</span>
-      <span className="metadata-value" title={formatTimestamp(item.created)}>{formatTimestamp(item.created)}</span>
-    </div>
-  )}
-  
-  {item.path && (
-    <div className="metadata-row">
-      <span className="metadata-label">Path</span>
-      <span className="metadata-value" title={item.path}>
-        {item.path}
-      </span>
-    </div>
-  )}
-
-  {item.id && (
-    <div className="metadata-row">
-      <span className="metadata-label">ID</span>
-      <span className="metadata-value" title={item.media_id}>{item.media_id}</span>
-    </div>
-  )}
-
-  {tags.length > 0 && (
-        <div className="metadata-row">
-          <span className="metadata-label">Tags</span>
-          <span className="metadata-value metadata-tags">
-            {tags.length > 0 && tags.map(tag => (
+        {tags.length > 0 && (
+          <MetaRow label="Tags">
+            {tags.map(tag => (
               <span
                 key={tag.id}
                 className="tag-pill"
-                style={{ backgroundColor: tag.color || "#555", color: getContrastColor(tag.color), marginRight: 4, padding: "2px 6px", borderRadius: 4 }}
                 title={tag.description || ""}
+                style={{ backgroundColor: tag.color || "#555", color: getContrastColor(tag.color), marginRight: 4, padding: "2px 6px", borderRadius: 4 }}
               >
                 {tag.name}
               </span>
             ))}
-          </span>
-        </div>
-      )}
-</div>
+          </MetaRow>
+        )}
+      </div>
 
-
-      {/* Fullscreen overlay */}
+      {/* ── Fullscreen overlay ── */}
       {isFullscreen && (
         <div className="fullscreen-overlay" onClick={closeFullscreen}>
-          <div
-            className="fullscreen-content"
-            onClick={(e) => e.stopPropagation()} // prevent closing when clicking content
-          >
-            {/* Close button */}
+          <div className="fullscreen-content" onClick={(e) => e.stopPropagation()}>
             <button className="fullscreen-close" onClick={closeFullscreen}>
               <FontAwesomeIcon icon={faXmark} />
             </button>
 
             {isVideo ? (
-              <div className="video-wrapper fullscreen-video"
+              <div
+                className="video-wrapper fullscreen-video"
                 onMouseEnter={() => !isSeeking && setIsHovered(true)}
-                onMouseLeave={() => !isSeeking && setIsHovered(false)}>
-                <video
-                  ref={videoRefFullscreen}
-                  src={fileUrl}
-                  autoPlay
-                  muted={isMuted}
-                  loop
-                  className="video-element"
-                />
-                  {(isHovered || isSeeking) && (
-                <div className="video-overlay">
-                  <div className="overlay-darken" onClick={togglePlay}></div>
-                  {(!isSeeking) && (
-                  <button onClick={togglePlay} className="video-control center-control">
-                    <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} />
-                  </button>
-                  )}
-
-                  <div className="video-controls-bottom">
-                    <div className="video-track-wrapper" ref={trackRefFullscreen} onMouseDown={handleSeekStart}>
-                      <div
-                        className="video-track-filled"
-                        style={{ width: `${progress * 100}%` }}
-                      ></div>
-                      <div className="video-track-overlay"></div>
-                    </div>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsMuted(!isMuted);
-                      }}
-                      className="video-control mute-control"
-                    >
-                      <FontAwesomeIcon icon={isMuted ? faVolumeMute : faVolumeUp} />
-                    </button>
-                  </div>
-                </div>
-                  )}
+                onMouseLeave={() => !isSeeking && setIsHovered(false)}
+              >
+                <video ref={videoRefFullscreen} src={fileUrl} autoPlay muted={isMuted} loop className="video-element" />
+                {(isHovered || isSeeking) && (
+                  <VideoControls ref={trackRefFullscreen} {...videoControlProps} showFullscreen={false} />
+                )}
               </div>
             ) : (
               <img
-                ref={imgRef} 
-                src={fileUrl} 
-                alt={item.filename} 
-                className={`fullscreen-image ${currentSettings.adjustHeicColors && item.extension === ".heic" ? "heic-color-adjust" : ""}`} 
+                ref={imgRef}
+                src={fileUrl}
+                alt={item.filename}
+                className={`fullscreen-image ${heicClass}`}
                 style={{
                   transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
                   cursor: zoom > 1 ? "grab" : "auto",
-                  transition: lastMousePos.current ? "none" : "transform 0.1s ease-out"
+                  transition: lastMousePos.current ? "none" : "transform 0.1s ease-out",
                 }}
                 onWheel={handleWheel}
                 onMouseDown={zoom > 1 ? handleMouseDown : undefined}
-                onDoubleClick={() => {
-                  setZoom(1);
-                  setOffset({ x: 0, y: 0 });
-                }}
+                onDoubleClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
               />
             )}
           </div>

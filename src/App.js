@@ -251,7 +251,7 @@ const App = () => {
           )}
           {activeView === "shuffle" && (
             <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} hideMetadata={shuffleSettings.hideInfo}
-              smoothTransition={shuffleSettings.smoothTransition} />
+              smoothTransition={shuffleSettings.smoothTransition} chronological={shuffleSettings.chronological} />
           )}
           {activeView === "memories" && (
             <MemoriesView switchMemoryMode={setMemoryMode} memoryMode={memoryMode}

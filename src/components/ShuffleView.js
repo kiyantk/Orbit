@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import "./ShuffleView.css";
 
-const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, smoothTransition = false, filters = {} }) => {
+const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, smoothTransition = false, chronological = false, filters = {} }) => {
   const [images, setImages] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -9,6 +9,7 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
   const preloadedUrls = useRef(new Set());
   const [displayedIndex, setDisplayedIndex] = useState(0);
   const [prevIndex, setPrevIndex] = useState(null);
+  const chronologicalOffset = useRef(0);
 
   function formatDate(timestamp) {
       if(!timestamp) return ''
@@ -48,30 +49,33 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
     );
   }, []);
 
-  const fetchRandom = useCallback(async (count = preloadCount) => {
+  const fetchNext = useCallback(async (count = preloadCount) => {
     try {
       const result = await window.electron.ipcRenderer.invoke("fetch-files", {
-        offset: 0,
+        offset: chronological ? chronologicalOffset.current : 0,
         limit: count,
-        filters: { sortBy: "random", ...filters }
+        filters: { sortBy: chronological ? "ID" : "random", sortOrder: chronological ? "asc" : "desc", ...filters }
       });
       if (result?.success) {
         const imagesOnly = result.rows.filter(f => f.file_type === "image");
+        if (chronological) {
+          chronologicalOffset.current += result.rows.length; // advance by total rows fetched, not just images
+        }
         return imagesOnly.map((f) => ({
           ...f,
           url: `http://localhost:54055/files/${encodeURIComponent(f.path)}`
         }));
       }
     } catch (err) {
-      console.error("Failed to fetch random files:", err);
+      console.error("Failed to fetch files:", err);
     }
     return [];
-  }, [preloadCount, filters]);
+  }, [preloadCount, chronological, filters]);
 
   const preloadImages = useCallback(async () => {
     let newImgs = [];
     while (newImgs.length < preloadCount) {
-      const fetched = await fetchRandom(preloadCount - newImgs.length);
+      const fetched = await fetchNext(preloadCount - newImgs.length);
       if (fetched.length === 0) break;
       newImgs = [...newImgs, ...fetched];
     }
@@ -81,7 +85,7 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
       setImages((prev) => [...prev, ...newImgs]);
     }
     setLoading(false);
-  }, [fetchRandom, preloadCount, preloadImageBytes]);
+  }, [fetchNext, preloadCount, preloadImageBytes]);
 
   useEffect(() => {
     if (images.length === 0) return;
@@ -109,8 +113,9 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
     setDisplayedIndex(0);
     setPrevIndex(null);
     preloadedUrls.current = new Set();
+    chronologicalOffset.current = 0;
     preloadImages();
-  }, [filters]);
+  }, [filters, chronological]);
 
   useEffect(() => {
     if (images.length === 0) return;

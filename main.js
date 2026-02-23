@@ -360,7 +360,16 @@ function initDatabase() {
       description TEXT,
       color TEXT,
       media_ids TEXT DEFAULT '[]',
-      created INTEGER
+      created INTEGER,
+      sort_order INTEGER DEFAULT 0
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS removed_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      path TEXT NOT NULL UNIQUE,
+      removed_at INTEGER DEFAULT (strftime('%s', 'now'))
     )
   `);
 
@@ -1211,7 +1220,7 @@ async function extractMetadata(filePath) {
     const rawDate = exifData.DateTimeOriginal ?? exifData.CreationDate ?? null;
     if (rawDate) {
       const dateStr = typeof rawDate === "object" ? rawDate.toString() : rawDate;
-      const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+      const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').replace('T', ' ');
       metadata.create_date_local = normalised.substring(0, 19);
       metadata.create_date = Math.floor(new Date(normalised).getTime() / 1000);
     } else {
@@ -1296,7 +1305,10 @@ async function* walkDir(dir) {
 // Preload all existing file paths into a Set
 function loadIndexedPaths() {
   const rows = db.prepare("SELECT path FROM files").all();
-  return new Set(rows.map(r => r.path));
+  const removedRows = db.prepare("SELECT path FROM removed_files").all();
+  const set = new Set(rows.map(r => r.path));
+  for (const r of removedRows) set.add(r.path);
+  return set;
 }
 
 // Main indexing function
@@ -1593,10 +1605,16 @@ ipcMain.handle("remove-item-from-index", async (event, id) => {
       throw new Error("No ID provided");
     }
 
-    // 1. Remove item from DB
+    // 1. Record path in removed_files before deleting
+    const removed = db.prepare("SELECT path FROM files WHERE id = ?").get(id);
+    if (removed?.path) {
+      db.prepare("INSERT OR IGNORE INTO removed_files (path) VALUES (?)").run(removed.path);
+    }
+
+    // 2. Remove item from DB
     db.prepare("DELETE FROM files WHERE id = ?").run(id);
 
-    // 2. Remove thumbnail from disk
+    // 3. Remove thumbnail from disk
     const thumbnailPath = path.join(
       dataDir,
       "thumbnails",
@@ -1966,7 +1984,7 @@ ipcMain.handle(
   "add-memory",
   async (
     event,
-    { title, description, color, startDate, endDate, idFrom, idTo }
+    { title, description, color, startDate, endDate, idFrom, idTo, pathStartsWith }
   ) => {
     try {
       initDatabase();
@@ -2027,17 +2045,33 @@ ipcMain.handle(
         mediaIds = rows.map(r => r.id);
       }
 
+      /**
+       * PATH PREFIX
+       */
+      else if (pathStartsWith) {
+        const rows = db.prepare(`
+          SELECT id
+          FROM files
+          WHERE path LIKE ?
+          ORDER BY id
+        `).all(pathStartsWith.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%');
+        mediaIds = rows.map(r => r.id);
+      }
+
       const now = Math.floor(Date.now() / 1000);
 
+      const maxOrder = db.prepare(`SELECT COALESCE(MAX(sort_order), 0) AS m FROM memories`).get()?.m ?? 0;
+
       const info = db.prepare(`
-        INSERT INTO memories (title, description, color, media_ids, created)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO memories (title, description, color, media_ids, created, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(
         title,
         description,
         color,
         JSON.stringify(mediaIds),
-        now
+        now,
+        maxOrder + 1
       );
 
       return {
@@ -2059,7 +2093,7 @@ ipcMain.handle("fetch-memories", async () => {
     const memories = db.prepare(`
       SELECT *
       FROM memories
-      ORDER BY created DESC
+      ORDER BY sort_order DESC, created DESC
     `).all();
 
     const results = memories.map((m) => {
@@ -2107,6 +2141,24 @@ ipcMain.handle("fetch-memories", async () => {
   } catch (err) {
     console.error("fetch-memories error:", err);
     return [];
+  }
+});
+
+ipcMain.handle("memory:reorder", async (event, { order }) => {
+  // order: [{ id, sort_order }, ...]
+  try {
+    initDatabase();
+    const stmt = db.prepare(`UPDATE memories SET sort_order = ? WHERE id = ?`);
+    const updateAll = db.transaction((items) => {
+      for (const { id, sort_order } of items) {
+        stmt.run(sort_order, id);
+      }
+    });
+    updateAll(order);
+    return { success: true };
+  } catch (err) {
+    console.error("memory:reorder error:", err);
+    return { success: false, error: err.message };
   }
 });
 
@@ -2236,9 +2288,11 @@ ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
     `).all();
 
     const byCountry = db.prepare(`
-      SELECT COALESCE(country, 'Unknown') AS country, COUNT(*) AS count
+      SELECT
+        COALESCE(NULLIF(TRIM(country), ''), 'Unknown') AS country,
+        COUNT(*) AS count
       FROM files
-      GROUP BY country
+      GROUP BY COALESCE(NULLIF(TRIM(country), ''), 'Unknown')
       ORDER BY count DESC
     `).all();
 

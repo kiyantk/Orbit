@@ -1,729 +1,486 @@
-import React, { useState, useEffect } from "react";
+// SettingsView.jsx
+import React, { useState, useEffect, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faArrowDown,
-  faArrowLeft,
-  faArrowRight,
-  faArrowUp,
-  faHardDrive,
-  faKeyboard,
-  faPanorama,
-  faPhotoFilm,
-  faTableCells,
-  faToolbox,
-  faUser,
+  faArrowDown, faArrowLeft, faArrowRight, faArrowUp,
+  faHardDrive, faKeyboard, faPanorama, faPhotoFilm,
+  faTableCells, faToolbox, faUser,
 } from "@fortawesome/free-solid-svg-icons";
 import FolderList from "./FolderList";
 import HeicPopup from "./HeicPopup";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+const TABS = ["User", "Media", "Explorer", "Memories", "Storage", "Controls", "App"];
+
+const TAB_ICONS = {
+  User: faUser,
+  Media: faPhotoFilm,
+  Explorer: faTableCells,
+  Memories: faPanorama,
+  Storage: faHardDrive,
+  Controls: faKeyboard,
+  App: faToolbox,
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatBytes(bytes, decimals = 2) {
+  if (!+bytes) return "0 Bytes";
+  const k = 1024;
+  const dm = Math.max(0, decimals);
+  const sizes = ["Bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
+function normalizePath(path) {
+  if (!path) return "";
+  let p = path.trim().replace(/[/\\]+$/, "");
+  if (navigator.platform.startsWith("Win")) p = p.toLowerCase();
+  return p;
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+const ShortcutKey = ({ children }) => (
+  <span className="settings-shortcut-key">{children}</span>
+);
+
+const SettingsRow = ({ children }) => (
+  <div className="settings-content-item">{children}</div>
+);
+
+// ─── Component ────────────────────────────────────────────────────────────────
 const SettingsView = ({
   currentSettings,
   applySettings,
   folderStatuses,
   checkStatusses,
   newTab,
-  enterRemoveMode
+  enterRemoveMode,
 }) => {
   const [selectedTab, setSelectedTab] = useState("User");
   const [settings, setSettings] = useState(currentSettings);
   const [isIndexing, setIsIndexing] = useState(false);
-  const [indexingStatus, setIndexingStatus] = useState("");
+  const [indexingStatus, setIndexingStatus] = useState(null);
   const [missingHeicFiles, setMissingHeicFiles] = useState([]);
   const [showHeicPopup, setShowHeicPopup] = useState(false);
-  const [showChecksPopup, setShowChecksPopup] = useState(false);
+  const [showToolsPopup, setShowToolsPopup] = useState(false);
   const [isFetchingUsage, setIsFetchingUsage] = useState(false);
+  const [storageUsage, setStorageUsage] = useState({ app: 0, index: 0, thumbnails: 0 });
 
-  const [storageUsage, setStorageUsage] = useState({
-    app: 0,
-    index: 0,
-    thumbnails: 0,
-    total: 1,
-  });
+  // ─── IPC wrappers ───────────────────────────────────────────────────────────
+  const ipc = useCallback(
+    (channel, ...args) => window.electron.ipcRenderer.invoke(channel, ...args),
+    []
+  );
 
-  // Get storage used in bytes
-  const getUsageData = async () => {
-    setIsFetchingUsage(true);
-    await window.electron.ipcRenderer
-      .invoke("get-storage-usage")
-      .then((data) => {
-        if (data) {
-          setStorageUsage({
-            app: data.appStorageUsed,
-            index: data.dbSize,
-            thumbnails: data.thumbSize
-          });
-        }
-      });
-      setIsFetchingUsage(false);
-  };
-
-  const startIndex = async (folders) => {
-    if (folders.length === 0) {
-      setIndexingStatus("Please select at least one folder to index");
-      return;
-    }
-
-    setIsIndexing(true);
-    setShowChecksPopup(false);
-    // setIndexingStatus("Indexing files...");
-    
-    try {
-      // Index the selected folders
-      const result = await window.electron.ipcRenderer.invoke("index-files", folders);
-      
-      if (result.success) {
-        setIndexingStatus("Files indexed successfully!");
-        setIndexingStatus(null);
-        setIsIndexing(false);
-      } else {
-        setIndexingStatus(`Error: ${result.error}`);
-        setIsIndexing(false);
+  // ─── Settings persistence ───────────────────────────────────────────────────
+  const saveSettings = useCallback(
+    async (next) => {
+      applySettings(next);
+      try {
+        const res = await ipc("save-settings", next);
+        if (!res.success) console.error("Failed to save settings:", res.error);
+      } catch (err) {
+        console.error("Error saving settings:", err);
       }
-    } catch (error) {
-      console.error("Error indexing files:", error);
-      setIndexingStatus("Error occurred during indexing");
-      setIsIndexing(false);
-    }
-  };
+    },
+    [applySettings, ipc]
+  );
 
-  useEffect(() => {
-    // Load settings when component mounts
-    window.electron.ipcRenderer
-      .invoke("get-settings")
-      .then((loadedSettings) => {
-        if (loadedSettings) {
-          setSettings(loadedSettings);
-        }
-      });
+  const updateSettings = useCallback((patch) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
   }, []);
 
+  // Generic checkbox handler
+  const handleCheckbox = (key) => (e) => updateSettings({ [key]: e.target.checked });
+
+  // Generic select handler
+  const handleSelect = (key) => (e) => updateSettings({ [key]: e.target.value });
+
+  const handleUsernameChange = (e) => {
+    const v = e.target.value;
+    if (
+      v !== "" &&
+      (v.length > 32 || /\s{2,}/.test(v) || !/^[a-zA-Z0-9 _-]+$/.test(v) || /^\s|\s$/.test(v))
+    ) return;
+    updateSettings({ username: v });
+  };
+
+  // ─── Effects ────────────────────────────────────────────────────────────────
+
+  // Load settings on mount
   useEffect(() => {
-    if(newTab) {
-      setSelectedTab(newTab)
-    }
+    ipc("get-settings").then((loaded) => { if (loaded) setSettings(loaded); });
+    // Preload logo
+    new Image().src = `${process.env.PUBLIC_URL}/logo-v2-orbit-bright-white-shadow-small.png`;
+  }, [ipc]);
+
+  // Sync tab from parent
+  useEffect(() => {
+    if (newTab) setSelectedTab(newTab);
   }, [newTab]);
 
+  // Auto-save on settings change
   useEffect(() => {
-    const img = new Image();
-    img.src = process.env.PUBLIC_URL + "/logo-v2-orbit-bright-white-shadow-small.png";
+    saveSettings(settings);
+  }, [settings]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Check for missing HEIC thumbnails when indexed folders change
+  useEffect(() => {
+    ipc("fetch-heic-missing-thumbnails").then((res) => {
+      if (res.success) setMissingHeicFiles(res.files);
+    });
+  }, [settings.indexedFolders, ipc]);
+
+  // Indexing progress listener
+  useEffect(() => {
+    const handleProgress = (data) => {
+      if (data && typeof data === "object") {
+        const { filename, processed, total, percentage } = data;
+        setIndexingStatus(
+          total > 0
+            ? `Indexing: ${processed}/${total} files (${percentage}%)`
+            : filename ? `Indexing: ${filename}` : "Indexing files..."
+        );
+      } else {
+        setIndexingStatus(data ? `Indexing: ${data}` : "Indexing files...");
+      }
+    };
+    window.electron.ipcRenderer.on("indexing-progress", handleProgress);
+    return () => window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
   }, []);
 
-  // Set local settings
-  const handleCheckboxChange = (key) => (event) => {
-    setSettings((prev) => ({
-      ...prev,
-      [key]: event.target.checked,
-    }));
-  };
-
-  const handleUsernameChange = (event) => {
-    const newValue = event.target.value;
-    if (newValue === "") {
-      setSettings((prev) => ({ ...prev, username: "" }));
-      return;
+  // ─── Indexing actions ────────────────────────────────────────────────────────
+  const startIndex = async (folders) => {
+    if (!folders.length) { setIndexingStatus("Please select at least one folder to index"); return; }
+    setIsIndexing(true);
+    setShowToolsPopup(false);
+    try {
+      const result = await ipc("index-files", folders);
+      setIndexingStatus(result.success ? null : `Error: ${result.error}`);
+    } catch (err) {
+      console.error("Error indexing files:", err);
+      setIndexingStatus("Error occurred during indexing");
     }
+    setIsIndexing(false);
+  };
 
-    if (
-      newValue.length > 32 ||
-      /\s{2,}/.test(newValue) ||
-      !/^[a-zA-Z0-9 _-]+$/.test(newValue) ||
-      /^\s|\s$/.test(newValue)
-    ) {
-      return;
+  const selectFolders = async () => {
+    try {
+      const folders = await ipc("select-folders");
+      if (!folders.length) return;
+      setSettings((prev) => {
+        const existing = prev.indexedFolders.map(normalizePath);
+        const unique = folders.filter((f) => !existing.includes(normalizePath(f)));
+        startIndex(folders);
+        return { ...prev, indexedFolders: [...prev.indexedFolders, ...unique] };
+      });
+    } catch (err) {
+      console.error("Error selecting folders:", err);
     }
-
-    setSettings((prev) => ({ ...prev, username: newValue }));
   };
-
-  const handleBirthDateChange = (event) => {
-    const newValue = event.target.value;
-    setSettings((prev) => ({ ...prev, birthDate: newValue }));
-  };
-
-  const handleDefaultSortChange = (event) => {
-    const newValue = event.target.value;
-    setSettings((prev) => ({ ...prev, defaultSort: newValue }));
-  };
-
-  const handleItemTextChange = (event) => {
-    const newValue = event.target.value;
-    setSettings((prev) => ({ ...prev, itemText: newValue }));
-  };
-
-  const handleOpenMemoriesInChange = (event) => {
-    const newValue = event.target.value;
-    setSettings((prev) => ({ ...prev, openMemoriesIn: newValue }));
-  };
-
-  useEffect(() => {
-    saveSettings(settings);
-  }, [settings]);
-
-  useEffect(() => {
-    saveSettings(settings);
-  }, [settings.indexedFolders]);
 
   const removeFolder = async (folderPath) => {
-    // 1. Update state + config
-    setSettings((prev) => ({
-      ...prev,
-      indexedFolders: prev.indexedFolders.filter((folder) => folder !== folderPath),
-    }));
-
+    updateSettings({ indexedFolders: settings.indexedFolders.filter((f) => f !== folderPath) });
     try {
-      // 2. Tell Electron to clean DB + thumbnails
-      const response = await window.electron.ipcRenderer.invoke(
-        "remove-folder-data",
-        folderPath
-      );
-      if (!response.success) {
-        console.error("Failed to remove folder data:", response.error);
-      }
+      const res = await ipc("remove-folder-data", folderPath);
+      if (!res.success) console.error("Failed to remove folder data:", res.error);
     } catch (err) {
       console.error("Error removing folder:", err);
     }
   };
 
   const handleRemoveAll = async () => {
-    const confirmed = window.confirm(
-      "Are you sure you want to remove ALL indexed folders and their data? This cannot be undone."
-    );
-
-    if (!confirmed) return;
-
+    if (!window.confirm("Are you sure you want to remove ALL indexed folders and their data? This cannot be undone.")) return;
     for (const folder of settings.indexedFolders) {
       try {
-        const response = await window.electron.ipcRenderer.invoke(
-          "remove-folder-data",
-          folder
-        );
-        if (!response.success) {
-          console.error("Failed to remove folder data:", response.error);
-        }
+        const res = await ipc("remove-folder-data", folder);
+        if (!res.success) console.error("Failed to remove folder data:", res.error);
       } catch (err) {
         console.error("Error removing folder:", err);
       }
     }
-    setSettings((prev) => ({ ...prev, indexedFolders: [] }));
+    updateSettings({ indexedFolders: [] });
   };
 
+  // ─── Tool actions ─────────────────────────────────────────────────────────────
+  const runTool = useCallback(
+    async (channel, label) => {
+      setIndexingStatus(`${label}...`);
+      setIsIndexing(true);
+      setShowToolsPopup(false);
+      try {
+        const result = await ipc(channel);
+        setIndexingStatus(result.success ? result.message : `Error: ${result.error}`);
+        if (result.success) setTimeout(() => setIndexingStatus(null), 5000);
+      } catch (err) {
+        setIndexingStatus(`Error: ${err.message}`);
+      }
+      setIsIndexing(false);
+    },
+    [ipc]
+  );
 
-  // Save settings
-  const saveSettings = async () => {
-    applySettings(settings); // Apply local changes
+  const fixThumbnails = () => runTool("fix-thumbnails", "Fixing thumbnails");
+  const fixIDs = () => runTool("fix-media-ids", "Fixing media IDs");
+  const cleanupThumbnails = () => runTool("cleanup-thumbnails", "Scanning for orphaned thumbnails");
+
+  // ─── Storage ──────────────────────────────────────────────────────────────────
+  const getUsageData = async () => {
+    setIsFetchingUsage(true);
     try {
-      const response = await window.electron.ipcRenderer.invoke(
-        "save-settings",
-        settings
-      );
-      if (!response.success) {
-        console.error("Failed to save settings:", response.error);
-      }
-    } catch (error) {
-      console.error("Error saving settings:", error);
+      const data = await ipc("get-storage-usage");
+      if (data) setStorageUsage({ app: data.appStorageUsed, index: data.dbSize, thumbnails: data.thumbSize });
+    } finally {
+      setIsFetchingUsage(false);
     }
   };
 
-  // Define tab icons
-  const tabIcons = {
-    User: faUser,
-    Media: faPhotoFilm,
-    Explorer: faTableCells,
-    Memories: faPanorama,
-    Storage: faHardDrive,
-    Controls: faKeyboard,
-    App: faToolbox,
-  };
+  // ─── Misc ─────────────────────────────────────────────────────────────────────
+  const openAppLocation = () => ipc("open-orbit-location");
+  const toggleFullscreen = () => ipc("toggle-fullscreen");
 
-  // Open app location in File Explorer
-  const openAppLocation = () => {
-    window.electron.ipcRenderer.invoke("open-orbit-location");
-  };
-
-const fixThumbnails = async () => {
-  setIndexingStatus("Fixing thumbnails...");
-  setIsIndexing(true);
-  setShowChecksPopup(false);
-  const result = await window.electron.ipcRenderer.invoke("fix-thumbnails");
-  
-  if (result.success) {
-    setIndexingStatus(result.message);
-    setTimeout(() => setIndexingStatus(null), 5000); // nullify after 2 seconds
-  } else {
-    setIndexingStatus(`Error: ${result.error}`);
-  }
-
-  setIsIndexing(false);
-};
-
-const fixIDs = async () => {
-  setIndexingStatus("Fixing media IDs...");
-  setIsIndexing(true);
-  setShowChecksPopup(false);
-  const result = await window.electron.ipcRenderer.invoke("fix-media-ids");
-  
-  if (result.success) {
-    setIndexingStatus(result.message);
-    setTimeout(() => setIndexingStatus(null), 5000); // nullify after 2 seconds
-  } else {
-    setIndexingStatus(`Error: ${result.error}`);
-  }
-
-  setIsIndexing(false);
-};
-
-useEffect(() => {
-  const checkHeicThumbnails = async () => {
-    const result = await window.electron.ipcRenderer.invoke("fetch-heic-missing-thumbnails");
-    if (result.success) setMissingHeicFiles(result.files);
-  };
-
-  checkHeicThumbnails();
-}, [settings.indexedFolders]);
-
-const toggleFullscreen = () => {
-  window.electron.ipcRenderer.invoke("toggle-fullscreen");
-};
-
-  // Convert bytes to human-readable
-  function formatBytes(a, b = 2) {
-    if (!+a) return "0 Bytes";
-    const c = 0 > b ? 0 : b,
-      d = Math.floor(Math.log(a) / Math.log(1024));
-    return `${parseFloat((a / Math.pow(1024, d)).toFixed(c))} ${
-      ["Bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"][d]
-    }`;
-  }
-
-  // Normalize folder paths for duplicate checks
-  function normalizePath(path) {
-    if (!path) return "";
-    let normalized = path.trim();
-
-    // Remove trailing slashes/backslashes
-    normalized = normalized.replace(/[\\\/]+$/, "");
-
-    // Windows is case-insensitive
-    if (navigator.platform.startsWith("Win")) {
-      normalized = normalized.toLowerCase();
-    }
-
-    return normalized;
-  }
-
-//   useEffect(() => {
-//   const handleProgress = (data) => { /* existing handler */ };
-//   const handleMigrationProgress = (data) => {
-//     setIndexingStatus(`Migrating: ${data.processed}/${data.total} (${data.percentage}%)`);
-//   };
-
-//   window.electron.ipcRenderer.on("indexing-progress", handleProgress);
-//   window.electron.ipcRenderer.on("migration-progress", handleMigrationProgress);
-
-//   return () => {
-//     window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
-//     window.electron.ipcRenderer.removeListener("migration-progress", handleMigrationProgress);
-//   };
-// }, []);
-
-// const migrateCreateDateLocal = async () => {
-//   setIsIndexing(true);
-//   setIndexingStatus("Migrating local dates...");
-
-//   try {
-//     const result = await window.electron.ipcRenderer.invoke("migrate-create-date-local");
-//     if (result.success) {
-//       setIndexingStatus(
-//         result.updated === 0
-//           ? "All files already migrated."
-//           : `Done! Updated ${result.updated} files.`
-//       );
-//     } else {
-//       setIndexingStatus(`Error: ${result.error}`);
-//     }
-//   } catch (err) {
-//     setIndexingStatus("Migration failed.");
-//   }
-
-//   setIsIndexing(false);
-//   setTimeout(() => setIndexingStatus(null), 5000);
-// };
-
-  // Select folders
-  const selectFolders = async () => {
-    try {
-      const folders = await window.electron.ipcRenderer.invoke("select-folders");
-      if (folders.length > 0) {
-        setSettings(prev => {
-          const existing = prev.indexedFolders.map(normalizePath);
-          const uniqueNewFolders = folders.filter(
-            (f) => !existing.includes(normalizePath(f))
-          );
-          // if (uniqueNewFolders.length === 0) {
-          //   setIndexingStatus(null);
-          //   return prev;
-          // }
-          startIndex(folders);
-          return {
-            ...prev,
-            indexedFolders: [...prev.indexedFolders, ...uniqueNewFolders],
-          };
-        });
-      }
-    } catch (error) {
-      console.error("Error selecting folders:", error);
-    }
-  };
-
-  useEffect(() => {
-    const handleProgress = (data) => {
-      if (typeof data === 'object' && data !== null) {
-        // New format with progress data
-        const { filename, processed, total, percentage } = data;
-
-        if (total > 0) {
-          setIndexingStatus(`Indexing: ${processed}/${total} files (${percentage}%)`);
-        } else {
-          setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
-        }
-      } else {
-        // Old format - just filename string
-        const filename = data || "";
-        setIndexingStatus(filename ? `Indexing: ${filename}` : "Indexing files...");
-      }
-    };
-
-    window.electron.ipcRenderer.on("indexing-progress", handleProgress);
-
-    return () => {
-      window.electron.ipcRenderer.removeListener("indexing-progress", handleProgress);
-    };
-  }, []);
-
-  const cleanupThumbnails = async () => {
-    setIndexingStatus("Scanning for orphaned thumbnails...");
-    setIsIndexing(true);
-    setShowChecksPopup(false);
-    const result = await window.electron.ipcRenderer.invoke("cleanup-thumbnails");
-
-    if (result.success) {
-      setIndexingStatus(result.message);
-      setTimeout(() => setIndexingStatus(null), 5000);
-    } else {
-      setIndexingStatus(`Error: ${result.error}`);
-    }
-
-    setIsIndexing(false);
-  };
-
+  // ─── Render ───────────────────────────────────────────────────────────────────
   return (
-      <div className="settings-view">
-        <div className="settings-main">
-          <div className="settings-list">
-            <h2>Settings</h2>
-            <ul>
-              {["User", "Media", "Explorer", "Memories", "Storage", "Controls", "App"].map(
-                (tab) => (
-                  <li
-                    key={tab}
-                    className={`settings-list-item ${
-                      selectedTab === tab ? "settings-list-active" : ""
-                    }`}
-                    onClick={() => setSelectedTab(tab)}
-                  >
-                    <FontAwesomeIcon icon={tabIcons[tab]} />
-                    <span>{tab}</span>
-                  </li>
-                )
-              )}
-            </ul>
-          </div>
+    <div className="settings-view">
+      <div className="settings-main">
 
-          <div className="settings-content">
-            {selectedTab === "User" && (
-              <div>
-                <div className="settings-content-item settings-content-item-noalign">
-                  <span>Username:</span>
-                  <input
-                    className="settings-content-input"
-                    type="text"
-                    value={settings.username}
-                    onChange={handleUsernameChange}
-                  />
-                </div>
-                <div className="settings-content-item settings-content-item-noalign">
-                  <span>Birth Date:</span>
-                  <input
-                    className="settings-content-input"
-                    type="date"
-                    style={{ colorScheme: "dark" }}
-                    value={settings.birthDate}
-                    onChange={handleBirthDateChange}
-                  />
-                </div>
-              </div>
-            )}
-            {selectedTab === "Explorer" && (
-              <div>
-                <div className="settings-content-item">
-                  <input
-                    type="checkbox"
-                    checked={settings?.adjustHeicColors}
-                    onChange={handleCheckboxChange('adjustHeicColors')}
-                  />
-                  <span>Adjust HEIC Colors</span>
-                  <span className="settings-hint">Recommended. Improves color accuracy for HEIC photos.</span>
-                </div>
-                <div className="settings-content-item">
-                  <input
-                    type="checkbox"
-                    checked={settings?.preloadHeic}
-                    onChange={handleCheckboxChange('preloadHeic')}
-                  />
-                  <span>Preload HEIC on hover</span>
-                  <span className="settings-hint">Experimental. Can significantly reduce loading times for HEIC files by decoding them in the background while hovering.</span>
-                </div>
-                <div className="settings-content-item">
-                  <span>Default sort:</span>
-                  <select
-                    value={settings?.defaultSort}
-                    onChange={(e) => handleDefaultSortChange(e)}
-                    className="settings-itemstyle-select"
-                  >
-                    <option value="media_id">ID (default)</option>
-                    <option value="name">Name</option>
-                    <option value="create_date">Date Taken</option>
-                    <option value="created">Date Created</option>
-                    <option value="size">File Size</option>
-                    <option value="random">Random</option>
-                  </select>
-                </div>
-                <div className="settings-content-item">
-                  <span>Item text:</span>
-                  <select
-                    value={settings?.itemText}
-                    onChange={(e) => handleItemTextChange(e)}
-                    className="settings-itemstyle-select"
-                  >
-                    <option value="filename">Filename (default)</option>
-                    <option value="datetime">Date</option>
-                    <option value="none">None</option>
-                  </select>
-                </div>
-                <div className="settings-content-item">
-                  <input
-                    type="checkbox"
-                    checked={settings?.noGutters}
-                    onChange={handleCheckboxChange('noGutters')}
-                  />
-                  <span>No gutters</span>
-                </div>
-              </div>
-            )}
-            {selectedTab === "Memories" && (
-              <div>
-                <div className="settings-content-item">
-                  <span>Open memories in:</span>
-                  <select
-                    value={settings?.openMemoriesIn}
-                    onChange={(e) => handleOpenMemoriesInChange(e)}
-                    className="settings-itemstyle-select"
-                  >
-                    <option value="explorer">Explorer (default)</option>
-                    <option value="shuffle">Shuffle</option>
-                    <option value="map">Map</option>
-                  </select>
-                </div>
-              </div>
-            )}
-            {selectedTab === "Media" && (
-              <div>
-                <div>
-                  <h3>Indexed Sources</h3>
-                  <FolderList folders={settings.indexedFolders} onRemoveFolder={removeFolder} folderStatuses={folderStatuses} />
-                </div>
-                <div>
-                  <button 
-                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={selectFolders}
-                    disabled={isIndexing}
-                  >
-                    Add Source
-                  </button>
-                  <button
-                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={handleRemoveAll}
-                    disabled={isIndexing || settings.indexedFolders.length === 0}
-                  >
-                    Remove All
-                  </button>
-                  <button
-                    className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                    onClick={() => setShowChecksPopup(true)}
-                    disabled={isIndexing || settings.indexedFolders.length === 0}
-                  >
-                    Tools
-                  </button>
-                  {missingHeicFiles.length > 0 && (
-                    <button
-                      className="welcome-popup-select-folders-btn"
-                      onClick={() => setShowHeicPopup(true)}
-                      disabled={isIndexing}
-                    >
-                      Generate HEIC Thumbnails
-                    </button>
-                  )}
-                  {indexingStatus && (
-                    <div className="welcome-popup-status">
-                      <span>{indexingStatus}</span><br></br><span>Don't close the app</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {selectedTab === "Storage" && (
-              <div>
-                <div className="settings-content-item">
-                  <span>Storage Usage:</span>
-                  <button
-                    className="settings-normal-button"
-                    onClick={() => getUsageData()}
-                    disabled={isFetchingUsage}
-                    style={isFetchingUsage ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
-                  >
-                    {isFetchingUsage ? "Loading..." : "Fetch Usage"}
-                  </button>
-                  {storageUsage.app !== 0 && (
-                  <div className="storage-bar-container">
-                    <div className="storage-legend">
-                      <span className="storage-legend-text">
-                        <div className="storage-legend-app"></div>App Total:{" "}
-                        {storageUsage.app > 0
-                          ? formatBytes(storageUsage.app)
-                          : "0 Bytes"}
-                      </span>
-                      <span className="storage-legend-text">
-                        <div className="storage-legend-index"></div>Database:{" "}
-                        {storageUsage.index > 0
-                          ? formatBytes(storageUsage.index)
-                          : "0 Bytes"}
-                      </span>
-                      <span className="storage-legend-text">
-                        <div className="storage-legend-thumbs"></div>Thumbnails:{" "}
-                        {storageUsage.thumbnails > 0
-                          ? formatBytes(storageUsage.thumbnails)
-                          : "0 Bytes"}
-                      </span>
-                    </div>
-                  </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {selectedTab === "Controls" && (
-              <div>
-                <h3>General</h3>
-                <div className="settings-content-item">
-                  <span>
-                    Quick minimize:</span>{" "}
-                    <span className="settings-shortcut-key">~</span> or <span className="settings-shortcut-key">`</span>
-                </div>
-                <br />
-                <h3>Explorer</h3>
-                <div className="settings-content-item">
-                  <span>
-                    Show preview:</span>{" "}
-                    <span className="settings-shortcut-key">Left Mouse Button</span>
-                </div>
-                <div className="settings-content-item">
-                  <span>
-                    Open fullscreen:</span>{" "}
-                    <span className="settings-shortcut-key">Double Left Mouse Button</span>
-                </div>
-                <div className="settings-content-item">
-                  <span>
-                    Open in default viewer:</span>{" "}
-                    <span className="settings-shortcut-key">CTRL</span> + <span className="settings-shortcut-key">Left Mouse Button</span>
-                </div>
-                <div className="settings-content-item">
-                  <span>
-                    Navigate:</span>{" "}
-                    <span className="settings-shortcut-key">SCROLL</span> or <span className="settings-shortcut-key"><FontAwesomeIcon icon={faArrowLeft} />{" "}<FontAwesomeIcon icon={faArrowUp} />{" "}<FontAwesomeIcon icon={faArrowDown} />{" "}<FontAwesomeIcon icon={faArrowRight} /></span>
-                </div>
-                <div className="settings-content-item">
-                  <span>
-                    Scale grid:</span>{" "}
-                    <span className="settings-shortcut-key">CTRL</span> + <span className="settings-shortcut-key">SCROLL</span>
-                </div>
-                <div className="settings-content-item">
-                  <span>
-                    Assign last used tag to selected item:</span>{" "}
-                    <span className="settings-shortcut-key">T</span>
-                </div>
-              </div>
-            )}
-            {selectedTab === "App" && (
-              <div>
-                <div className="settings-content-item">
-                  <img width="50" src={process.env.PUBLIC_URL + "/logo-v2-orbit-bright-white-shadow-small.png"} />
-                  <span>Orbit 1.1.0</span>
-                </div>
-                <div className="settings-content-item">
-                  <span>App Location:</span>
-                  <button
-                    className="settings-normal-button"
-                    onClick={openAppLocation}
-                  >
-                    Open in File Explorer
-                  </button>
-                </div>
-                <div className="settings-content-item">
-                  <span>Window:</span>
-                  <button
-                    className="settings-normal-button"
-                    onClick={toggleFullscreen}
-                  >
-                    Toggle Fullscreen
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+        {/* Sidebar */}
+        <div className="settings-list">
+          <h2>Settings</h2>
+          <ul>
+            {TABS.map((tab) => (
+              <li
+                key={tab}
+                className={`settings-list-item ${selectedTab === tab ? "settings-list-active" : ""}`}
+                onClick={() => setSelectedTab(tab)}
+              >
+                <FontAwesomeIcon icon={TAB_ICONS[tab]} />
+                <span>{tab}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        {showHeicPopup && (
-          <HeicPopup
-            missingFiles={missingHeicFiles}
-            onClose={() => setShowHeicPopup(false)}
-          />
-        )}
-        {showChecksPopup && (
-          <div className="welcome-popup-overlay">
-            <div className="welcome-popup">
-              <h2>Tools</h2>
-              <p>Select which tool to run:</p>
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", marginTop: "10px", padding: "0px 10px" }}>
-                <button className="welcome-popup-select-folders-btn" 
-                  onClick={() => startIndex(settings.indexedFolders)}>Reindex All</button>
-                <button className="welcome-popup-select-folders-btn" 
-                  onClick={() => {setShowChecksPopup(false); checkStatusses()}}>Check Status</button>
-                <button className="welcome-popup-select-folders-btn"
-                  onClick={fixIDs}>Fix IDs</button>
-                <button className="welcome-popup-select-folders-btn"
-                  onClick={fixThumbnails}>Fix Thumbnails</button>
-                <button className="welcome-popup-select-folders-btn"
-                  onClick={cleanupThumbnails}>Cleanup Thumbnails</button>
-                <button className="welcome-popup-select-folders-btn"
-                  onClick={() => {setShowChecksPopup(false); enterRemoveMode()}}>Remove Mode</button>
-                {/* <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin"
-                  onClick={migrateCreateDateLocal}>Migrate - create_date_local</button> */}
+
+        {/* Content */}
+        <div className="settings-content">
+
+          {/* User */}
+          {selectedTab === "User" && (
+            <div>
+              <SettingsRow>
+                <span>Username:</span>
+                <input className="settings-content-input" type="text" value={settings.username} onChange={handleUsernameChange} />
+              </SettingsRow>
+              <SettingsRow>
+                <span>Birth Date:</span>
+                <input className="settings-content-input" type="date" style={{ colorScheme: "dark" }} value={settings.birthDate} onChange={handleSelect("birthDate")} />
+              </SettingsRow>
+            </div>
+          )}
+
+          {/* Explorer */}
+          {selectedTab === "Explorer" && (
+            <div>
+              <SettingsRow>
+                <input type="checkbox" checked={!!settings.adjustHeicColors} onChange={handleCheckbox("adjustHeicColors")} />
+                <span>Adjust HEIC Colors</span>
+                <span className="settings-hint">Recommended. Improves color accuracy for HEIC photos.</span>
+              </SettingsRow>
+              <SettingsRow>
+                <input type="checkbox" checked={!!settings.preloadHeic} onChange={handleCheckbox("preloadHeic")} />
+                <span>Preload HEIC on hover</span>
+                <span className="settings-hint">Experimental. Can significantly reduce loading times for HEIC files by decoding them in the background while hovering.</span>
+              </SettingsRow>
+              <SettingsRow>
+                <span>Default sort:</span>
+                <select value={settings.defaultSort} onChange={handleSelect("defaultSort")} className="settings-itemstyle-select">
+                  <option value="media_id">ID (default)</option>
+                  <option value="name">Name</option>
+                  <option value="create_date">Date Taken</option>
+                  <option value="created">Date Created</option>
+                  <option value="size">File Size</option>
+                  <option value="random">Random</option>
+                </select>
+              </SettingsRow>
+              <SettingsRow>
+                <span>Item text:</span>
+                <select value={settings.itemText} onChange={handleSelect("itemText")} className="settings-itemstyle-select">
+                  <option value="filename">Filename (default)</option>
+                  <option value="datetime">Date</option>
+                  <option value="none">None</option>
+                </select>
+              </SettingsRow>
+              <SettingsRow>
+                <input type="checkbox" checked={!!settings.noGutters} onChange={handleCheckbox("noGutters")} />
+                <span>No gutters</span>
+              </SettingsRow>
+            </div>
+          )}
+
+          {/* Memories */}
+          {selectedTab === "Memories" && (
+            <div>
+              <SettingsRow>
+                <span>Open memories in:</span>
+                <select value={settings.openMemoriesIn} onChange={handleSelect("openMemoriesIn")} className="settings-itemstyle-select">
+                  <option value="explorer">Explorer (default)</option>
+                  <option value="shuffle">Shuffle</option>
+                  <option value="map">Map</option>
+                </select>
+              </SettingsRow>
+            </div>
+          )}
+
+          {/* Media */}
+          {selectedTab === "Media" && (
+            <div>
+              <h3>Indexed Sources</h3>
+              <FolderList folders={settings.indexedFolders} onRemoveFolder={removeFolder} folderStatuses={folderStatuses} />
+              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="welcome-popup-select-folders-btn" onClick={selectFolders} disabled={isIndexing}>Add Source</button>
+                <button className="welcome-popup-select-folders-btn" onClick={handleRemoveAll} disabled={isIndexing || !settings.indexedFolders.length}>Remove All</button>
+                <button className="welcome-popup-select-folders-btn" onClick={() => setShowToolsPopup(true)} disabled={isIndexing || !settings.indexedFolders.length}>Tools</button>
+                {missingHeicFiles.length > 0 && (
+                  <button className="welcome-popup-select-folders-btn" onClick={() => setShowHeicPopup(true)} disabled={isIndexing}>
+                    Generate HEIC Thumbnails
+                  </button>
+                )}
               </div>
-              <div className="settings-bottom-bar" style={{ height: "70px"}}>
-                <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" onClick={() => setShowChecksPopup(false)}>Close</button>
-              </div>
+              {indexingStatus && (
+                <div className="welcome-popup-status">
+                  <span>{indexingStatus}</span><br /><span>Don't close the app</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Storage */}
+          {selectedTab === "Storage" && (
+            <div>
+              <SettingsRow>
+                <span>Storage Usage:</span>
+                <button
+                  className="settings-normal-button"
+                  onClick={getUsageData}
+                  disabled={isFetchingUsage}
+                  style={isFetchingUsage ? { opacity: 0.5, cursor: "not-allowed" } : {}}
+                >
+                  {isFetchingUsage ? "Loading..." : "Fetch Usage"}
+                </button>
+              </SettingsRow>
+              {storageUsage.app !== 0 && (
+                <div className="storage-bar-container">
+                  <div className="storage-legend">
+                    {[
+                      { cls: "storage-legend-app", label: "App Total", val: storageUsage.app },
+                      { cls: "storage-legend-index", label: "Database", val: storageUsage.index },
+                      { cls: "storage-legend-thumbs", label: "Thumbnails", val: storageUsage.thumbnails },
+                    ].map(({ cls, label, val }) => (
+                      <span key={label} className="storage-legend-text">
+                        <div className={cls} />{label}: {val > 0 ? formatBytes(val) : "0 Bytes"}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Controls */}
+          {selectedTab === "Controls" && (
+            <div>
+              <h3>General</h3>
+              <SettingsRow>
+                <span>Quick minimize:</span>
+                <ShortcutKey>~</ShortcutKey> or <ShortcutKey>`</ShortcutKey>
+              </SettingsRow>
+              <br />
+              <h3>Explorer</h3>
+              {[
+                { label: "Show preview:", keys: [<ShortcutKey key="lmb">Left Mouse Button</ShortcutKey>] },
+                { label: "Open fullscreen:", keys: [<ShortcutKey key="dlmb">Double Left Mouse Button</ShortcutKey>] },
+                {
+                  label: "Open in default viewer:",
+                  keys: [<ShortcutKey key="ctrl">CTRL</ShortcutKey>, " + ", <ShortcutKey key="lmb2">Left Mouse Button</ShortcutKey>],
+                },
+                {
+                  label: "Navigate:",
+                  keys: [
+                    <ShortcutKey key="scroll">SCROLL</ShortcutKey>, " or ",
+                    <ShortcutKey key="arrows">
+                      <FontAwesomeIcon icon={faArrowLeft} />{" "}
+                      <FontAwesomeIcon icon={faArrowUp} />{" "}
+                      <FontAwesomeIcon icon={faArrowDown} />{" "}
+                      <FontAwesomeIcon icon={faArrowRight} />
+                    </ShortcutKey>,
+                  ],
+                },
+                {
+                  label: "Scale grid:",
+                  keys: [<ShortcutKey key="ctrl">CTRL</ShortcutKey>, " + ", <ShortcutKey key="scroll">SCROLL</ShortcutKey>],
+                },
+                { label: "Assign last used tag to selected item:", keys: [<ShortcutKey key="t">T</ShortcutKey>] },
+              ].map(({ label, keys }) => (
+                <SettingsRow key={label}>
+                  <span>{label}</span> {keys}
+                </SettingsRow>
+              ))}
+            </div>
+          )}
+
+          {/* App */}
+          {selectedTab === "App" && (
+            <div>
+              <SettingsRow>
+                <img width="50" src={`${process.env.PUBLIC_URL}/logo-v2-orbit-bright-white-shadow-small.png`} alt="Orbit logo" />
+                <span>Orbit 1.1.0</span>
+              </SettingsRow>
+              <SettingsRow>
+                <span>App Location:</span>
+                <button className="settings-normal-button" onClick={openAppLocation}>Open in File Explorer</button>
+              </SettingsRow>
+              <SettingsRow>
+                <span>Window:</span>
+                <button className="settings-normal-button" onClick={toggleFullscreen}>Toggle Fullscreen</button>
+              </SettingsRow>
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* ── Popups ── */}
+      {showHeicPopup && (
+        <HeicPopup missingFiles={missingHeicFiles} onClose={() => setShowHeicPopup(false)} />
+      )}
+
+      {showToolsPopup && (
+        <div className="welcome-popup-overlay">
+          <div className="welcome-popup">
+            <h2>Tools</h2>
+            <p>Select which tool to run:</p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginTop: 10, padding: "0 10px" }}>
+              {[
+                { label: "Reindex All", action: () => startIndex(settings.indexedFolders) },
+                { label: "Check Status", action: () => { setShowToolsPopup(false); checkStatusses(); } },
+                { label: "Fix IDs", action: fixIDs },
+                { label: "Fix Thumbnails", action: fixThumbnails },
+                { label: "Cleanup Thumbnails", action: cleanupThumbnails },
+                { label: "Remove Mode", action: () => { setShowToolsPopup(false); enterRemoveMode(); } },
+              ].map(({ label, action }) => (
+                <button key={label} className="welcome-popup-select-folders-btn" onClick={action}>{label}</button>
+              ))}
+            </div>
+            <div className="settings-bottom-bar" style={{ height: 70 }}>
+              <button className="welcome-popup-select-folders-btn welcome-popup-select-folders-btn-margin" onClick={() => setShowToolsPopup(false)}>
+                Close
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
   );
 };
 

@@ -2,440 +2,281 @@ import { faUndo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import React, { useState, useEffect } from "react";
 
-const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, activeMapFilters, activeView, activeShuffleFilters, activeShuffleSettings }) => {
-  const [sortBy, setSortBy] = useState("media_id");
-  const [sortOrder, setSortOrder] = useState("desc");
-  const [filters, setFilters] = useState(activeFilters || {
-    dateExact: "",
-    dateFrom: "",
-    dateTo: "",
-    device: "",
-    folder: "",
-    filetype: "",
-    mediaType: "",
-    country: "",
-    year: "",
-    tag: "",
-    age: "",
-    ids: null
-  });
-  const [searchBy, setSearchBy] = useState("name");
-  const [searchTerm, setSearchTerm] = useState("");
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const EMPTY_FILTERS = {
+  dateExact: "",
+  dateFrom: "",
+  dateTo: "",
+  device: "",
+  folder: "",
+  filetype: "",
+  mediaType: "",
+  country: "",
+  year: "",
+  tag: "",
+  age: "",
+  ids: null,
+};
+
+const DEFAULT_SORT = { sortBy: "media_id", sortOrder: "desc" };
+const DEFAULT_SEARCH = { searchBy: "name", searchTerm: "" };
+const DEFAULT_SHUFFLE_SETTINGS = { shuffleInterval: 8, hideInfo: false, smoothTransition: false };
+
+// ─── Generic filter hook ───────────────────────────────────────────────────────
+
+function useFilterState(initial = EMPTY_FILTERS) {
+  const [filters, setFilters] = useState(initial);
+
+  const handleDateChange = (field, value) => {
+    setFilters(prev => {
+      const next = { ...prev, [field]: value };
+      if (field === "dateExact" && value) {
+        next.dateFrom = "";
+        next.dateTo   = "";
+        next.year     = "";
+        next.age      = "";
+      } else if ((field === "dateFrom" || field === "dateTo") && value) {
+        next.dateExact = "";
+        next.year      = "";
+        next.age       = "";
+      }
+      if (field === "dateFrom" && next.dateTo && value > next.dateTo) next.dateTo = value;
+      if (field === "dateTo" && next.dateFrom && value < next.dateFrom) next.dateFrom = value;
+      return next;
+    });
+  };
+
+  const handleYearChange = (year) => {
+    setFilters(prev => {
+      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "", age: "" };
+      return { ...prev, year, age: "", dateFrom: `${year}-01-01`, dateTo: `${year}-12-31` };
+    });
+  };
+
+  const handleAgeChange = (age, birthDate) => {
+    setFilters(prev => {
+      if (!age || !birthDate) return { ...prev, age: "", dateFrom: "", dateTo: "" };
+      const birth = new Date(birthDate);
+      const dateFrom = new Date(birth);
+      dateFrom.setFullYear(birth.getFullYear() + Number(age));
+      const dateTo = new Date(birth);
+      dateTo.setFullYear(birth.getFullYear() + Number(age) + 1);
+      dateTo.setDate(dateTo.getDate() - 1);
+      return {
+        ...prev,
+        age,
+        year: "",
+        dateExact: "",
+        dateFrom: dateFrom.toISOString().slice(0, 10),
+        dateTo: dateTo.toISOString().slice(0, 10),
+      };
+    });
+  };
+
+  const resetFilters = () => setFilters(EMPTY_FILTERS);
+
+  return { filters, setFilters, handleDateChange, handleYearChange, handleAgeChange, resetFilters };
+}
+
+// ─── Shared FilterPanel component ─────────────────────────────────────────────
+
+const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
+  const { handleDateChange, handleYearChange, handleAgeChange, setFilters } = handlers;
+
+  return (
+    <div className="filter-panel">
+      {filters.ids && (
+        <div>
+          <label>Selection</label>
+          <span className="filter-static">{filters.ids.length + " items"}</span>
+        </div>
+      )}
+
+      <div>
+        <label>Year</label>
+        <select value={filters.year} onChange={e => handleYearChange(e.target.value)}>
+          <option value="">All</option>
+          {options.years.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
+      <div>
+        <label>Date</label>
+        <input
+          type="date"
+          value={filters.dateExact}
+          min={options.minDate}
+          max={options.maxDate}
+          disabled={!!filters.dateFrom || !!filters.dateTo}
+          onChange={e => handleDateChange("dateExact", e.target.value)}
+        />
+      </div>
+
+      <div>
+        <label>Date From</label>
+        <input
+          type="date"
+          value={filters.dateFrom}
+          min={options.minDate}
+          max={options.maxDate}
+          disabled={!!filters.dateExact}
+          onChange={e => handleDateChange("dateFrom", e.target.value)}
+        />
+      </div>
+
+      <div>
+        <label>Date To</label>
+        <input
+          type="date"
+          value={filters.dateTo}
+          min={options.minDate}
+          max={options.maxDate}
+          disabled={!!filters.dateExact}
+          onChange={e => handleDateChange("dateTo", e.target.value)}
+        />
+      </div>
+
+      {[
+        ["Device",     "device",    options.devices],
+        ["Source",     "folder",    options.folders],
+        ["Filetype",   "filetype",  options.filetypes],
+        ["Media Type", "mediaType", options.mediaTypes],
+        ["Tag",        "tag",       options.tags ?? []],
+      ].map(([label, key, opts]) => (
+        <div key={key}>
+          <label>{label}</label>
+          <select value={filters[key]} onChange={e => setFilters(prev => ({ ...prev, [key]: e.target.value }))}>
+            <option value="">All</option>
+            {opts.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+      ))}
+
+      <div>
+        <label>Country</label>
+        <select value={filters.country} onChange={e => setFilters(prev => ({ ...prev, country: e.target.value }))}>
+          <option value="">All</option>
+          {options.countries.filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
+      {settings?.birthDate && (
+        <div>
+          <label>Age</label>
+          <select value={filters.age} onChange={e => handleAgeChange(e.target.value, settings.birthDate)}>
+            <option value="">All</option>
+            {[...options.ages].reverse().map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div className="action-panel-reset">
+        <button onClick={onReset}><FontAwesomeIcon icon={faUndo} /></button>
+      </div>
+    </div>
+  );
+};
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+const ActionPanel = ({
+  settings,
+  type,
+  onApply,
+  actionPanelKey,
+  activeFilters,
+  activeMapFilters,
+  activeView,
+  activeShuffleFilters,
+  activeShuffleSettings,
+}) => {
+  const [sortBy,    setSortBy]    = useState(DEFAULT_SORT.sortBy);
+  const [sortOrder, setSortOrder] = useState(DEFAULT_SORT.sortOrder);
+  const [searchBy,  setSearchBy]  = useState(DEFAULT_SEARCH.searchBy);
+  const [searchTerm, setSearchTerm] = useState(DEFAULT_SEARCH.searchTerm);
   const [prevActionPanelKey, setPrevActionPanelKey] = useState(0);
 
-  // Options dynamically loaded from indexed files
+  const [shuffleSettings, setShuffleSettings] = useState(DEFAULT_SHUFFLE_SETTINGS);
+
   const [options, setOptions] = useState({
-    devices: [],
-    folders: [],
-    filetypes: [],
-    mediaTypes: [],
-    minDate: "",
-    maxDate: "",
-    countries: [],
-    years: [],
-    tags: [],
-    ages: []
+    devices: [], folders: [], filetypes: [], mediaTypes: [],
+    minDate: "", maxDate: "", countries: [], years: [], tags: [], ages: [],
   });
 
-  const [shuffleSettings, setShuffleSettings] = useState({
-    shuffleInterval: 8,
-    hideInfo: false,
-    smoothTransition: false
-  });
+  const explore = useFilterState(activeFilters || EMPTY_FILTERS);
+  const shuffle = useFilterState(activeShuffleFilters || EMPTY_FILTERS);
+  const map     = useFilterState(activeMapFilters || EMPTY_FILTERS);
 
-  const [shuffleFilters, setShuffleFilters] = useState({
-    dateExact: "",
-    dateFrom: "",
-    dateTo: "",
-    device: "",
-    folder: "",
-    filetype: "",
-    mediaType: "",
-    country: "",
-    year: "",
-    tag: "",
-    age: "",
-    ids: null
-  });
+  // ── Fetch options ──────────────────────────────────────────────────────────
 
-  const [mapFilters, setMapFilters] = useState({
-    dateExact: "",
-    dateFrom: "",
-    dateTo: "",
-    device: "",
-    folder: "",
-    filetype: "",
-    mediaType: "",
-    country: "",
-    year: "",
-    tag: "",
-    age: "",
-    ids: null
-  });
-
-  // Fetch options from database on mount
   useEffect(() => {
     async function fetchOptions() {
-      const opts = await window.electron.ipcRenderer.invoke("fetch-options", {birthDate: settings && settings.birthDate ? settings.birthDate : null});
+      const opts = await window.electron.ipcRenderer.invoke("fetch-options", {
+        birthDate: settings?.birthDate ?? null,
+      });
       setOptions(opts);
-    
-      // if (opts.minDate && opts.maxDate) {
-      //   setFilters(f => ({ ...f, dateFrom: opts.minDate, dateTo: opts.maxDate }));
-      // }
     }
-  
     fetchOptions();
   }, [settings, actionPanelKey]);
-  
+
+  // ── Sync default sort from settings ───────────────────────────────────────
+
   useEffect(() => {
-    if(settings && settings.defaultSort && !activeFilters) {
-      setSortBy(settings.defaultSort)
+    if (settings?.defaultSort && !activeFilters) {
+      setSortBy(settings.defaultSort);
     }
   }, [settings]);
 
+  // ── Sync active state when view changes ───────────────────────────────────
+
   useEffect(() => {
-    if(activeView === "explore") {
-      if(activeFilters && activeFilters.sortBy && activeFilters.sortOrder) {
-        setSortBy(activeFilters.sortBy)
-        setSortOrder(activeFilters.sortOrder)
-      } else if(activeFilters && activeFilters.searchBy && activeFilters.searchTerm) {
-        setSearchBy(activeFilters.searchBy)
-        setSearchTerm(activeFilters.searchTerm)
-      } else if(activeFilters) {
-        setFilters(prev => ({ ...prev, ...activeFilters }))
+    if (activeView === "explore") {
+      if (activeFilters?.sortBy && activeFilters?.sortOrder) {
+        setSortBy(activeFilters.sortBy);
+        setSortOrder(activeFilters.sortOrder);
+      } else if (activeFilters?.searchBy && activeFilters?.searchTerm) {
+        setSearchBy(activeFilters.searchBy);
+        setSearchTerm(activeFilters.searchTerm);
+      } else if (activeFilters) {
+        explore.setFilters(prev => ({ ...prev, ...activeFilters }));
       }
-    } else if(activeView === "shuffle") {
-      if(activeShuffleFilters) {
-        setShuffleFilters(prev => ({ ...prev, ...activeShuffleFilters }))
-      }
-      if(activeShuffleSettings) {
-        setShuffleSettings(prev => ({ ...prev, ...activeShuffleSettings }))
-      }
-    } else if(activeView === "map") {
-      if(activeMapFilters) {
-        setMapFilters(prev => ({ ...prev, ...activeMapFilters }))
-      }
+    } else if (activeView === "shuffle") {
+      if (activeShuffleFilters)  shuffle.setFilters(prev => ({ ...prev, ...activeShuffleFilters }));
+      if (activeShuffleSettings) setShuffleSettings(prev => ({ ...prev, ...activeShuffleSettings }));
+    } else if (activeView === "map") {
+      if (activeMapFilters) map.setFilters(prev => ({ ...prev, ...activeMapFilters }));
     }
-    console.log(filters, activeFilters)
   }, [activeView]);
 
-  // Auto-apply filters or sort whenever they change
-  useEffect(() => {
-    if (type === "sort") onApply({ sortBy, sortOrder });
-    if (type === "filter") onApply(filters);
-    if (type === "shuffle-filter") onApply(shuffleFilters);
-    if (type === "shuffle-settings") onApply(shuffleSettings);
-    if (type === "search") onApply({ searchBy, searchTerm });
-    if (type === "map-filter") onApply(mapFilters);
-  }, [sortBy, sortOrder, filters, searchBy, searchTerm, shuffleFilters, mapFilters, shuffleSettings]);
+  // ── Auto-apply on state change ─────────────────────────────────────────────
 
-  // Handle date linking
-  const handleDateChange = (field, value) => {
-    setFilters(prev => {
-      let newFilters = { ...prev, [field]: value };
+  useEffect(() => { if (type === "sort")   onApply({ sortBy, sortOrder }); }, [sortBy, sortOrder]);
+  useEffect(() => { if (type === "filter") onApply(explore.filters); },     [explore.filters]);
+  useEffect(() => { if (type === "shuffle-filter")   onApply(shuffle.filters); },  [shuffle.filters]);
+  useEffect(() => { if (type === "shuffle-settings") onApply(shuffleSettings); },  [shuffleSettings]);
+  useEffect(() => { if (type === "search") onApply({ searchBy, searchTerm }); },   [searchBy, searchTerm]);
+  useEffect(() => { if (type === "map-filter") onApply(map.filters); },            [map.filters]);
 
-      if (field === "dateExact") {
-        newFilters.dateExact = value;
-        // Clear the from/to dates if exact date is set
-        if (value) {
-          newFilters.dateFrom = "";
-          newFilters.dateTo = "";
-        }
-      } else if (field === "dateFrom" || field === "dateTo") {
-        newFilters[field] = value;
-        // Clear exact date if from/to is set
-        if (value) {
-          newFilters.dateExact = "";
-          // Reset year and age filters when manually changing date range
-          newFilters.year = "";
-          newFilters.age = "";
-        }
-      }
-    
-      if (field === "dateFrom" && newFilters.dateTo && value > newFilters.dateTo) {
-        newFilters.dateTo = value;
-      } else if (field === "dateTo" && newFilters.dateFrom && value < newFilters.dateFrom) {
-        newFilters.dateFrom = value;
-      }
-      return newFilters;
-    });
-    resetSort();
-    resetSearch();
-  };
+  // ── Reset helpers ──────────────────────────────────────────────────────────
 
-  // Handle date linking
-  const handleDateShuffleChange = (field, value) => {
-    setShuffleFilters(prev => {
-      let newFilters = { ...prev, [field]: value };
+  const resetSort   = () => { setSortBy(settings?.defaultSort ?? "media_id"); setSortOrder("desc"); };
+  const resetSearch = () => { setSearchBy("name"); setSearchTerm(""); };
 
-      if (field === "dateExact") {
-        newFilters.dateExact = value;
-        // Clear the from/to dates if exact date is set
-        if (value) {
-          newFilters.dateFrom = "";
-          newFilters.dateTo = "";
-        }
-      } else if (field === "dateFrom" || field === "dateTo") {
-        newFilters[field] = value;
-        // Clear exact date if from/to is set
-        if (value) {
-          newFilters.dateExact = "";
-        }
-      }
-    
-      if (field === "dateFrom" && newFilters.dateTo && value > newFilters.dateTo) {
-        newFilters.dateTo = value;
-      } else if (field === "dateTo" && newFilters.dateFrom && value < newFilters.dateFrom) {
-        newFilters.dateFrom = value;
-      }
-      return newFilters;
-    });
-  };
+  // Explore filters also clear sort/search
+  const handleExploreDate = (field, value) => { explore.handleDateChange(field, value); resetSort(); resetSearch(); };
+  const handleExploreYear = (year)          => { explore.handleYearChange(year);         resetSort(); resetSearch(); };
+  const handleExploreAge  = (age)           => { explore.handleAgeChange(age, settings?.birthDate); resetSort(); resetSearch(); };
+  const handleExploreFilter = (key, value)  => { explore.setFilters(prev => ({ ...prev, [key]: value })); resetSort(); resetSearch(); };
 
-  // Handle date linking
-  const handleDateMapChange = (field, value) => {
-    setMapFilters(prev => {
-      let newFilters = { ...prev, [field]: value };
+  const resetExploreAll = () => { explore.resetFilters(); resetSort(); resetSearch(); };
 
-      if (field === "dateExact") {
-        newFilters.dateExact = value;
-        // Clear the from/to dates if exact date is set
-        if (value) {
-          newFilters.dateFrom = "";
-          newFilters.dateTo = "";
-        }
-      } else if (field === "dateFrom" || field === "dateTo") {
-        newFilters[field] = value;
-        // Clear exact date if from/to is set
-        if (value) {
-          newFilters.dateExact = "";
-        }
-      }
-    
-      if (field === "dateFrom" && newFilters.dateTo && value > newFilters.dateTo) {
-        newFilters.dateTo = value;
-      } else if (field === "dateTo" && newFilters.dateFrom && value < newFilters.dateFrom) {
-        newFilters.dateFrom = value;
-      }
-      return newFilters;
-    });
-  };
-
-  // Handle year change
-  const handleYearChange = (year) => {
-    setFilters(prev => {
-      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
-
-      const dateFrom = `${year}-01-01`;
-      const dateTo = `${year}-12-31`;
-      return { ...prev, year, dateFrom, dateTo };
-    });
-    resetSort();
-    resetSearch();
-  };
-
-  // Handle year change
-  const handleYearShuffleChange = (year) => {
-    setShuffleFilters(prev => {
-      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
-
-      const dateFrom = `${year}-01-01`;
-      const dateTo = `${year}-12-31`;
-      return { ...prev, year, dateFrom, dateTo };
-    });
-  };
-
-  // Handle year change
-  const handleYearMapChange = (year) => {
-    setMapFilters(prev => {
-      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "" };
-
-      const dateFrom = `${year}-01-01`;
-      const dateTo = `${year}-12-31`;
-      return { ...prev, year, dateFrom, dateTo };
-    });
-  };
-
-  const resetFilters = () => {
-    setFilters({
-      dateFrom: "",
-      dateTo: "",
-      dateExact: "",
-      device: "",
-      folder: "",
-      filetype: "",
-      mediaType: "",
-      country: "",
-      year: "",
-      tag: "",
-      age: "",
-      ids: null
-    });
-  };
-
-  const resetShuffleFilters = () => {
-    setShuffleFilters({
-      dateFrom: "",
-      dateTo: "",
-      dateExact: "",
-      device: "",
-      folder: "",
-      filetype: "",
-      mediaType: "",
-      country: "",
-      year: "",
-      tag: "",
-      age: "",
-      ids: null
-    });
-  }
-
-  const resetMapFilters = () => {
-    setMapFilters({
-      dateFrom: "",
-      dateTo: "",
-      dateExact: "",
-      device: "",
-      folder: "",
-      filetype: "",
-      mediaType: "",
-      country: "",
-      year: "",
-      tag: "",
-      age: "",
-      ids: null
-    });
-  }
-
-  const resetSort = () => {
-    setSortBy(settings.defaultSort || "media_id")
-    setSortOrder("desc")
-  }
-
-  const resetSearch = () => {
-    setSearchBy("name")
-    setSearchTerm("")
-  }
-
-  const handleAgeChange = (age) => {
-    setFilters(prev => {
-      if (!age || !settings.birthDate) {
-        return {
-          ...prev,
-          age: "",
-          dateFrom: "",
-          dateTo: ""
-        };
-      }
-
-      const birth = new Date(settings.birthDate);
-
-      const dateFrom = new Date(birth);
-      dateFrom.setFullYear(birth.getFullYear() + Number(age));
-
-      const dateTo = new Date(birth);
-      dateTo.setFullYear(birth.getFullYear() + Number(age) + 1);
-      dateTo.setDate(dateTo.getDate() - 1);
-
-      return {
-        ...prev,
-        age,
-        year: "",
-        dateExact: "",
-        dateFrom: dateFrom.toISOString().slice(0, 10),
-        dateTo: dateTo.toISOString().slice(0, 10)
-      };
-    });
-    resetSort();
-    resetSearch();
-  };
-
-  const handleShuffleAgeChange = (age) => {
-    setShuffleFilters(prev => {
-      if (!age || !settings.birthDate) {
-        return {
-          ...prev,
-          age: "",
-          dateFrom: "",
-          dateTo: ""
-        };
-      }
-
-      const birth = new Date(settings.birthDate);
-
-      const dateFrom = new Date(birth);
-      dateFrom.setFullYear(birth.getFullYear() + Number(age));
-
-      const dateTo = new Date(birth);
-      dateTo.setFullYear(birth.getFullYear() + Number(age) + 1);
-      dateTo.setDate(dateTo.getDate() - 1);
-
-      return {
-        ...prev,
-        age,
-        year: "",
-        dateExact: "",
-        dateFrom: dateFrom.toISOString().slice(0, 10),
-        dateTo: dateTo.toISOString().slice(0, 10)
-      };
-    });
-  };
-
-  const handleMapAgeChange = (age) => {
-    setMapFilters(prev => {
-      if (!age || !settings.birthDate) {
-        return {
-          ...prev,
-          age: "",
-          dateFrom: "",
-          dateTo: ""
-        };
-      }
-
-      const birth = new Date(settings.birthDate);
-
-      const dateFrom = new Date(birth);
-      dateFrom.setFullYear(birth.getFullYear() + Number(age));
-
-      const dateTo = new Date(birth);
-      dateTo.setFullYear(birth.getFullYear() + Number(age) + 1);
-      dateTo.setDate(dateTo.getDate() - 1);
-
-      return {
-        ...prev,
-        age,
-        year: "",
-        dateExact: "",
-        dateFrom: dateFrom.toISOString().slice(0, 10),
-        dateTo: dateTo.toISOString().slice(0, 10)
-      };
-    });
-  };
-
-  const applyFilterChange = updater => {
-    resetSearch();
-    resetSort();
-    setFilters(prev => updater(prev));
-  };
-
-  const applySearchChange = (by, term) => {
-    resetFilters();
-    resetSort();
-    setSearchBy(by);
-    setSearchTerm(term);
-  };
-
-  const applySortChange = (by, order = sortOrder) => {
-    resetFilters();
-    resetSearch();
-    setSortBy(by);
-    setSortOrder(order);
-  };
+  // ── Reset on panel key change ──────────────────────────────────────────────
 
   useEffect(() => {
-    if(actionPanelKey !== prevActionPanelKey) {
-      setPrevActionPanelKey(actionPanelKey)
-      resetFilters();
+    if (actionPanelKey !== prevActionPanelKey) {
+      setPrevActionPanelKey(actionPanelKey);
+      explore.resetFilters();
       resetSearch();
       setSortBy("media_id");
       setSortOrder("desc");
@@ -444,12 +285,15 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
 
   if (!type) return null;
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="action-panel">
+
       {type === "sort" && (
         <div className="sort-panel">
           <label>Sort by:</label>
-          <select value={sortBy} onChange={e => applySortChange(e.target.value)}>
+          <select value={sortBy} onChange={e => { resetSearch(); explore.resetFilters(); setSortBy(e.target.value); }}>
             <option value="media_id">ID</option>
             <option value="name">Name</option>
             <option value="create_date_local">Date Taken</option>
@@ -457,217 +301,60 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
             <option value="size">File Size</option>
             <option value="random">Random</option>
           </select>
-          <button  onClick={() => applySortChange(sortBy, "asc")} className={sortOrder === "asc" ? "active" : ""}>Asc</button>
-          <button  onClick={() => applySortChange(sortBy, "desc")} className={sortOrder === "desc" ? "active" : ""}>Desc</button>
-          <div className="action-panel-reset"><button onClick={resetSort}><FontAwesomeIcon icon={faUndo}/></button></div>
+          <button onClick={() => {resetSearch(); explore.resetFilters(); setSortOrder("asc")}}  className={sortOrder === "asc"  ? "active" : ""}>Asc</button>
+          <button onClick={() => {resetSearch(); explore.resetFilters(); setSortOrder("desc")}} className={sortOrder === "desc" ? "active" : ""}>Desc</button>
+          <div className="action-panel-reset">
+            <button onClick={resetSort}><FontAwesomeIcon icon={faUndo} /></button>
+          </div>
         </div>
       )}
 
       {type === "filter" && (
-        <div className="filter-panel">
-          {filters.ids && (
-            <div>
-              <label>Selection</label>
-              <span className="filter-static">{filters.ids.length + " items"}</span>
-            </div>
-          )}
-          <div>
-            <label>Year</label>
-            <select value={filters.year} onChange={e => handleYearChange(e.target.value)}>
-              <option value="">All</option>
-              {options.years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Date</label>
-            <input type="date" 
-                   value={filters.dateExact} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!filters.dateFrom || !!filters.dateTo}
-                   onChange={e => handleDateChange("dateExact", e.target.value)}/>
-          </div>
-          <div>
-            <label>Date From</label>
-            <input type="date" 
-                   value={filters.dateFrom} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!filters.dateExact} 
-                   onChange={e => handleDateChange("dateFrom", e.target.value)}/>
-          </div>
-          <div>
-            <label>Date To</label>
-            <input type="date" 
-                   value={filters.dateTo} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!filters.dateExact}
-                   onChange={e => handleDateChange("dateTo", e.target.value)}/>
-          </div>
-          <div>
-            <label>Device</label>
-            <select value={filters.device} onChange={e => applyFilterChange(prev => ({...prev, device: e.target.value}))}>
-              <option value="">All</option>
-              {options.devices.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Source</label>
-            <select value={filters.folder} onChange={e => applyFilterChange(prev => ({...prev, folder: e.target.value}))}>
-              <option value="">All</option>
-              {options.folders.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Filetype</label>
-            <select value={filters.filetype} onChange={e => applyFilterChange(prev => ({...prev, filetype: e.target.value}))}>
-              <option value="">All</option>
-              {options.filetypes.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Media Type</label>
-            <select value={filters.mediaType} onChange={e => applyFilterChange(prev => ({...prev, mediaType: e.target.value}))}>
-              <option value="">All</option>
-              {options.mediaTypes.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Country</label>
-            <select value={filters.country} onChange={e => applyFilterChange(prev => ({...prev, country: e.target.value}))}>
-              <option value="">All</option>
-              {options.countries.map(c => c !== "" ? <option key={c} value={c}>{c}</option> : "")}
-            </select>
-          </div>
-          <div>
-            <label>Tag</label>
-            <select value={filters.tag} onChange={e => applyFilterChange(prev => ({...prev, tag: e.target.value}))}>
-              <option value="">All</option>
-              {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          {settings && settings.birthDate && (
-            <div>
-              <label>Age</label>
-              <select value={filters.age} onChange={e => handleAgeChange(e.target.value)}>
-                <option value="">All</option>
-                {options.ages.map(d => <option key={d} value={d}>{d}</option>).reverse()}
-              </select>
-            </div>
-          )}
-          <div className="action-panel-reset"><button onClick={resetFilters}><FontAwesomeIcon icon={faUndo}/></button></div>
-        </div>
+        <FilterPanel
+          filters={explore.filters}
+          options={options}
+          settings={settings}
+          handlers={{
+            handleDateChange: handleExploreDate,
+            handleYearChange: handleExploreYear,
+            handleAgeChange:  handleExploreAge,
+            setFilters: (updater) => {
+              // Wrap setFilters to also reset sort/search for explore view
+              explore.setFilters(updater);
+              resetSort();
+              resetSearch();
+            },
+          }}
+          onReset={resetExploreAll}
+        />
       )}
 
       {type === "search" && (
         <div className="search-panel">
-          <select value={searchBy} onChange={e => applySearchChange(e.target.value, searchTerm)}>
+          <select value={searchBy} onChange={e => { explore.resetFilters(); resetSort(); setSearchBy(e.target.value); }}>
             <option value="name">Name</option>
             <option value="media_id">ID</option>
           </select>
-          <input type="text" value={searchTerm} onChange={e => applySearchChange(searchBy, e.target.value)} placeholder="Search..." />
-          <div className="action-panel-reset"><button onClick={resetSearch}><FontAwesomeIcon icon={faUndo}/></button></div>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={e => { explore.resetFilters(); resetSort(); setSearchTerm(e.target.value); }}
+            placeholder="Search..."
+          />
+          <div className="action-panel-reset">
+            <button onClick={resetSearch}><FontAwesomeIcon icon={faUndo} /></button>
+          </div>
         </div>
       )}
 
       {type === "shuffle-filter" && (
-        <div className="filter-panel">
-          {shuffleFilters.ids && (
-            <div>
-              <label>Selection</label>
-              <span className="filter-static">{shuffleFilters.ids.length + " items"}</span>
-            </div>
-          )}
-          <div>
-            <label>Year</label>
-            <select value={shuffleFilters.year} onChange={e => handleYearShuffleChange(e.target.value)}>
-              <option value="">All</option>
-              {options.years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Date</label>
-            <input type="date" 
-                   value={shuffleFilters.dateExact} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!shuffleFilters.dateFrom || !!shuffleFilters.dateTo}
-                   onChange={e => handleDateShuffleChange("dateExact", e.target.value)}/>
-          </div>
-          <div>
-            <label>Date From</label>
-            <input type="date" 
-                   value={shuffleFilters.dateFrom} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!shuffleFilters.dateExact} 
-                   onChange={e => handleDateShuffleChange("dateFrom", e.target.value)}/>
-          </div>
-          <div>
-            <label>Date To</label>
-            <input type="date" 
-                   value={shuffleFilters.dateTo} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!shuffleFilters.dateExact}
-                   onChange={e => handleDateShuffleChange("dateTo", e.target.value)}/>
-          </div>
-          <div>
-            <label>Device</label>
-            <select value={shuffleFilters.device} onChange={e => setShuffleFilters(f => ({ ...f, device: e.target.value }))}>
-              <option value="">All</option>
-              {options.devices.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Source</label>
-            <select value={shuffleFilters.folder} onChange={e => setShuffleFilters(f => ({ ...f, folder: e.target.value }))}>
-              <option value="">All</option>
-              {options.folders.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Filetype</label>
-            <select value={shuffleFilters.filetype} onChange={e => setShuffleFilters(f => ({ ...f, filetype: e.target.value }))}>
-              <option value="">All</option>
-              {options.filetypes.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Media Type</label>
-            <select value={shuffleFilters.mediaType} onChange={e => setShuffleFilters(f => ({ ...f, mediaType: e.target.value }))}>
-              <option value="">All</option>
-              {options.mediaTypes.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Country</label>
-            <select value={shuffleFilters.country} onChange={e => setShuffleFilters(f => ({ ...f, country: e.target.value }))}>
-              <option value="">All</option>
-              {options.countries.map(c => c !== "" ? <option key={c} value={c}>{c}</option> : "")}
-            </select>
-          </div>
-          <div>
-            <label>Tag</label>
-            <select value={shuffleFilters.tag} onChange={e => setShuffleFilters(f => ({ ...f, tag: e.target.value }))}>
-              <option value="">All</option>
-              {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          {settings && settings.birthDate && (
-            <div>
-              <label>Age</label>
-              <select value={shuffleFilters.age} onChange={e => handleShuffleAgeChange(e.target.value)}>
-                <option value="">All</option>
-                {options.ages.map(d => <option key={d} value={d}>{d}</option>).reverse()}
-              </select>
-            </div>
-          )}
-          <div className="action-panel-reset" onClick={resetShuffleFilters}>
-            <button><FontAwesomeIcon icon={faUndo}/></button>
-          </div>
-        </div>
+        <FilterPanel
+          filters={shuffle.filters}
+          options={options}
+          settings={settings}
+          handlers={shuffle}
+          onReset={shuffle.resetFilters}
+        />
       )}
 
       {type === "shuffle-settings" && (
@@ -677,13 +364,10 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
             <input
               type="number"
               min="1"
-              value={shuffleSettings.shuffleInterval || 8}
+              value={shuffleSettings.shuffleInterval}
               onChange={e => {
                 const value = Number(e.target.value);
-                setShuffleSettings({ 
-                  ...shuffleSettings,
-                  shuffleInterval: isNaN(value) || value < 1 ? 1 : value 
-                });
+                setShuffleSettings(prev => ({ ...prev, shuffleInterval: isNaN(value) || value < 1 ? 1 : value }));
               }}
               style={{ width: "80px" }}
             />
@@ -694,13 +378,7 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
             <input
               type="checkbox"
               checked={shuffleSettings.hideInfo}
-              onChange={e => {
-                const value = e.target.checked;
-                setShuffleSettings({ 
-                  ...shuffleSettings,
-                  hideInfo: value
-                });
-              }}
+              onChange={e => setShuffleSettings(prev => ({ ...prev, hideInfo: e.target.checked }))}
             />
           </div>
           <div>
@@ -708,115 +386,28 @@ const ActionPanel = ({ settings, type, onApply, actionPanelKey, activeFilters, a
             <input
               type="checkbox"
               checked={shuffleSettings.smoothTransition}
-              onChange={e => {
-                const value = e.target.checked;
-                setShuffleSettings({ 
-                  ...shuffleSettings,
-                  smoothTransition: value
-                });
-              }}
+              onChange={e => setShuffleSettings(prev => ({ ...prev, smoothTransition: e.target.checked }))}
+            />
+          </div>
+          <div>
+            <label>Chronological: </label>
+            <input
+              type="checkbox"
+              checked={shuffleSettings.chronological}
+              onChange={e => setShuffleSettings(prev => ({ ...prev, chronological: e.target.checked }))}
             />
           </div>
         </div>
       )}
 
       {type === "map-filter" && (
-        <div className="filter-panel">
-          {mapFilters.ids && (
-            <div>
-              <label>Selection</label>
-              <span className="filter-static">{mapFilters.ids.length + " items"}</span>
-            </div>
-          )}
-          <div>
-            <label>Year</label>
-            <select value={mapFilters.year} onChange={e => handleYearMapChange(e.target.value)}>
-              <option value="">All</option>
-              {options.years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Date</label>
-            <input type="date" 
-                   value={mapFilters.dateExact} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!mapFilters.dateFrom || !!mapFilters.dateTo}
-                   onChange={e => handleDateMapChange("dateExact", e.target.value)}/>
-          </div>
-          <div>
-            <label>Date From</label>
-            <input type="date" 
-                   value={mapFilters.dateFrom} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!mapFilters.dateExact} 
-                   onChange={e => handleDateMapChange("dateFrom", e.target.value)}/>
-          </div>
-          <div>
-            <label>Date To</label>
-            <input type="date" 
-                   value={mapFilters.dateTo} 
-                   min={options.minDate} 
-                   max={options.maxDate}
-                   disabled={!!mapFilters.dateExact}
-                   onChange={e => handleDateMapChange("dateTo", e.target.value)}/>
-          </div>
-          <div>
-            <label>Device</label>
-            <select value={mapFilters.device} onChange={e => setMapFilters(f => ({ ...f, device: e.target.value }))}>
-              <option value="">All</option>
-              {options.devices.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Source</label>
-            <select value={mapFilters.folder} onChange={e => setMapFilters(f => ({ ...f, folder: e.target.value }))}>
-              <option value="">All</option>
-              {options.folders.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Filetype</label>
-            <select value={mapFilters.filetype} onChange={e => setMapFilters(f => ({ ...f, filetype: e.target.value }))}>
-              <option value="">All</option>
-              {options.filetypes.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Media Type</label>
-            <select value={mapFilters.mediaType} onChange={e => setMapFilters(f => ({ ...f, mediaType: e.target.value }))}>
-              <option value="">All</option>
-              {options.mediaTypes.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Country</label>
-            <select value={mapFilters.country} onChange={e => setMapFilters(f => ({ ...f, country: e.target.value }))}>
-              <option value="">All</option>
-              {options.countries.map(c => c !== "" ? <option key={c} value={c}>{c}</option> : "")}
-            </select>
-          </div>
-          <div>
-            <label>Tag</label>
-            <select value={mapFilters.tag} onChange={e => setMapFilters(f => ({ ...f, tag: e.target.value }))}>
-              <option value="">All</option>
-              {options.tags?.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          {settings && settings.birthDate && (
-            <div>
-              <label>Age</label>
-              <select value={mapFilters.age} onChange={e => handleMapAgeChange(e.target.value)}>
-                <option value="">All</option>
-                {options.ages.map(d => <option key={d} value={d}>{d}</option>).reverse()}
-              </select>
-            </div>
-          )}
-          <div className="action-panel-reset" onClick={resetMapFilters}>
-            <button><FontAwesomeIcon icon={faUndo}/></button>
-          </div>
-        </div>
+        <FilterPanel
+          filters={map.filters}
+          options={options}
+          settings={settings}
+          handlers={map}
+          onReset={map.resetFilters}
+        />
       )}
 
     </div>
