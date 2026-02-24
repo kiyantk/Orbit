@@ -27,6 +27,7 @@ let splash;
 
 // On startup:
 app.whenReady().then(() => {
+  initPaths();
   // Splash screen
   splash = new BrowserWindow({
     width: 400,
@@ -272,14 +273,13 @@ appServer.get("/files/*", async (req, res) => {
 
 
   mainWindow.loadURL("http://localhost:3000");
+  // mainWindow.loadFile(path.join(__dirname, 'index.html'));
 });
 
-// Data directory
-const dataDir = path.join(__dirname, "data");
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-// Config
-const configPath = path.join(dataDir, "config.json");
+let dataDir;
+let configPath;
+let dbPath;
 const defaultConfig = {
   welcomePopupSeen: false,
   username: null,
@@ -296,7 +296,14 @@ const defaultConfig = {
 
 // Database
 let db;
-const dbPath = path.join(dataDir, "orbit-index.db");
+
+function initPaths() {
+  dataDir = path.join(app.getPath("userData"), "data");
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+  configPath = path.join(dataDir, "config.json");
+  dbPath = path.join(dataDir, "orbit-index.db");
+}
 
 function initDatabase() {
   if(!db) {
@@ -500,6 +507,10 @@ ipcMain.handle("open-orbit-location", () => {
   }
 
   shell.openPath(appPath);
+});
+
+ipcMain.handle("open-data-location", () => {
+  shell.openPath(dataDir);
 });
 
 ipcMain.handle('open-in-default-viewer', async (event, rawPath) => {
@@ -1784,25 +1795,20 @@ ipcMain.handle("apply-heic-thumbnails", async (event, heicFiles) => {
 
 ipcMain.handle("get-storage-usage", async () => {
   try {
-    const appDataPath = path.join(__dirname); // App root folder
-    const dbPath = path.join(dataDir, "orbit-index.db");
+    const dbFilePath = path.join(dataDir, "orbit-index.db");
     const thumbsPath = path.join(dataDir, "thumbnails");
 
     let dbSize = 0;
-    if (fs.existsSync(dbPath)) {
-      const stats = fs.statSync(dbPath);
-      dbSize = stats.size; // Size in bytes
+    if (fs.existsSync(dbFilePath)) {
+      dbSize = fs.statSync(dbFilePath).size;
     }
 
-    // Calculate total storage used by the app itself
     const getDirectorySize = (dirPath) => {
+      if (!fs.existsSync(dirPath)) return 0;
       let totalSize = 0;
-      const files = fs.readdirSync(dirPath);
-
-      for (const file of files) {
+      for (const file of fs.readdirSync(dirPath)) {
         const filePath = path.join(dirPath, file);
         const stats = fs.statSync(filePath);
-
         if (stats.isDirectory()) {
           totalSize += getDirectorySize(filePath);
         } else {
@@ -1812,12 +1818,12 @@ ipcMain.handle("get-storage-usage", async () => {
       return totalSize;
     };
 
-    const appStorageUsed = getDirectorySize(appDataPath);
     const thumbSize = getDirectorySize(thumbsPath);
+    const totalDataSize = dbSize + thumbSize;
 
     return {
-      appStorageUsed, // Total space used by the app (bytes)
-      dbSize, // Space used by `orbit-index.db` (bytes)
+      appStorageUsed: totalDataSize,
+      dbSize,
       thumbSize,
     };
   } catch (error) {

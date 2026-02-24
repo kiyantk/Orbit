@@ -28,6 +28,7 @@ const FolderList = ({
   folderStatuses,
   driveLetterMap = {},
   onSetDriveLetter,
+  isOnboarding = false
 }) => {
   // Track which folder row is in "edit drive letter" mode
   const [editingFolder, setEditingFolder] = useState(null);
@@ -102,51 +103,55 @@ const FolderList = ({
                 {displayPath}
               </span>
 
-              {/* Drive letter edit input (inline, shown when editing) */}
-              {editingFolder === folder && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 6 }}>
-                  <input
-                    autoFocus
-                    maxLength={1}
-                    value={inputValue.replace(":", "")}
-                    onChange={(e) => setInputValue(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => handleInputKeyDown(e, folder)}
-                    onBlur={() => commitDriveLetter(folder)}
-                    placeholder="X"
-                    style={{
-                      width: 28,
-                      textAlign: "center",
-                      fontWeight: "bold",
-                      textTransform: "uppercase",
-                      background: "#2a2733",
-                      color: "#fff",
-                      border: "1px solid #666",
-                      borderRadius: 4,
-                      padding: "2px 4px",
-                    }}
-                  />
-                  <span style={{ color: "#aaa", fontSize: 12 }}>:</span>
-                </span>
-              )}
+              {!isOnboarding && (
+                <div>
+                  {/* Drive letter edit input (inline, shown when editing) */}
+                  {editingFolder === folder && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginLeft: 6 }}>
+                      <input
+                        autoFocus
+                        maxLength={1}
+                        value={inputValue.replace(":", "")}
+                        onChange={(e) => setInputValue(e.target.value.toUpperCase())}
+                        onKeyDown={(e) => handleInputKeyDown(e, folder)}
+                        onBlur={() => commitDriveLetter(folder)}
+                        placeholder="X"
+                        style={{
+                          width: 28,
+                          textAlign: "center",
+                          fontWeight: "bold",
+                          textTransform: "uppercase",
+                          background: "#2a2733",
+                          color: "#fff",
+                          border: "1px solid #666",
+                          borderRadius: 4,
+                          padding: "2px 4px",
+                        }}
+                      />
+                      <span style={{ color: "#aaa", fontSize: 12 }}>:</span>
+                    </span>
+                  )}
 
-              {/* Drive letter toggle button */}
-              {getDriveLetter(folder) && (
-                <button
-                  className="welcome-popup-remove-folder welcome-popup-folder-action"
-                  title={hasCustom ? `Remove custom drive letter (${customLetter})` : "Set custom drive letter"}
-                  onClick={() => handleDriveButtonClick(folder)}
-                  disabled={isDisabled}
-                  style={{
-                    marginRight: 4,
-                    color: hasCustom ? "#ffffff" : "#888",
-                    fontWeight: hasCustom ? "bold" : "normal",
-                    fontSize: 11,
-                    minWidth: 28,
-                    opacity: isDisabled ? 0.5 : 1,
-                  }}
-                >
-                  {hasCustom ? customLetter : <FontAwesomeIcon icon={faHardDrive} />}
-                </button>
+                  {/* Drive letter toggle button */}
+                  {getDriveLetter(folder) && (
+                    <button
+                      className="welcome-popup-remove-folder welcome-popup-folder-action"
+                      title={hasCustom ? `Remove custom drive letter (${customLetter})` : "Set custom drive letter"}
+                      onClick={() => handleDriveButtonClick(folder)}
+                      disabled={isDisabled}
+                      style={{
+                        marginRight: 4,
+                        color: hasCustom ? "#ffffff" : "#888",
+                        fontWeight: hasCustom ? "bold" : "normal",
+                        fontSize: 11,
+                        minWidth: 28,
+                        opacity: isDisabled ? 0.5 : 1,
+                      }}
+                    >
+                      {hasCustom ? customLetter : <FontAwesomeIcon icon={faHardDrive} />}
+                    </button>
+                  )}
+              </div>
               )}
 
               {/* Remove folder button */}

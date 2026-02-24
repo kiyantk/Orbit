@@ -143,7 +143,7 @@ const WelcomePopup = ({ submitWelcomePopup }) => {
               </button>
               
               {welcomePopupContent.selectedFolders.length > 0 && (
-                <FolderList folders={welcomePopupContent.selectedFolders} onRemoveFolder={removeFolder} isDisabled={isIndexing} />
+                <FolderList folders={welcomePopupContent.selectedFolders} onRemoveFolder={removeFolder} isDisabled={isIndexing} isOnboarding={true} />
               )}
             </div>
           </div>

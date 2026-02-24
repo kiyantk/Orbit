@@ -322,6 +322,7 @@ const SettingsView = ({
   };
 
   const openAppLocation = () => ipc("open-orbit-location");
+  const openDataLocation = () => ipc("open-data-location");
   const toggleFullscreen = () => ipc("toggle-fullscreen");
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -424,8 +425,8 @@ const SettingsView = ({
               />
               <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="welcome-popup-select-folders-btn" onClick={selectFolders} disabled={isIndexing}>Add Source</button>
-                <button className="welcome-popup-select-folders-btn" onClick={handleRemoveAll} disabled={isIndexing || !settings.indexedFolders.length}>Remove All</button>
-                <button className="welcome-popup-select-folders-btn" onClick={() => setShowToolsPopup(true)} disabled={isIndexing || !settings.indexedFolders.length}>Tools</button>
+                <button className="welcome-popup-select-folders-btn" onClick={handleRemoveAll} disabled={isIndexing || (settings && !settings.indexedFolders.length)}>Remove All</button>
+                <button className="welcome-popup-select-folders-btn" onClick={() => setShowToolsPopup(true)} disabled={isIndexing || (settings && !settings.indexedFolders.length)}>Tools</button>
                 {missingHeicFiles.length > 0 && (
                   <button className="welcome-popup-select-folders-btn" onClick={() => setShowHeicPopup(true)} disabled={isIndexing}>
                     Generate HEIC Thumbnails
@@ -521,6 +522,10 @@ const SettingsView = ({
               <SettingsRow>
                 <span>App Location:</span>
                 <button className="settings-normal-button" onClick={openAppLocation}>Open in File Explorer</button>
+              </SettingsRow>
+              <SettingsRow>
+                <span>Data Location:</span>
+                <button className="settings-normal-button" onClick={openDataLocation}>Open in File Explorer</button>
               </SettingsRow>
               <SettingsRow>
                 <span>Window:</span>
