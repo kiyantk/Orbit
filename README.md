@@ -62,7 +62,7 @@ If your photo library has outgrown traditional viewers, Orbit is built for you.
 
 ## 🖼️ Screenshots
 
-_WIP_
+<img src="https://cdn.kiy.li/img/kiyantk/orbit-screenshot-2.webp" width="700" alt="Orbit Logo"/>
 
 ---
 
