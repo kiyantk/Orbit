@@ -234,14 +234,14 @@ const ExplorerView = ({
 
   const handleClick = useCallback(
     (e, item) => {
-      if (!folderStatuses[item.folder_path]) return;
+      // if (!folderStatuses[item.folder_path]) return;
       if (e.ctrlKey) {
         window.electron.ipcRenderer.invoke("open-in-default-viewer", item.path);
       } else {
         handleSelect(item, "single");
       }
     },
-    [folderStatuses, handleSelect]
+    [handleSelect]
   );
 
   const handleAddModeClick = useCallback((item) => {
@@ -262,7 +262,8 @@ const ExplorerView = ({
 
   const handleRemoveItem = useCallback(async (itemId) => {
     try {
-      await window.electron.ipcRenderer.invoke("remove-item-from-index", itemId);
+      const ids = Array.isArray(itemId) ? itemId : [itemId];
+      await window.electron.ipcRenderer.invoke("remove-item-from-index", ids);
     } catch (err) {
       console.error("Failed to remove item:", err);
     }
@@ -622,22 +623,26 @@ if (distFromTop < EDGE_SIZE) {
 
   // IPC: item removed
   useEffect(() => {
-    const handleItemRemoved = ({ id }) => {
-      const index = idToIndex.current.get(id);
-      if (index == null) return;
-
-      delete itemsRef.current[index];
-      idToIndex.current.delete(id);
-      setTotalCount((prev) => (prev ? prev - 1 : prev));
-
+    const handleItemRemoved = ({ ids }) => {
+      const idList = Array.isArray(ids) ? ids : [ids];
+    
+      idList.forEach((id) => {
+        const index = idToIndex.current.get(id);
+        if (index == null) return;
+        delete itemsRef.current[index];
+        idToIndex.current.delete(id);
+      });
+    
+      setTotalCount((prev) => (prev ? prev - idList.length : prev));
+    
       // Rebuild idToIndex
       const rebuilt = new Map();
       Object.entries(itemsRef.current).forEach(([idx, item]) => {
         rebuilt.set(item.id, Number(idx));
       });
       idToIndex.current = rebuilt;
-
-      if (selectedItem?.id === id) setSelectedItem(null);
+    
+      if (idList.includes(selectedItem?.id)) setSelectedItem(null);
       itemDeleted();
     };
 
@@ -800,7 +805,6 @@ if (distFromTop < EDGE_SIZE) {
         dragJustFinishedRef.current = false;
         return;
       }
-      if (!folderAvailable && !isInAddMode && !isInRemoveMode) return;
       if (isInAddMode) handleAddModeClick(item);
       else if (isInRemoveMode) handleRemoveModeClick(item);
       else handleClick(e, item);
@@ -987,7 +991,7 @@ if (distFromTop < EDGE_SIZE) {
           <span>Remove Mode Enabled</span>
           <BannerButton
             onClick={async () => {
-              for (const id of removeModeSelected) await handleRemoveItem(id);
+              await handleRemoveItem(Array.from(removeModeSelected));
               setExplorerMode({ enabled: false, value: null, type: "" });
               setRemoveModeSelected(new Set());
             }}

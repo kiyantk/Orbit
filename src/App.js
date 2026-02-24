@@ -21,6 +21,7 @@ const App = () => {
   const [folderStatuses, setFolderStatuses] = useState({}); // { "C:/path": true/false }
   const [selectedSettingsTab, setSelectedSettingsTab] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [selectedItemAvailable, setSelectedItemAvailable] = useState(true)
   const [isMuted, setIsMuted] = useState(true); // session-wide mute state
   const [forceFullscreen, setForceFullscreen] = useState(false);
   const [explorerScale, setExplorerScale] = useState(1);
@@ -193,7 +194,7 @@ const checkFolderStatuses = useCallback(async () => {
 
     const handleExplorerSelect = (item, type) => {
       setSelectedItem(item);
-
+      setSelectedItemAvailable(folderStatuses[item.folder_path] ?? true);
       if (type === "double") {
         setForceFullscreen(true); // tell PreviewPanel to open fullscreen
       } else {
@@ -349,6 +350,7 @@ const checkFolderStatuses = useCallback(async () => {
                     birthDate={settings.birthDate}
                     currentSettings={settings}
                     panelKey={previewPanelKey}
+                    selectedItemAvailable={selectedItemAvailable}
                   />
                 ) : (
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>

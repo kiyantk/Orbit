@@ -120,7 +120,7 @@ const VideoControls = React.forwardRef(function VideoControls({ progress, isPlay
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey }) {
+export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey, selectedItemAvailable }) {
   const videoRefNormal     = useRef(null);
   const trackRefNormal     = useRef(null);
   const videoRefFullscreen = useRef(null);
@@ -323,45 +323,51 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     <div className="p-4 space-y- preview-panel-wrapper">
 
       {/* ── Media preview ── */}
-      <div className="flex justify-center preview-panel-content">
-        {isLoading && (
-          <div className="absolute inset-0 flex justify-center items-center bg-black/50 z-10">
-            <div className="loader" />
-          </div>
-        )}
+      {selectedItemAvailable === false ? (
+        <div className="flex justify-center items-center preview-panel-content text-gray-400 text-sm">
+          Item could not be found
+        </div>
+      ) : (
+        <div className="flex justify-center preview-panel-content">
+          {isLoading && (
+            <div className="absolute inset-0 flex justify-center items-center bg-black/50 z-10">
+              <div className="loader" />
+            </div>
+          )}
 
-        {isVideo ? (
-          <div
-            className="video-wrapper"
-            onMouseEnter={() => !isSeeking && setIsHovered(true)}
-            onMouseLeave={() => !isSeeking && setIsHovered(false)}
-          >
-            <video
-              ref={videoRefNormal}
-              src={fileUrl}
-              autoPlay muted={isMuted} loop
-              className={`video-element ${isLoading ? "hidden" : ""}`}
-              onLoadedData={() => setIsLoading(false)}
-            />
-            {isHovered && (
-              <VideoControls
-                ref={trackRefNormal}
-                {...videoControlProps}
-                showFullscreen
-                onFullscreen={openFullscreen}
+          {isVideo ? (
+            <div
+              className="video-wrapper"
+              onMouseEnter={() => !isSeeking && setIsHovered(true)}
+              onMouseLeave={() => !isSeeking && setIsHovered(false)}
+            >
+              <video
+                ref={videoRefNormal}
+                src={fileUrl}
+                autoPlay muted={isMuted} loop
+                className={`video-element ${isLoading ? "hidden" : ""}`}
+                onLoadedData={() => setIsLoading(false)}
               />
-            )}
-          </div>
-        ) : (
-          <img
-            src={fileUrl}
-            alt={item.filename}
-            className={`max-h-[500px] object-contain rounded-lg bg-gray-200 ${isLoading ? "hidden" : ""} ${heicClass}`}
-            onClick={openFullscreen}
-            onLoad={() => setIsLoading(false)}
-          />
-        )}
-      </div>
+              {isHovered && (
+                <VideoControls
+                  ref={trackRefNormal}
+                  {...videoControlProps}
+                  showFullscreen
+                  onFullscreen={openFullscreen}
+                />
+              )}
+            </div>
+          ) : (
+            <img
+              src={fileUrl}
+              alt={item.filename}
+              className={`max-h-[500px] object-contain rounded-lg bg-gray-200 ${isLoading ? "hidden" : ""} ${heicClass}`}
+              onClick={openFullscreen}
+              onLoad={() => setIsLoading(false)}
+            />
+          )}
+        </div>
+      )}
 
       {/* ── Metadata ── */}
       <div className="metadata-panel" key={panelKey}>

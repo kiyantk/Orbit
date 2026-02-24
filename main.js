@@ -377,6 +377,7 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS removed_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       path TEXT NOT NULL UNIQUE,
+      folder_path TEXT NOT NULL,
       removed_at INTEGER DEFAULT (strftime('%s', 'now'))
     )
   `);
@@ -1428,7 +1429,11 @@ ipcMain.handle("fetch-options", async (event, {birthDate = null}) => {
     initDatabase();
 
     const devices = db.prepare("SELECT DISTINCT device_model FROM files WHERE device_model IS NOT NULL").all().map(r => r.device_model);
-    const folders = db.prepare("SELECT DISTINCT folder_path FROM files WHERE folder_path IS NOT NULL").all().map(r => r.folder_path);
+    const driveMap = getDriveLetterMap();
+    const folders = db.prepare("SELECT DISTINCT folder_path FROM files WHERE folder_path IS NOT NULL").all().map(r => ({
+      value: r.folder_path,
+      label: applyDriveLetterMap(r.folder_path, driveMap),
+    }));
     const filetypes = db.prepare("SELECT DISTINCT extension FROM files WHERE extension IS NOT NULL").all().map(r => r.extension);
     const mediaTypes = db.prepare("SELECT DISTINCT file_type FROM files WHERE file_type IS NOT NULL").all().map(r => r.file_type);
     const countries = db.prepare("SELECT DISTINCT country FROM files WHERE country IS NOT NULL").all().map(r => r.country);
@@ -1627,13 +1632,15 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
   try {
     initDatabase();
 
-    // Get all thumbnails linked to this folder
-    const thumbnails = db.prepare(
-      "SELECT thumbnail_path FROM files WHERE folder_path = ?"
+    // Get all files in this folder
+    const files = db.prepare(
+      "SELECT id, thumbnail_path FROM files WHERE folder_path = ?"
     ).all(folderPath);
 
+    const fileIds = new Set(files.map(f => f.id));
+
     // Delete thumbnails from disk
-    for (const { thumbnail_path } of thumbnails) {
+    for (const { thumbnail_path } of files) {
       if (thumbnail_path && fs.existsSync(thumbnail_path)) {
         try {
           fs.unlinkSync(thumbnail_path);
@@ -1643,11 +1650,38 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
       }
     }
 
-    // Delete files from DB
-    db.prepare("DELETE FROM files WHERE folder_path = ?").run(folderPath);
+    db.transaction(() => {
+      // Delete files from DB
+      db.prepare("DELETE FROM files WHERE folder_path = ?").run(folderPath);
 
-    // Delete folder record
-    db.prepare("DELETE FROM folders WHERE path = ?").run(folderPath);
+      // Delete folder record
+      db.prepare("DELETE FROM folders WHERE path = ?").run(folderPath);
+
+      // Delete removed_files entries from this source
+      db.prepare("DELETE FROM removed_files WHERE folder_path = ?").run(folderPath);
+
+      // Clean up tags
+      const allTags = db.prepare("SELECT id, media_ids FROM tags").all();
+      const updateTag = db.prepare("UPDATE tags SET media_ids = ? WHERE id = ?");
+      for (const tag of allTags) {
+        const mediaIds = JSON.parse(tag.media_ids || "[]");
+        const filtered = mediaIds.filter(mid => !fileIds.has(Number(mid)));
+        if (filtered.length !== mediaIds.length) {
+          updateTag.run(JSON.stringify(filtered), tag.id);
+        }
+      }
+
+      // Clean up memories
+      const allMemories = db.prepare("SELECT id, media_ids FROM memories").all();
+      const updateMemory = db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?");
+      for (const memory of allMemories) {
+        const mediaIds = JSON.parse(memory.media_ids || "[]");
+        const filtered = mediaIds.filter(mid => !fileIds.has(Number(mid)));
+        if (filtered.length !== mediaIds.length) {
+          updateMemory.run(JSON.stringify(filtered), memory.id);
+        }
+      }
+    })();
 
     return { success: true };
   } catch (err) {
@@ -1656,47 +1690,71 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
   }
 });
 
-ipcMain.handle("remove-item-from-index", async (event, id) => {
+ipcMain.handle("remove-item-from-index", async (event, ids) => {
   try {
     initDatabase();
 
-    if (!id) {
-      throw new Error("No ID provided");
+    // Accept a single id or an array of ids
+    const idList = Array.isArray(ids) ? ids : [ids];
+
+    if (!idList.length || idList.some(id => !id)) {
+      throw new Error("No valid ID(s) provided");
     }
 
-    // 1. Record path in removed_files before deleting
-    const removed = db.prepare("SELECT path FROM files WHERE id = ?").get(id);
-    if (removed?.path) {
-      db.prepare("INSERT OR IGNORE INTO removed_files (path) VALUES (?)").run(removed.path);
-    }
+    const idSet = new Set(idList.map(Number));
 
-    // 2. Remove item from DB
-    db.prepare("DELETE FROM files WHERE id = ?").run(id);
+    db.transaction(() => {
+      for (const id of idSet) {
+        // 1. Record path in removed_files before deleting
+        const removed = db.prepare("SELECT path, folder_path FROM files WHERE id = ?").get(id);
+        if (removed?.path) {
+          db.prepare("INSERT OR IGNORE INTO removed_files (path, folder_path) VALUES (?, ?)").run(removed.path, removed.folder_path);
+        }
 
-    // 3. Remove thumbnail from disk
-    const thumbnailPath = path.join(
-      dataDir,
-      "thumbnails",
-      `${id}_thumb.jpg`
-    );
+        // 2. Remove item from DB
+        db.prepare("DELETE FROM files WHERE id = ?").run(id);
+      }
 
-    if (fs.existsSync(thumbnailPath)) {
-      try {
-        fs.unlinkSync(thumbnailPath);
-      } catch (err) {
-        console.warn(
-          "Failed to delete thumbnail:",
-          thumbnailPath,
-          err.message
-        );
+      // 3. Remove id(s) from all tags' media_ids
+      const allTags = db.prepare("SELECT id, media_ids FROM tags").all();
+      const updateTag = db.prepare("UPDATE tags SET media_ids = ? WHERE id = ?");
+      for (const tag of allTags) {
+        const mediaIds = JSON.parse(tag.media_ids || "[]");
+        const filtered = mediaIds.filter(mid => !idSet.has(Number(mid)));
+        if (filtered.length !== mediaIds.length) {
+          updateTag.run(JSON.stringify(filtered), tag.id);
+        }
+      }
+
+      // 4. Remove id(s) from all memories' media_ids
+      const allMemories = db.prepare("SELECT id, media_ids FROM memories").all();
+      const updateMemory = db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?");
+      for (const memory of allMemories) {
+        const mediaIds = JSON.parse(memory.media_ids || "[]");
+        const filtered = mediaIds.filter(mid => !idSet.has(Number(mid)));
+        if (filtered.length !== mediaIds.length) {
+          updateMemory.run(JSON.stringify(filtered), memory.id);
+        }
+      }
+    })();
+
+    // 5. Remove thumbnails from disk (outside transaction — non-critical)
+    for (const id of idSet) {
+      const thumbnailPath = path.join(dataDir, "thumbnails", `${id}_thumb.jpg`);
+      if (fs.existsSync(thumbnailPath)) {
+        try {
+          fs.unlinkSync(thumbnailPath);
+        } catch (err) {
+          console.warn("Failed to delete thumbnail:", thumbnailPath, err.message);
+        }
       }
     }
 
-    event.sender.send("item-removed", { id });
+    event.sender.send("item-removed", { ids: [...idSet] });
 
     return { success: true };
   } catch (err) {
-    console.error("Error removing item from index:", err);
+    console.error("Error removing item(s) from index:", err);
     return { success: false, error: err.message };
   }
 });

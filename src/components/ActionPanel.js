@@ -139,7 +139,6 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
 
       {[
         ["Device",     "device",    options.devices],
-        ["Source",     "folder",    options.folders],
         ["Filetype",   "filetype",  options.filetypes],
         ["Media Type", "mediaType", options.mediaTypes],
       ].map(([label, key, opts]) => (
@@ -151,6 +150,16 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
           </select>
         </div>
       ))}
+
+      <div>
+        <label>Source</label>
+        <select value={filters.folder} onChange={e => setFilters(prev => ({ ...prev, folder: e.target.value }))}>
+          <option value="">All</option>
+          {options.folders.map(f => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+      </div>
 
       <div>
         <label>Tag</label>
