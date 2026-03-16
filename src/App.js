@@ -284,7 +284,7 @@ const checkFolderStatuses = useCallback(async () => {
           )}
           {activeView === "shuffle" && (
             <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} hideMetadata={shuffleSettings.hideInfo}
-              smoothTransition={shuffleSettings.smoothTransition} chronological={shuffleSettings.chronological} />
+              smoothTransition={shuffleSettings.smoothTransition} chronological={shuffleSettings.chronological} currentSettings={settings} />
           )}
           {activeView === "memories" && (
             <MemoriesView switchMemoryMode={setMemoryMode} memoryMode={memoryMode}

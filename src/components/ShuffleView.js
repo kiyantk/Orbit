@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import "./ShuffleView.css";
 
-const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, smoothTransition = false, chronological = false, filters = {} }) => {
+const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, smoothTransition = false, chronological = false, filters = {}, currentSettings }) => {
   const [images, setImages] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -135,6 +135,11 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
   const displayed = images[displayedIndex];
   if (!current) return null;
 
+  const getHeicClass = (img) =>
+  currentSettings?.adjustHeicColors && img?.extension === ".heic"
+    ? "heic-color-adjust"
+    : "";
+
   return (
     <div className="shuffle-view">
       {/* Hidden preloader */}
@@ -154,14 +159,14 @@ const ShuffleView = ({ preloadCount = 3, interval = 8000, hideMetadata = false, 
             key={`prev-${images[prevIndex]?.url}`}
             src={images[prevIndex]?.url}
             alt=""
-            className="shuffle-image shuffle-image-prev"
+            className={`shuffle-image shuffle-image-prev ${getHeicClass(images[prevIndex])}`}
           />
         )}
         <img
           key={images[displayedIndex]?.url}
           src={images[displayedIndex]?.url}
           alt={images[displayedIndex]?.filename}
-          className={`shuffle-image${smoothTransition ? " shuffle-image-next" : ""}`}
+          className={`shuffle-image${smoothTransition ? " shuffle-image-next" : ""} ${getHeicClass(images[displayedIndex])}`}
         />
       </div>
 

@@ -59,24 +59,26 @@
   border-radius: 4px;
   cursor: pointer;
   border: none;
+  outline: 1px solid #4f4b52;
+  border-radius: 2px;
 }
 
 .btn-primary {
-  background: #484050;
+  background: #2b272e;
   color: white;
 }
 
 .btn-primary:hover {
-  background: #50475a;
+  background: #3c3741;
 }
 
 .btn-gray {
-  background: #71647d;
+  background: #2b272e;
   color: white;
 }
 
 .btn-gray:hover {
-  background: #9282a1;
+  background: #3c3741;
 }
 
 .btn-warning {
@@ -88,12 +90,12 @@
 }
 
 .btn-danger {
-  background: #484050;
+  background: #2b272e;
   color: white;
 }
 
 .btn-danger:hover {
-  background: #50475a;
+  background: #3c3741;
 }
 
 /* Modal */
@@ -132,10 +134,10 @@
   width: 100%;
   padding: 6px;
   color: white;
-  border: none;
-  border-radius: 4px;
   margin-bottom: 10px;
-  background-color: #484050;
+  background-color: #2b272e;
+  border: 1px solid #4f4b52;
+  border-radius: 2px;
 }
 
 .textarea {

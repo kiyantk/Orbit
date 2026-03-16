@@ -146,7 +146,7 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
         >
           Remove
         </div>
-        <span style={{position: "absolute",bottom: "4px", left: "8px",color:"gray", fontSize: "10px", marginTop: "5px"}}>{ item.filename }</span>
+        <span className="context-menu-filename">{ item.filename }</span>
       </div>
 
       {/* Tag submenu */}

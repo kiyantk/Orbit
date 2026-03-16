@@ -141,7 +141,7 @@ const MapView = ({ mapViewType, filters }) => {
       const markers = res.points.map((p) => {
         const marker = L.marker([p.lat, p.lng], {
           icon: L.icon({
-            iconUrl:   "/marker.png",
+            iconUrl: `${process.env.PUBLIC_URL}/marker.png`,
             iconSize:  [10, 10],
             iconAnchor:[5, 5],
           }),

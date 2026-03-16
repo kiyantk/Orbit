@@ -356,7 +356,7 @@ const SettingsView = ({
                 <input className="settings-content-input" type="text" value={settings.username} onChange={handleUsernameChange} />
               </SettingsRow>
               <SettingsRow>
-                <span>Birth Date:</span>
+                <span>Birthdate:</span>
                 <input className="settings-content-input" type="date" style={{ colorScheme: "dark" }} value={settings.birthDate} onChange={handleSelect("birthDate")} />
               </SettingsRow>
             </div>
@@ -365,12 +365,22 @@ const SettingsView = ({
           {selectedTab === "Explorer" && (
             <div>
               <SettingsRow>
-                <input type="checkbox" checked={!!settings.adjustHeicColors} onChange={handleCheckbox("adjustHeicColors")} />
-                <span>Adjust HEIC Colors</span>
+                <div className="slider-wrapper">
+                  <label className="switch">
+                    <input type="checkbox" id="settings-adjustheiccolors-checkbox" checked={!!settings.adjustHeicColors} onChange={handleCheckbox("adjustHeicColors")} />
+                    <div className="slider round"></div>
+                  </label>
+                </div>
+                <span>Adjust HEIC colors</span>
                 <span className="settings-hint">Recommended. Improves color accuracy for HEIC photos.</span>
               </SettingsRow>
               <SettingsRow>
-                <input type="checkbox" checked={!!settings.preloadHeic} onChange={handleCheckbox("preloadHeic")} />
+                <div className="slider-wrapper">
+                  <label className="switch">
+                    <input type="checkbox" id="settings-preloadheic-checkbox" checked={!!settings.preloadHeic} onChange={handleCheckbox("preloadHeic")} />
+                    <div className="slider round"></div>
+                  </label>
+                </div>
                 <span>Preload HEIC on hover</span>
                 <span className="settings-hint">Experimental. Can significantly reduce loading times for HEIC files by decoding them in the background while hovering.</span>
               </SettingsRow>
@@ -394,7 +404,12 @@ const SettingsView = ({
                 </select>
               </SettingsRow>
               <SettingsRow>
-                <input type="checkbox" checked={!!settings.noGutters} onChange={handleCheckbox("noGutters")} />
+                <div className="slider-wrapper">
+                  <label className="switch">
+                    <input type="checkbox" id="settings-nogutters-checkbox" checked={!!settings.noGutters} onChange={handleCheckbox("noGutters")} />
+                    <div className="slider round"></div>
+                  </label>
+                </div>
                 <span>No gutters</span>
               </SettingsRow>
             </div>
@@ -415,7 +430,7 @@ const SettingsView = ({
 
           {selectedTab === "Media" && (
             <div>
-              <h3>Indexed Sources</h3>
+              <h3>Indexed sources</h3>
               <FolderList
                 folders={settings.indexedFolders}
                 onRemoveFolder={removeFolder}
@@ -444,14 +459,14 @@ const SettingsView = ({
           {selectedTab === "Storage" && (
             <div>
               <SettingsRow>
-                <span>Storage Usage:</span>
+                <span>Storage usage:</span>
                 <button
                   className="settings-normal-button"
                   onClick={getUsageData}
                   disabled={isFetchingUsage}
                   style={isFetchingUsage ? { opacity: 0.5, cursor: "not-allowed" } : {}}
                 >
-                  {isFetchingUsage ? "Loading..." : "Fetch Usage"}
+                  {isFetchingUsage ? "Loading..." : "Fetch"}
                 </button>
               </SettingsRow>
               {storageUsage.app !== 0 && (
@@ -477,7 +492,7 @@ const SettingsView = ({
               <h3>General</h3>
               <SettingsRow>
                 <span>Quick minimize:</span>
-                <ShortcutKey>~</ShortcutKey> or <ShortcutKey>`</ShortcutKey>
+                <ShortcutKey>~</ShortcutKey> <span>or</span> <ShortcutKey>`</ShortcutKey>
               </SettingsRow>
               <br />
               <h3>Explorer</h3>
@@ -486,12 +501,12 @@ const SettingsView = ({
                 { label: "Open fullscreen:", keys: [<ShortcutKey key="dlmb">Double Left Mouse Button</ShortcutKey>] },
                 {
                   label: "Open in default viewer:",
-                  keys: [<ShortcutKey key="ctrl">CTRL</ShortcutKey>, " + ", <ShortcutKey key="lmb2">Left Mouse Button</ShortcutKey>],
+                  keys: [<ShortcutKey key="ctrl">CTRL</ShortcutKey>, <span>+</span>, <ShortcutKey key="lmb2">Left Mouse Button</ShortcutKey>],
                 },
                 {
                   label: "Navigate:",
                   keys: [
-                    <ShortcutKey key="scroll">SCROLL</ShortcutKey>, " or ",
+                    <ShortcutKey key="scroll">SCROLL</ShortcutKey>, <span>or</span>,
                     <ShortcutKey key="arrows">
                       <FontAwesomeIcon icon={faArrowLeft} />{" "}
                       <FontAwesomeIcon icon={faArrowUp} />{" "}
@@ -502,7 +517,7 @@ const SettingsView = ({
                 },
                 {
                   label: "Scale grid:",
-                  keys: [<ShortcutKey key="ctrl">CTRL</ShortcutKey>, " + ", <ShortcutKey key="scroll">SCROLL</ShortcutKey>],
+                  keys: [<ShortcutKey key="ctrl">CTRL</ShortcutKey>, <span>+</span>, <ShortcutKey key="scroll">SCROLL</ShortcutKey>],
                 },
                 { label: "Assign last used tag to selected item:", keys: [<ShortcutKey key="t">T</ShortcutKey>] },
               ].map(({ label, keys }) => (
@@ -516,19 +531,16 @@ const SettingsView = ({
           {selectedTab === "App" && (
             <div>
               <SettingsRow>
-                <img width="50" src={`${process.env.PUBLIC_URL}/logo-v2-orbit-bright-white-shadow-small.png`} alt="Orbit logo" />
-                <span>Orbit 1.1.0</span>
+                <img width="44" style={{marginBottom: "5px"}} src={`${process.env.PUBLIC_URL}/logo-v2-orbit-bright-white-shadow-small.png`} alt="Orbit logo" />
+                <span>Orbit 1.2.0</span>
               </SettingsRow>
               <SettingsRow>
-                <span>App Location:</span>
-                <button className="settings-normal-button" onClick={openAppLocation}>Open in File Explorer</button>
+                <button className="settings-normal-button" onClick={openAppLocation}>Open app directory</button>
               </SettingsRow>
               <SettingsRow>
-                <span>Data Location:</span>
-                <button className="settings-normal-button" onClick={openDataLocation}>Open in File Explorer</button>
+                <button className="settings-normal-button" onClick={openDataLocation}>Open data directory</button>
               </SettingsRow>
               <SettingsRow>
-                <span>Window:</span>
                 <button className="settings-normal-button" onClick={toggleFullscreen}>Toggle Fullscreen</button>
               </SettingsRow>
             </div>

@@ -396,27 +396,30 @@ const ActionPanel = ({
           </div>
           <div>
             <label>Hide Metadata: </label>
-            <input
-              type="checkbox"
-              checked={shuffleSettings.hideInfo}
-              onChange={e => setShuffleSettings(prev => ({ ...prev, hideInfo: e.target.checked }))}
-            />
+            <div className="slider-wrapper">
+              <label className="switch">
+                <input type="checkbox" id="shuffle-chronological-checkbox" checked={shuffleSettings.hideInfo} onChange={e => setShuffleSettings(prev => ({ ...prev, hideInfo: e.target.checked }))} />
+                <div className="slider round"></div>
+              </label>
+            </div>
           </div>
           <div>
             <label>Smooth Transition: </label>
-            <input
-              type="checkbox"
-              checked={shuffleSettings.smoothTransition}
-              onChange={e => setShuffleSettings(prev => ({ ...prev, smoothTransition: e.target.checked }))}
-            />
+            <div className="slider-wrapper">
+              <label className="switch">
+                <input type="checkbox" id="shuffle-chronological-checkbox" checked={shuffleSettings.smoothTransition} onChange={e => setShuffleSettings(prev => ({ ...prev, smoothTransition: e.target.checked }))} />
+                <div className="slider round"></div>
+              </label>
+            </div>
           </div>
           <div>
             <label>Chronological: </label>
-            <input
-              type="checkbox"
-              checked={shuffleSettings.chronological}
-              onChange={e => setShuffleSettings(prev => ({ ...prev, chronological: e.target.checked }))}
-            />
+            <div className="slider-wrapper">
+              <label className="switch">
+                <input type="checkbox" id="shuffle-chronological-checkbox" checked={shuffleSettings.chronological} onChange={e => setShuffleSettings(prev => ({ ...prev, chronological: e.target.checked }))} />
+                <div className="slider round"></div>
+              </label>
+            </div>
           </div>
         </div>
       )}
