@@ -19,6 +19,7 @@ const fsPromises = fs.promises;
 const heicDecode = require("heic-decode");
 const { Worker } = require("worker_threads");
 const EmbeddingService = require("./embedding-service");
+const crypto = require("crypto");
 let embeddingService = null;
 let _textPipeline = null;
 
@@ -227,6 +228,12 @@ appServer.get("/files/*", async (req, res) => {
 
   const ext = path.extname(filePath).toLowerCase();
 
+  const rawExtensions = [
+    ".dng", ".cr2", ".nef", ".arw", ".orf", ".rw2",
+    ".raw", ".raf", ".pef", ".srw", ".x3f", ".kdc",
+    ".dcr", ".mrw", ".erf", ".3fr", ".mef", ".rwl", ".iiq"
+  ];
+
   try {
     if (ext === ".heic") {
       const settings = getSettings();
@@ -243,24 +250,46 @@ appServer.get("/files/*", async (req, res) => {
         .toBuffer();
       res.type("jpeg").send(outputBuffer);
 
-    } else if (ext === ".avi" || ext === ".wmv") {
-      res.type("mp4");
+    } else if (rawExtensions.includes(ext)) {
+      try {
+        const hash = crypto.createHash('md5').update(filePath).digest('hex');
+        const tmpRaw = path.join(os.tmpdir(), `orbit_raw_${hash}.jpg`);
+      
+        if (!fs.existsSync(tmpRaw)) {
+          const dcraw = require("dcraw");
+          const rawBuffer = fs.readFileSync(filePath);
+          // dcraw with -e flag extracts the embedded thumbnail/preview
+          const jpegBuffer = dcraw(rawBuffer, { extractThumbnail: true });
+          fs.writeFileSync(tmpRaw, jpegBuffer);
+        }
+      
+        return res.type("jpeg").sendFile(tmpRaw);
+      } catch (err) {
+        console.error("RAW preview extraction failed:", err.message);
+        return res.status(500).send("RAW not supported on this system");
+      }
+    } else if (ext === '.avi' || ext === '.wmv' || ext === '.3gp') {
+      const hash = crypto.createHash('md5').update(filePath).digest('hex');
+      const tmpPath = path.join(os.tmpdir(), `orbit_${hash}.mp4`);
 
-      ffmpeg(filePath)
-        .outputFormat("mp4")
-        .videoCodec("libx264")
-        .audioCodec("aac")
-        .outputOptions([
-          "-preset ultrafast",
-          "-crf 28",
-          "-movflags frag_keyframe+empty_moov" // makes streamable MP4
-        ])
-        .on("error", err => {
-          console.error("ffmpeg error:", err);
-          if (!res.headersSent) res.status(500).send("Video conversion failed");
-          else res.end();
-        })
-        .pipe(res, { end: true });
+      // Serve cached transcode if it exists
+      if (fs.existsSync(tmpPath)) {
+        return res.sendFile(tmpPath);
+      }
+    
+      // Otherwise transcode to temp file first, then serve
+      await new Promise((resolve, reject) => {
+        ffmpeg(filePath)
+          .outputFormat("mp4")
+          .videoCodec("libx264")
+          .audioCodec("aac")
+          .outputOptions(["-preset ultrafast", "-crf 28", "-movflags +faststart"])
+          .on("error", reject)
+          .on("end", resolve)
+          .save(tmpPath);
+      });
+    
+      res.sendFile(tmpPath);
     } else {
       // Default: just serve file
       res.sendFile(filePath);
@@ -1040,7 +1069,12 @@ ipcMain.handle("index-files", async (event, folders) => {
 async function generateThumbnail(filePath, id) {
   const ext = path.extname(filePath).toLowerCase();
   const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"];
-  const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv"];
+  const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".3gp", ".flv"];
+  const rawExtensions = [
+    ".dng", ".cr2", ".nef", ".arw", ".orf", ".rw2",
+    ".raw", ".raf", ".pef", ".srw", ".x3f", ".kdc",
+    ".dcr", ".mrw", ".erf", ".3fr", ".mef", ".rwl", ".iiq"
+  ];
 
   const thumbnailsDir = path.join(dataDir, "thumbnails");
   if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true });
@@ -1058,6 +1092,22 @@ async function generateThumbnail(filePath, id) {
         .toFile(thumbnailPath);
 
       return thumbnailPath;
+    } else if (rawExtensions.includes(ext)) {
+      try {
+        const dcraw = require("dcraw");
+        const rawBuffer = fs.readFileSync(filePath);
+        const jpegBuffer = dcraw(rawBuffer, { extractThumbnail: true });
+        // Pipe through sharp to resize to thumbnail dimensions
+        await sharp(jpegBuffer, { failOnError: false })
+          .rotate()
+          .resize(200, 200, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toFile(thumbnailPath);
+        return thumbnailPath;
+      } catch (err) {
+        console.warn(`RAW thumbnail failed for ${filePath}:`, err.message);
+        return null;
+      }
     } else if (videoExtensions.includes(ext)) {
       // --- Video thumbnails ---
       await new Promise((resolve, reject) => {
@@ -2143,6 +2193,79 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
     title: t.countries.join(" – ") + ` ${new Date(t.start).getFullYear()}`,
     thumbnails: thumbsByTrip[t.id] || [],
   }));
+});
+
+ipcMain.handle("fetch-on-this-day", async () => {
+  try {
+    initDatabase();
+ 
+    const now = new Date();
+    // Zero-pad month and day so they match SQLite's strftime output
+    const todayMM = String(now.getMonth() + 1).padStart(2, "0");
+    const todayDD = String(now.getDate()).padStart(2, "0");
+    const currentYear = now.getFullYear();
+ 
+    // The same date-expression used throughout the app
+    const datePart = (fmt) => `
+      CASE
+        WHEN create_date_local IS NOT NULL
+          THEN strftime('${fmt}', create_date_local)
+        WHEN create_date IS NOT NULL
+          THEN strftime('${fmt}', datetime(create_date, 'unixepoch', 'localtime'))
+        ELSE
+          strftime('${fmt}', datetime(MIN(created, modified), 'unixepoch', 'localtime'))
+      END
+    `;
+ 
+    // Fetch all files whose month AND day match today, grouped by year,
+    // excluding the current year (those aren't "memories" yet).
+    const rows = db.prepare(`
+      SELECT
+        ${datePart('%Y')} AS year,
+        COUNT(*)          AS total,
+        GROUP_CONCAT(id)  AS ids
+      FROM files
+      WHERE
+        ${datePart('%m')} = ?
+        AND ${datePart('%d')} = ?
+        AND CAST(${datePart('%Y')} AS INTEGER) < ?
+      GROUP BY year
+      ORDER BY year DESC
+    `).all(todayMM, todayDD, currentYear);
+ 
+    if (!rows.length) return [];
+ 
+    // Grab up to 20 random image thumbnails per year in one pass
+    const thumbRows = db.prepare(`
+      SELECT id, thumbnail_path,
+        ${datePart('%Y')} AS year
+      FROM files
+      WHERE
+        file_type = 'image'
+        AND thumbnail_path IS NOT NULL
+        AND ${datePart('%m')} = ?
+        AND ${datePart('%d')} = ?
+        AND CAST(${datePart('%Y')} AS INTEGER) < ?
+      ORDER BY RANDOM()
+    `).all(todayMM, todayDD, currentYear);
+ 
+    // Group thumbnails by year (cap at 20 each)
+    const thumbsByYear = {};
+    for (const t of thumbRows) {
+      if (!thumbsByYear[t.year]) thumbsByYear[t.year] = [];
+      if (thumbsByYear[t.year].length < 20) thumbsByYear[t.year].push(t);
+    }
+ 
+    return rows.map((r) => ({
+      year: parseInt(r.year, 10),
+      total: r.total,
+      ids: r.ids.split(",").map(Number),
+      thumbnails: thumbsByYear[r.year] || [],
+    }));
+  } catch (err) {
+    console.error("fetch-on-this-day error:", err);
+    return [];
+  }
 });
 
 ipcMain.handle(

@@ -25,6 +25,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
   const [vacations, setVacations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [customMemories, setCustomMemories] = useState([]);
+  const [onThisDay, setOnThisDay] = useState([]);
 
   // All drag state lives in a single ref — no stale closure issues
   const drag = useRef({ active: false, fromIndex: null, toIndex: null });
@@ -60,12 +61,14 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     setTrips([]);
     setVacations([]);
     setCustomMemories([]);
+    setOnThisDay([]);
     if (selectedTab === "All") fetchAll();
     if (selectedTab === "Years") fetchYears();
     if (selectedTab === "Months") fetchMonths();
     if (selectedTab === "Vacations") fetchVacations();
     if (selectedTab === "Trips") fetchTrips();
     if (selectedTab === "Custom") fetchCustomMemories();
+    if (selectedTab === "On This Day") fetchOnThisDay();
   }, [selectedTab]);
 
   const fetchAll = async () => {
@@ -118,6 +121,18 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
       setLoading(false);
     } catch (err) {
       console.error("Failed to fetch custom memories:", err);
+    }
+  };
+
+  const fetchOnThisDay = async () => {
+    try {
+      setLoading(true);
+      const rows = await window.electron.ipcRenderer.invoke("fetch-on-this-day");
+      setOnThisDay(rows);
+      setLoading(false);
+    } catch (err) {
+      console.error("Failed to fetch on this day:", err);
+      setLoading(false);
     }
   };
 
@@ -194,18 +209,12 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
         }
       }
 
-      // Convert visual edge into the actual insertion index
-      // "top of card i" means insert before i → insertAt = i
-      // "bottom of card i" means insert after i → insertAt = i + 1
       const insertAt = edge === "top" ? toIndex : toIndex + 1;
-      // Clamp to valid range accounting for the removed dragged item
       const maxInsert = cards.length - 1;
       const clampedInsert = Math.min(insertAt, maxInsert);
 
       drag.current.toIndex = clampedInsert;
 
-      // Show indicator: if inserting before toIndex show top border on that card,
-      // if inserting after toIndex show bottom border on that card
       if (edge === "top") {
         setDropEdge({ index: toIndex, edge: "top" });
       } else {
@@ -216,7 +225,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
     const onMouseUp = () => {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
-
+    
       if (didDrag) {
         const from = drag.current.fromIndex;
         const to = drag.current.toIndex;
@@ -224,14 +233,17 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
           setCustomMemories((prev) => {
             const next = [...prev];
             const [moved] = next.splice(from, 1);
-            next.splice(to, 0, moved);
+            // After splicing `from` out, indices >= from shift down by 1.
+            // So if we're inserting after the original `from`, adjust by -1.
+            const adjustedTo = to > from ? to - 1 : to;
+            next.splice(adjustedTo, 0, moved);
             const order = next.map((m, i) => ({ id: m.id, sort_order: next.length - i }));
             window.electron.ipcRenderer.invoke("memory:reorder", { order });
             return next;
           });
         }
       }
-
+    
       drag.current = { active: false, fromIndex: null, toIndex: null };
       setDragIndex(null);
       setDropEdge(null);
@@ -325,6 +337,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
           <div
             key={m.id}
             className={`memory-box${isDragging ? " memory-box--dragging" : ""}${dropClass}`}
+            style={{ cursor: dragIndex === index ? "grabbing" : "default" }}
             onMouseDown={(e) => handleCardMouseDown(e, index)}
             onClick={() => {
               if (drag.current.active) return;
@@ -357,6 +370,43 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
       })}
     </div>
   );
+
+  const renderOnThisDay = () => {
+    const today = new Date();
+    const todayLabel = today.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+
+    if (onThisDay.length === 0) {
+      return (
+        <div className="memories-empty">
+          <p>No memories found for {todayLabel} in previous years.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="memories-grid">
+        {onThisDay.map((entry) => {
+          const yearsAgo = today.getFullYear() - entry.year;
+          const yearsAgoLabel = yearsAgo === 1 ? "1 year ago" : `${yearsAgo} years ago`;
+
+          return (
+            <div
+              key={entry.year}
+              className="memory-box"
+              onClick={() => onViewMemory(entry.ids)}
+            >
+              <div className="memory-text">
+                <div className="title">{entry.year}</div>
+                <div className="description">{yearsAgoLabel} · {todayLabel}</div>
+              </div>
+              <ThumbnailStrip thumbnails={entry.thumbnails} />
+              <div className="memory-count">{entry.total} items</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const renderAllBoxes = () => {
     const items = [
@@ -475,7 +525,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
       <div className="memories-main">
         <div className="settings-list">
           <ul>
-            {["All", "Custom", "Years", "Months", "Vacations", "Trips"].map((tab) => (
+            {["All", "On This Day", "Custom", "Years", "Months", "Vacations", "Trips"].map((tab) => (
               <li
                 key={tab}
                 className={`settings-list-item ${selectedTab === tab ? "settings-list-active" : ""} ${
@@ -497,6 +547,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
           {!loading && selectedTab === "Custom" && renderCustomMemories()}
           {!loading && selectedTab === "Vacations" && renderVacationBoxes()}
           {!loading && selectedTab === "Trips" && renderTripBoxes()}
+          {!loading && selectedTab === "On This Day" && renderOnThisDay()}
         </div>
       </div>
 

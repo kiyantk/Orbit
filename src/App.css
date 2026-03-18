@@ -460,7 +460,7 @@ select:disabled {
 }
 
 .video-element {
-  max-height: 500px;
+  max-height: 95%;
   max-width: 100%;
   /* border-radius: 0.5rem; */
   background: black;
@@ -566,10 +566,9 @@ select:disabled {
 }
 
 .fullscreen-video .video-element {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
 }
-
 
 .video-track-wrapper {
   position: relative;
@@ -1135,14 +1134,14 @@ select:focus {
 }
 
 .thumb-selected-addmode {
-  background-color: rgba(255, 255, 0, 0.268);
+  background-color: rgba(130, 253, 255, 0.268);
   border: 1px solid #0f0f12;
   z-index: 1;
 }
 
 .thumb-selected-removemode {
   background-color: rgba(255, 0, 0, 0.268);
-  border: 1px solid #af3a3a;
+  border: 1px solid #0f0f12;
   z-index: 1;
 }
 
@@ -1596,7 +1595,9 @@ select:focus {
 }
 
 .filter-static {
-  background-color: #484050;
+  background-color: #383838;
+  border: 1px solid #6d6d6d;
+  border-radius: 2px;
   font-size: 14px;
   padding: 2px 9px;
   user-select: none;
@@ -1693,11 +1694,6 @@ input[type="checkbox"] {
   .custom-cluster--medium { width: 36px; height: 36px; font-size: 12px; background: #5a5ee0; z-index: 2 }
   .custom-cluster--large  { width: 44px; height: 44px; font-size: 13px; background: #d06a26; z-index: 3 }
   .custom-cluster--xlarge { width: 52px; height: 52px; font-size: 14px; background: #9f0d0d; z-index: 4 }
-
-/* Cursor hint while hovering custom memory cards */
-.memories-grid .memory-box:active {
-  cursor: grabbing;
-}
 
 /* Card being dragged */
 .memory-box--dragging {
