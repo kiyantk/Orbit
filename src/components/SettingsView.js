@@ -61,41 +61,138 @@ const SettingsRow = ({ children }) => (
 // ─── Confirm Popup ────────────────────────────────────────────────────────────
 const ConfirmPopup = ({ message, subMessage, onConfirm, onCancel }) => (
   <div className="welcome-popup-overlay">
-          <div className="confirm-popup" style={{ maxWidth: 420 }}>
-            <div className="welcome-popup-top">
-              <div className="welcome-popup-inline">
-                <h2>Remove source(s)</h2>
-              </div>
-            </div>
-
-            <div className="welcome-popup-content">
-              <span style={{ color: "#ccc" }}>
-                {message}
-                <br /><br />
-                <strong>{subMessage}</strong>
-              </span>
-            </div>
-
-            <div className="settings-bottom-bar" style={{ gap: 8 }}>
-              <button
-                className="settings-cancel-btn"
-                style={{ backgroundColor: "#2d2a35" }}
-                onClick={onCancel}
-              >
-                No
-              </button>
-
-              <button
-                className="settings-save-btn"
-                style={{ backgroundColor: "#ff6b6b" }}
-                onClick={onConfirm}
-              >
-                Yes
-              </button>
-            </div>
-          </div>
+    <div className="confirm-popup" style={{ maxWidth: 420 }}>
+      <div className="welcome-popup-top">
+        <div className="welcome-popup-inline">
+          <h2>Remove source(s)</h2>
         </div>
+      </div>
+      <div className="welcome-popup-content">
+        <span style={{ color: "#ccc" }}>
+          {message}
+          <br /><br />
+          <strong>{subMessage}</strong>
+        </span>
+      </div>
+      <div className="settings-bottom-bar" style={{ gap: 8 }}>
+        <button className="settings-cancel-btn" style={{ backgroundColor: "#2d2a35" }} onClick={onCancel}>No</button>
+        <button className="settings-save-btn" style={{ backgroundColor: "#ff6b6b" }} onClick={onConfirm}>Yes</button>
+      </div>
+    </div>
+  </div>
 );
+
+// ─── Smart Search Status Panel ────────────────────────────────────────────────
+const SmartSearchStatus = () => {
+  const [status, setStatus] = useState({
+    modelReady: false,
+    initError: null,
+    total: 0,
+    done: 0,
+    percentage: 0,
+    paused: false,
+  });
+  const [loading, setLoading] = useState(true);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const s = await window.electron.ipcRenderer.invoke("embedding:get-status");
+      if (s) setStatus(s);
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  // Poll every 4 seconds
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 4000);
+    return () => clearInterval(interval);
+  }, [fetchStatus]);
+
+  // Also listen for push updates from the background service
+  useEffect(() => {
+    const handler = (data) => { if (data) setStatus(data); setLoading(false); };
+    window.electron.ipcRenderer.on("embedding-progress", handler);
+    return () => window.electron.ipcRenderer.removeListener("embedding-progress", handler);
+  }, []);
+
+  const isComplete = status.total > 0 && status.done >= status.total;
+  const percentage = status.total > 0 ? Math.round((status.done / status.total) * 100) : 0;
+
+  // ── Determine status label & colour ──
+  let statusLabel;
+  let statusColor;
+
+  if (loading) {
+    statusLabel = "Checking…";
+    statusColor = "#888";
+  } else if (status.initError) {
+    statusLabel = "Error loading model";
+    statusColor = "#ff9a9a";
+  } else if (!status.modelReady) {
+    statusLabel = "Loading CLIP model…";
+    statusColor = "#ffd577";
+  } else if (isComplete) {
+    statusLabel = "Complete";
+    statusColor = "#d8d8d8";
+  } else if (status.paused) {
+    statusLabel = "Paused";
+    statusColor = "#888";
+  } else if (status.total === 0) {
+    statusLabel = "No images indexed yet";
+    statusColor = "#888";
+  } else {
+    statusLabel = `Indexing in background… ${percentage}%`;
+    statusColor = "#8f8f8f";
+  }
+
+  return (
+    <div className="smart-search-status-panel">
+      <div className="smart-search-status-header">
+        <span className="smart-search-status-title">Smart Search</span>
+        <span className="smart-search-status-badge" style={{ color: statusColor }}>
+          {statusLabel}
+        </span>
+      </div>
+
+      {/* Progress bar */}
+      {status.modelReady && status.total > 0 && (
+        <>
+          <div className="smart-search-status-bar-track">
+            <div
+              className="smart-search-status-bar-fill"
+              style={{
+                width: `${percentage}%`,
+                backgroundColor: isComplete ? "#4caf82" : "#a78bfa",
+              }}
+            />
+          </div>
+          <div className="smart-search-status-counts">
+            {status.done.toLocaleString()} / {status.total.toLocaleString()} images
+          </div>
+        </>
+      )}
+
+      {/* Error detail */}
+      {status.initError && (
+        <div className="smart-search-status-error">
+          {status.initError}
+        </div>
+      )}
+
+      {/* Info line */}
+      {!status.initError && (
+        <div className="smart-search-status-info">
+          {isComplete
+            ? "All images are indexed. Use Smart Search to find photos by description."
+            : status.modelReady
+              ? "Running quietly in the background. The app will not be affected."
+              : "The CLIP model is downloaded once (~80 MB) and cached locally."}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const SettingsView = ({
@@ -114,9 +211,8 @@ const SettingsView = ({
   const [showHeicPopup, setShowHeicPopup] = useState(false);
   const [showToolsPopup, setShowToolsPopup] = useState(false);
   const [isFetchingUsage, setIsFetchingUsage] = useState(false);
-  const [storageUsage, setStorageUsage] = useState({ app: 0, index: 0, thumbnails: 0 });
+  const [storageUsage, setStorageUsage] = useState(null);
 
-  // confirmPopup: null | { message, subMessage, onConfirm }
   const [confirmPopup, setConfirmPopup] = useState(null);
 
   const ipc = useCallback(
@@ -315,7 +411,7 @@ const SettingsView = ({
     setIsFetchingUsage(true);
     try {
       const data = await ipc("get-storage-usage");
-      if (data) setStorageUsage({ app: data.appStorageUsed, index: data.dbSize, thumbnails: data.thumbSize });
+      if (data) setStorageUsage(data);
     } finally {
       setIsFetchingUsage(false);
     }
@@ -367,7 +463,7 @@ const SettingsView = ({
               <SettingsRow>
                 <div className="slider-wrapper">
                   <label className="switch">
-                    <input type="checkbox" id="settings-adjustheiccolors-checkbox" checked={!!settings.adjustHeicColors} onChange={handleCheckbox("adjustHeicColors")} />
+                    <input type="checkbox" checked={!!settings.adjustHeicColors} onChange={handleCheckbox("adjustHeicColors")} />
                     <div className="slider round"></div>
                   </label>
                 </div>
@@ -377,7 +473,7 @@ const SettingsView = ({
               <SettingsRow>
                 <div className="slider-wrapper">
                   <label className="switch">
-                    <input type="checkbox" id="settings-preloadheic-checkbox" checked={!!settings.preloadHeic} onChange={handleCheckbox("preloadHeic")} />
+                    <input type="checkbox" checked={!!settings.preloadHeic} onChange={handleCheckbox("preloadHeic")} />
                     <div className="slider round"></div>
                   </label>
                 </div>
@@ -406,7 +502,7 @@ const SettingsView = ({
               <SettingsRow>
                 <div className="slider-wrapper">
                   <label className="switch">
-                    <input type="checkbox" id="settings-nogutters-checkbox" checked={!!settings.noGutters} onChange={handleCheckbox("noGutters")} />
+                    <input type="checkbox" checked={!!settings.noGutters} onChange={handleCheckbox("noGutters")} />
                     <div className="slider round"></div>
                   </label>
                 </div>
@@ -438,21 +534,21 @@ const SettingsView = ({
                 driveLetterMap={settings.driveLetterMap || {}}
                 onSetDriveLetter={handleSetDriveLetter}
               />
-              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="settings-media-buttons">
                 <button className="welcome-popup-select-folders-btn" onClick={selectFolders} disabled={isIndexing}>Add Source</button>
                 <button className="welcome-popup-select-folders-btn" onClick={handleRemoveAll} disabled={isIndexing || (settings && !settings.indexedFolders.length)}>Remove All</button>
                 <button className="welcome-popup-select-folders-btn" onClick={() => setShowToolsPopup(true)} disabled={isIndexing || (settings && !settings.indexedFolders.length)}>Tools</button>
-                {missingHeicFiles.length > 0 && (
-                  <button className="welcome-popup-select-folders-btn" onClick={() => setShowHeicPopup(true)} disabled={isIndexing}>
-                    Generate HEIC Thumbnails
-                  </button>
-                )}
               </div>
               {indexingStatus && (
                 <div className="welcome-popup-status">
                   <span>{indexingStatus}</span><br /><span>Don't close the app</span>
                 </div>
               )}
+              <h3 style={{ marginTop: 18 }}>Smart search</h3>
+              {/* ── Smart Search Status ── */}
+              <div style={{ marginTop: 10 }}>
+                <SmartSearchStatus />
+              </div>
             </div>
           )}
 
@@ -469,21 +565,102 @@ const SettingsView = ({
                   {isFetchingUsage ? "Loading..." : "Fetch"}
                 </button>
               </SettingsRow>
-              {storageUsage.app !== 0 && (
-                <div className="storage-bar-container">
-                  <div className="storage-legend">
-                    {[
-                      { cls: "storage-legend-app", label: "App Total", val: storageUsage.app },
-                      { cls: "storage-legend-index", label: "Database", val: storageUsage.index },
-                      { cls: "storage-legend-thumbs", label: "Thumbnails", val: storageUsage.thumbnails },
-                    ].map(({ cls, label, val }) => (
-                      <span key={label} className="storage-legend-text">
-                        <div className={cls} />{label}: {val > 0 ? formatBytes(val) : "0 Bytes"}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
+          
+              {storageUsage && (() => {
+                const { appStorageUsed, dbSize, thumbSize, tables = {} } = storageUsage;
+              
+                const tableDefs = [
+                  { key: "files",         label: "File Index",      color: "#a78bfa" },
+                  { key: "embeddings",    label: "Smart Search", color: "#60a5fa" },
+                  { key: "memories",      label: "Memories",   color: "#f472b6" },
+                  { key: "tags",          label: "Tags",       color: "#34d399" },
+                  { key: "removed_files", label: "Removed",    color: "#fb523c" },
+                ];
+              
+                const dbOtherBytes = Math.max(0, dbSize - tableDefs.reduce((s, d) => s + (tables[d.key]?.bytes ?? 0), 0));
+              
+                // Bar excludes App Total (which is just dbSize + thumbSize, not additive)
+                const segments = [
+                  ...tableDefs.map(d => ({ label: d.label, color: d.color, bytes: tables[d.key]?.bytes ?? 0 })),
+                  { label: "DB overhead", color: "#afafaf", bytes: dbOtherBytes },
+                  { label: "Thumbnails",  color: "#fbbf24", bytes: thumbSize },
+                ].filter(s => s.bytes > 0);
+              
+                const total = (dbSize + thumbSize) || 1;
+              
+                const topItems = [
+                  { color: "#7e30fa", label: "App Total", val: appStorageUsed },
+                ];
+
+                const midItems = [
+                  { color: "#afafaf", label: "Database",   val: dbSize },
+                  { color: "#fbbf24", label: "Thumbnails", val: thumbSize },  // matches bar segment color
+                ];
+
+                const tableItems = tableDefs.map(d => ({
+                  color: d.color,
+                  label: d.label,
+                  val: tables[d.key]?.bytes ?? 0,
+                  rows: tables[d.key]?.rows ?? 0,
+                }));
+              
+                const dot = (color) => (
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: color, flexShrink: 0 }} />
+                );
+              
+                return (
+                  <>
+                    {/* Distribution bar — db segments + thumbnails, no "App Total" wrapper */}
+                    <div style={{ display: "flex", height: 10, borderRadius: 6, overflow: "hidden", marginTop: 12, width: "40%", gap: 2 }}>
+                      {segments.map((s, i) => (
+                        <div
+                          key={i}
+                          title={`${s.label}: ${formatBytes(s.bytes)}`}
+                          style={{
+                            width: `${(s.bytes / total) * 100}%`,
+                            backgroundColor: s.color,
+                            minWidth: s.bytes > 0 ? 3 : 0,
+                            transition: "width 0.3s ease",
+                          }}
+                        />
+                      ))}
+                    </div>                 
+                    {/* Legend */}
+                    <div className="storage-bar-container" style={{ marginTop: 12 }}>
+                      <div className="storage-legend">
+                        {/* App Total */}
+                        {topItems.map(({ color, label, val }) => (
+                          <span key={label} className="storage-legend-text">
+                            {dot(color)}
+                            {label}: {val > 0 ? formatBytes(val) : "0 Bytes"}
+                          </span>
+                        ))}
+
+                        <div style={{ width: "100%", height: 1, backgroundColor: "#2d2a35", margin: "6px 0" }} />
+                      
+                        {/* Database + Thumbnails */}
+                        {midItems.map(({ color, label, val }) => (
+                          <span key={label} className="storage-legend-text">
+                            {dot(color)}
+                            {label}: {val > 0 ? formatBytes(val) : "0 Bytes"}
+                          </span>
+                        ))}
+
+                        <div style={{ width: "100%", height: 1, backgroundColor: "#2d2a35", margin: "6px 0" }} />
+                      
+                        {/* Per-table breakdown */}
+                        {tableItems.map(({ color, label, val, rows }) => (
+                          <span key={label} className="storage-legend-text">
+                            {dot(color)}
+                            {label}: {val > 0 ? formatBytes(val) : "0 Bytes"}
+                            <span style={{ color: "#666", marginLeft: 4 }}>({rows.toLocaleString()})</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 
@@ -553,19 +730,19 @@ const SettingsView = ({
       {showHeicPopup && (
         <HeicPopup missingFiles={missingHeicFiles} onClose={() => setShowHeicPopup(false)} />
       )}
-
       {showToolsPopup && (
         <div className="welcome-popup-overlay">
           <div className="welcome-popup">
             <h2>Tools</h2>
             <p>Select which tool to run:</p>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginTop: 10, padding: "0 10px" }}>
+            <div className="tools-popup-content">
               {[
                 { label: "Reindex All", action: () => startIndex(settings.indexedFolders) },
                 { label: "Check Status", action: () => { setShowToolsPopup(false); checkStatusses(); } },
-                { label: "Fix IDs", action: fixIDs },
-                { label: "Fix Thumbnails", action: fixThumbnails },
+                { label: "Verify IDs", action: fixIDs },
+                { label: "Verify Thumbnails", action: fixThumbnails },
                 { label: "Cleanup Thumbnails", action: cleanupThumbnails },
+                { label: "Generate HEIC Thumbnails", action: () => { setShowHeicPopup(true) } },
                 { label: "Remove Mode", action: () => { setShowToolsPopup(false); enterRemoveMode(); } },
               ].map(({ label, action }) => (
                 <button key={label} className="welcome-popup-select-folders-btn" onClick={action}>{label}</button>

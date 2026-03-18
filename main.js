@@ -18,6 +18,9 @@ const lookup = require("coordinate_to_country");
 const fsPromises = fs.promises;
 const heicDecode = require("heic-decode");
 const { Worker } = require("worker_threads");
+const EmbeddingService = require("./embedding-service");
+let embeddingService = null;
+let _textPipeline = null;
 
 
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
@@ -58,6 +61,7 @@ app.whenReady().then(() => {
   mainWindow.once("ready-to-show", () => {
     splash.close();
     mainWindow.show();
+    setTimeout(startEmbeddingService, 3000);
   });
 
   app.on("browser-window-focus", () => {
@@ -399,6 +403,13 @@ function initDatabase() {
   }
 }
 
+function startEmbeddingService() {
+  if (embeddingService) return;
+  initDatabase();
+  embeddingService = new EmbeddingService(db, dataDir, () => mainWindow);
+  embeddingService.start();
+}
+
 ipcMain.handle("fix-media-ids", async () => {
   try {
     initDatabase();
@@ -535,15 +546,15 @@ ipcMain.handle("select-folders", async () => {
 
 function applyIdsFilter(db, ids) {
   db.prepare(`DROP TABLE IF EXISTS temp_ids`).run();
-  db.prepare(`CREATE TEMP TABLE temp_ids (id INTEGER PRIMARY KEY)`).run();
-
-  const insert = db.prepare(`INSERT INTO temp_ids (id) VALUES (?)`);
+  db.prepare(`CREATE TEMP TABLE temp_ids (id INTEGER PRIMARY KEY, rank INTEGER)`).run();
+ 
+  const insert = db.prepare(`INSERT INTO temp_ids (id, rank) VALUES (?, ?)`);
   const insertMany = db.transaction((ids) => {
-    for (const id of ids) insert.run(id);
+    ids.forEach((id, i) => insert.run(id, i));
   });
-
+ 
   insertMany(ids);
-
+ 
   return "id IN (SELECT id FROM temp_ids)";
 }
 
@@ -633,12 +644,17 @@ ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters =
     let orderSQL = "";
     if (filters.sortBy === "random") {
       orderSQL = "ORDER BY RANDOM()";
+    } else if (Array.isArray(filters.ids) && filters.ids.length > 0 && filters._smartSearch) {
+      // Smart search: preserve similarity rank order supplied by the caller.
+      // temp_ids.rank was populated in the same order as filters.ids.
+      orderSQL = `ORDER BY (SELECT rank FROM temp_ids WHERE temp_ids.id = files.id) ASC`;
     } else {
       const validSorts = ["media_id", "filename", "create_date_local", "created", "size"];
-      const safeSortBy = validSorts.includes(filters.sortBy) ? filters.sortBy : (settings && settings.defaultSort ? settings.defaultSort : "media_id");
+      const safeSortBy = validSorts.includes(filters.sortBy)
+        ? filters.sortBy
+        : (settings && settings.defaultSort ? settings.defaultSort : "media_id");
       const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC";
       if (filters.sortBy === "create_date_local") {
-        // Sort by local date string where available, fall back to create_date epoch
         orderSQL = `ORDER BY
           CASE
             WHEN create_date_local IS NOT NULL THEN create_date_local
@@ -1795,6 +1811,8 @@ ipcMain.handle("apply-heic-thumbnails", async (event, heicFiles) => {
 
 ipcMain.handle("get-storage-usage", async () => {
   try {
+    initDatabase();
+
     const dbFilePath = path.join(dataDir, "orbit-index.db");
     const thumbsPath = path.join(dataDir, "thumbnails");
 
@@ -1809,26 +1827,50 @@ ipcMain.handle("get-storage-usage", async () => {
       for (const file of fs.readdirSync(dirPath)) {
         const filePath = path.join(dirPath, file);
         const stats = fs.statSync(filePath);
-        if (stats.isDirectory()) {
-          totalSize += getDirectorySize(filePath);
-        } else {
-          totalSize += stats.size;
-        }
+        if (stats.isDirectory()) totalSize += getDirectorySize(filePath);
+        else totalSize += stats.size;
       }
       return totalSize;
     };
 
     const thumbSize = getDirectorySize(thumbsPath);
-    const totalDataSize = dbSize + thumbSize;
+
+    // Per-table row counts + byte estimates via dbstat
+    const tableNames = ["files", "embeddings", "memories", "tags", "removed_files"];
+    const tables = {};
+
+    for (const t of tableNames) {
+      try {
+        const row = db.prepare(`SELECT COUNT(*) as count FROM ${t}`).get();
+        tables[t] = { rows: row?.count ?? 0, bytes: 0 };
+      } catch {
+        tables[t] = { rows: 0, bytes: 0 };
+      }
+    }
+
+    try {
+      const statRows = db.prepare(`
+        SELECT name, SUM(payload) as payload_bytes
+        FROM dbstat
+        WHERE aggregate = TRUE
+        GROUP BY name
+      `).all();
+      for (const r of statRows) {
+        if (tables[r.name]) tables[r.name].bytes = r.payload_bytes ?? 0;
+      }
+    } catch {
+      // dbstat not available — bytes stay 0
+    }
 
     return {
-      appStorageUsed: totalDataSize,
+      appStorageUsed: dbSize + thumbSize,
       dbSize,
       thumbSize,
+      tables,
     };
   } catch (error) {
     console.error("Error getting storage usage:", error);
-    return { appStorageUsed: 0, dbSize: 0, thumbSize: 0 };
+    return { appStorageUsed: 0, dbSize: 0, thumbSize: 0, tables: {} };
   }
 });
 
@@ -2692,6 +2734,153 @@ ipcMain.handle("save-drive-letter-map", (event, map) => {
   }
 });
 
+/** Return current embedding progress */
+ipcMain.handle("embedding:get-status", () => {
+  if (!embeddingService) return { modelReady: false, total: 0, done: 0, percentage: 0 };
+  return embeddingService.getStatus();
+});
+ 
+/** Pause/resume from the renderer (optional — e.g. during active media browsing) */
+ipcMain.handle("embedding:pause",  () => { embeddingService?.pause();  return { ok: true }; });
+ipcMain.handle("embedding:resume", () => { embeddingService?.resume(); return { ok: true }; });
+ 
+/**
+ * Smart search: find the top-N most similar images to a text query.
+ * Returns an array of file IDs sorted by descending similarity.
+ * Embed the query text via the child process,
+ * then score all stored image vectors and return top-K file IDs.
+ */
+// ipcMain.handle("embedding:search", async (event, { query, topK = 200, threshold = 0.20 }) => {
+//   if (!embeddingService?._pipelineReady) {
+//     return { success: false, error: "Model not ready yet", results: [] };
+//   }
+ 
+//   try {
+//     // Get text embedding from child process
+//     const textVecArray = await embeddingService.embedText(query);
+//     const textVec = new Float32Array(textVecArray);
+
+//     // In main.js embedding:search handler, replace the single embedText call:
+//     // const phrases = [
+//     //   query,
+//     //   `a photo of ${query}`,
+//     //   `a picture of ${query}`,
+//     // ];
+
+//     // const embeddings = await Promise.all(
+//     //   phrases.map(p => embeddingService.embedText(p))
+//     // );
+
+//     // // Average the vectors
+//     // const dim = embeddings[0].length;
+//     // const avgVec = new Float32Array(dim);
+//     // for (const emb of embeddings) {
+//     //   for (let i = 0; i < dim; i++) avgVec[i] += emb[i] / embeddings.length;
+//     // }
+
+//     // // Re-normalise
+//     // const norm = Math.sqrt(avgVec.reduce((s, v) => s + v * v, 0)) || 1;
+//     // const textVec = avgVec.map(v => v / norm);
+ 
+//     initDatabase();
+//     const rows = db.prepare(`
+//       SELECT e.file_id, e.embedding
+//       FROM   embeddings e
+//       INNER  JOIN files f ON f.id = e.file_id
+//     `).all();
+ 
+//     if (!rows.length) return { success: true, results: [] };
+ 
+//     const scored = rows.map(row => {
+//       const imgVec = new Float32Array(
+//         row.embedding.buffer,
+//         row.embedding.byteOffset,
+//         row.embedding.byteLength / 4
+//       );
+//       let dot = 0;
+//       for (let i = 0; i < textVec.length; i++) dot += textVec[i] * imgVec[i];
+//       return { fileId: row.file_id, score: dot };
+//     });
+ 
+//     scored.sort((a, b) => b.score - a.score);
+
+//     // Filter out results below a similarity threshold.
+//     // CLIP dot products on normalised vectors range roughly 0.15–0.35 for this model.
+//     // 0.20 is a reasonable starting point — raise it to get stricter results.
+ 
+//     const SIMILARITY_THRESHOLD = 0.20;
+//     const filtered = scored.filter(r => r.score >= SIMILARITY_THRESHOLD).slice(0, topK);
+ 
+//     return {
+//       success: true,
+//       results: filtered.map(r => r.fileId),
+//       // Map of fileId → similarity score (0–1), so the UI can display confidence
+//       scores: Object.fromEntries(filtered.map(r => [r.fileId, r.score])),
+//     };
+//   } catch (err) {
+//     console.error("embedding:search error:", err);
+//     return { success: false, error: err.message, results: [] };
+//   }
+// });
+
+ipcMain.handle("embedding:search", async (event, { query, topK = 200, threshold = 0.20 }) => {
+  if (!embeddingService?._pipelineReady) {
+    return { success: false, error: "Model not ready yet", results: [] };
+  }
+ 
+  try {
+    const textVecArray = await embeddingService.embedText(query);
+ 
+    // Always re-normalise the text vector here, regardless of what the child did.
+    // CLIPTextModelWithProjection returns a projection that may not be unit length.
+    const textRaw  = new Float32Array(textVecArray);
+    const textNorm = Math.sqrt(textRaw.reduce((s, v) => s + v * v, 0)) || 1;
+    const textVec  = textRaw.map(v => v / textNorm);
+ 
+    initDatabase();
+    const rows = db.prepare(`
+      SELECT e.file_id, e.embedding
+      FROM   embeddings e
+      INNER  JOIN files f ON f.id = e.file_id
+    `).all();
+ 
+    if (!rows.length) return { success: true, results: [], scores: {} };
+ 
+    const scored = rows.map(row => {
+      const imgRaw = new Float32Array(
+        row.embedding.buffer,
+        row.embedding.byteOffset,
+        row.embedding.byteLength / 4
+      );
+ 
+      // Re-normalise image vector too — belt-and-suspenders in case the
+      // pipeline's normalize:true produced vectors that drifted from unit length.
+      const imgNorm = Math.sqrt(imgRaw.reduce((s, v) => s + v * v, 0)) || 1;
+ 
+      let dot = 0;
+      for (let i = 0; i < textVec.length; i++) dot += textVec[i] * (imgRaw[i] / imgNorm);
+ 
+      return { fileId: row.file_id, score: dot };
+    });
+ 
+    scored.sort((a, b) => b.score - a.score);
+ 
+    const SIMILARITY_THRESHOLD = threshold;
+    const filtered = scored
+      .filter(r => r.score >= SIMILARITY_THRESHOLD)
+      .slice(0, topK);
+ 
+    return {
+      success: true,
+      results: filtered.map(r => r.fileId),
+      scores:  Object.fromEntries(filtered.map(r => [r.fileId, r.score])),
+    };
+  } catch (err) {
+    console.error("embedding:search error:", err);
+    return { success: false, error: err.message, results: [] };
+  }
+});
+
 // Helper for use in Express routes and open-in-default-viewer:
 function getDriveLetterMap() {
   // Use getSettings if it exists, otherwise fall back to reading directly
@@ -2749,4 +2938,5 @@ ipcMain.on("quick-minimize", () => {
 // Properly shut down exiftool on exit
 app.on("before-quit", async () => {
   await exiftool.end();
+  embeddingService?.stop();
 });

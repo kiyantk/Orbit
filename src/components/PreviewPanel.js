@@ -120,7 +120,7 @@ const VideoControls = React.forwardRef(function VideoControls({ progress, isPlay
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey, selectedItemAvailable }) {
+export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey, selectedItemAvailable, smartScore }) {
   const videoRefNormal     = useRef(null);
   const trackRefNormal     = useRef(null);
   const videoRefFullscreen = useRef(null);
@@ -202,6 +202,8 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.key === "Escape" && isFullscreen) { closeFullscreen(); return; }
       if (e.key === " " || e.code === "Space") { e.preventDefault(); togglePlay(); }
     };
@@ -429,6 +431,13 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
         <MetaRow label="Modified At"  value={item.modified ? formatTimestamp(item.modified) : null} />
         <MetaRow label="Created At"   value={item.created  ? formatTimestamp(item.created)  : null} />
         <MetaRow label="Path"         value={item.path} />
+        {smartScore != null && (
+          <MetaRow
+            label="Similarity"
+            value={`${(smartScore * 100).toFixed(1)}%`}
+            title={`Raw CLIP cosine similarity: ${smartScore.toFixed(4)}`}
+          />
+        )}
         <MetaRow label="ID"           value={item.id ? item.media_id : null} />
 
         {tags.length > 0 && (

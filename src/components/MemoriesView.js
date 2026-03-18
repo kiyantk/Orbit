@@ -510,6 +510,7 @@ const MemoriesView = ({ switchMemoryMode, memoryMode, onAddMedia, onViewMemory }
               type="text"
               placeholder="Title"
               className="input"
+              maxLength={20}
               value={newMemory.title}
               onChange={(e) => setNewMemory({ ...newMemory, title: e.target.value })}
             />

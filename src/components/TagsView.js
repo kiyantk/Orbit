@@ -105,7 +105,7 @@ const handleSaveTag = async () => {
                   {tag.name}
                 </span>
               </td>
-              <td>{tag.description}</td>
+              <td className="tag-description" title={tag.description}>{tag.description}</td>
               <td>{tag.media_ids.length}</td>
               <td className="actions">
                 <button
@@ -157,12 +157,14 @@ const handleSaveTag = async () => {
               type="text"
               placeholder="Name"
               className="input"
+              maxLength={30}
               value={newTag.name}
               onChange={(e) => setNewTag({ ...newTag, name: e.target.value })}
             />
             <textarea
               placeholder="Description"
               className="textarea"
+              maxLength={100}
               value={newTag.description}
               onChange={(e) =>
                 setNewTag({ ...newTag, description: e.target.value })

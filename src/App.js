@@ -41,6 +41,32 @@ const App = () => {
 
   const handleActionPanelApply = (data) => {
     if (actionPanelType === "filter" || actionPanelType === "sort" || actionPanelType === "search") {
+    
+      if (data.searchBy === "smart") {
+        if (data.smartIds?.length > 0) {
+          setFilters({
+            ids: data.smartIds,
+            _smartSearch: true,
+            _smartScores: data.smartScores || {},
+            searchBy: "smart",
+            searchTerm: data.searchTerm,
+          });
+        } else if (data.searchTerm) {
+          // Search ran but returned zero results — pass an empty ids array so
+          // Explorer shows "No results" instead of keeping the previous view.
+          setFilters({
+            ids: [-1],
+            _smartSearch: true,
+            _smartScores: {},
+            searchBy: "smart",
+            searchTerm: data.searchTerm,
+          });
+        } else {
+          setFilters({});
+        }
+        return;
+      }
+    
       setFilters(data);
     } else if (actionPanelType === "shuffle-filter") {
       setShuffleFilters(data);
@@ -351,6 +377,11 @@ const checkFolderStatuses = useCallback(async () => {
                     currentSettings={settings}
                     panelKey={previewPanelKey}
                     selectedItemAvailable={selectedItemAvailable}
+                    smartScore={
+                      selectedItem && filters?._smartScores
+                        ? filters._smartScores[selectedItem.id] ?? null
+                        : null
+                    }
                   />
                 ) : (
                   <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>

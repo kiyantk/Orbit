@@ -1,6 +1,6 @@
-import { faUndo } from "@fortawesome/free-solid-svg-icons";
+import { faSearch, faUndo } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,6 +78,107 @@ function useFilterState(initial = EMPTY_FILTERS) {
 
   return { filters, setFilters, handleDateChange, handleYearChange, handleAgeChange, resetFilters };
 }
+
+// ─── Smart Search Input ────────────────────────────────────────────────────────
+
+/**
+ * The input + status display for Smart Search.
+ * Shows a progress bar while embeddings are being built,
+ * disables input until the model is ready.
+ */
+const SmartSearchInput = ({ status, value, isSearching, onChange, onSearch, onReset, threshold, setThreshold, topK, setTopK }) => {
+  const inputRef = useRef(null);
+ 
+  const embeddingsComplete = status.total > 0 && status.done >= status.total;
+  const embeddingsReady    = status.modelReady && status.done > 0;
+ 
+  let placeholder;
+  if (!status.modelReady && !status.initError) {
+    placeholder = "Loading CLIP model…";
+  } else if (status.initError) {
+    placeholder = "Model unavailable — check logs";
+  } else if (!embeddingsReady) {
+    placeholder = "Building index… please wait";
+  } else if (isSearching) {
+    placeholder = "Searching…";
+  } else {
+    placeholder = embeddingsComplete
+      ? "Search your photos (e.g. 'beach sunset')"
+      : `Search available (${status.done} / ${status.total} indexed)`;
+  }
+ 
+  const handleKey = (e) => {
+    if (e.key === "Enter" && embeddingsReady && !isSearching && value.trim()) {
+      onSearch(value, threshold, topK);
+    }
+  };
+ 
+  return (
+    <div className="smart-search-wrapper">
+      {/* Row 1: text input + go + reset */}
+      <div className="smart-search-input-row">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          disabled={!embeddingsReady || isSearching}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          className="smart-search-input"
+        />
+        {embeddingsReady && !isSearching && value.trim() && (
+          <button
+            className="smart-search-go-btn"
+            onClick={() => onSearch(value, threshold, topK)}
+            title="Search"
+          >
+            <FontAwesomeIcon icon={faSearch} />
+          </button>
+        )}
+        {isSearching && (
+          <span className="smart-search-spinner" title="Searching…" />
+        )}
+        <div className="action-panel-reset">
+          <button onClick={onReset} title="Clear smart search">
+            <FontAwesomeIcon icon={faUndo} />
+          </button>
+        </div>
+      </div>
+ 
+      {/* Row 2: threshold + topK — only shown when model is ready */}
+      {embeddingsReady && (
+        <div className="smart-search-options-row">
+          <label className="smart-search-option-label" title="Minimum similarity score (0–1). Higher = stricter matches only.">
+            Min score
+            <input
+              type="number"
+              className="smart-search-option-input"
+              // toFixed(2) ensures "0.20" is displayed instead of "0.2"
+              value={Number(threshold).toFixed(2)}
+              min={0.01}
+              max={0.99}
+              step={0.01}
+              onChange={e => setThreshold(Math.min(0.99, Math.max(0.01, Number(e.target.value))))}
+            />
+          </label>
+          <label className="smart-search-option-label" title="Maximum number of results to return.">
+            Max results
+            <input
+              type="number"
+              className="smart-search-option-input smart-search-option-max"
+              value={topK}
+              min={1}
+              // max={10000}
+              step={50}
+              onChange={e => setTopK(Math.max(1, Number(e.target.value)))}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ─── Shared FilterPanel component ─────────────────────────────────────────────
 
@@ -220,6 +321,19 @@ const ActionPanel = ({
 
   const [shuffleSettings, setShuffleSettings] = useState(DEFAULT_SHUFFLE_SETTINGS);
 
+  // ── Smart Search state ───────────────────────────────────────────────────
+  const [smartSearchTerm, setSmartSearchTerm] = useState("");
+  const [smartSearchStatus, setSmartSearchStatus] = useState({
+    modelReady: false,
+    total: 0,
+    done: 0,
+    percentage: 0,
+    initError: null,
+  });
+  const [smartThreshold, setSmartThreshold] = useState(0.20);
+  const [smartTopK,      setSmartTopK]      = useState(200);
+  const [isSearching, setIsSearching] = useState(false);
+
   const [options, setOptions] = useState({
     devices: [], folders: [], filetypes: [], mediaTypes: [],
     minDate: "", maxDate: "", countries: [], years: [], tags: [], ages: [],
@@ -270,6 +384,33 @@ const ActionPanel = ({
     }
   }, [activeView]);
 
+  // ── Poll embedding status when search panel is open ───────────────────────
+
+  useEffect(() => {
+    if (type !== "search") return;
+
+    const fetchStatus = async () => {
+      try {
+        const status = await window.electron.ipcRenderer.invoke("embedding:get-status");
+        if (status) setSmartSearchStatus(status);
+      } catch {}
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, [type]);
+
+  // ── Also update status in real-time via IPC event ─────────────────────────
+
+  useEffect(() => {
+    const handler = (data) => {
+      if (data) setSmartSearchStatus(data);
+    };
+    window.electron.ipcRenderer.on("embedding-progress", handler);
+    return () => window.electron.ipcRenderer.removeListener("embedding-progress", handler);
+  }, []);
+
   // ── Auto-apply on state change ─────────────────────────────────────────────
 
   useEffect(() => { if (type === "sort")   onApply({ sortBy, sortOrder }); }, [sortBy, sortOrder]);
@@ -282,7 +423,7 @@ const ActionPanel = ({
   // ── Reset helpers ──────────────────────────────────────────────────────────
 
   const resetSort   = () => { setSortBy(settings?.defaultSort ?? "media_id"); setSortOrder("desc"); };
-  const resetSearch = () => { setSearchBy("name"); setSearchTerm(""); };
+  const resetSearch = () => { setSearchBy("name"); setSearchTerm(""); setSmartSearchTerm(""); };
 
   // Explore filters also clear sort/search
   const handleExploreDate = (field, value) => { explore.handleDateChange(field, value); resetSort(); resetSearch(); };
@@ -291,6 +432,39 @@ const ActionPanel = ({
   const handleExploreFilter = (key, value)  => { explore.setFilters(prev => ({ ...prev, [key]: value })); resetSort(); resetSearch(); };
 
   const resetExploreAll = () => { explore.resetFilters(); resetSort(); resetSearch(); };
+
+  // ── Smart Search ──────────────────────────────────────────────────────────
+
+  const handleSmartSearch = useCallback(async (term, threshold = 0.20, topK = 200) => {
+    if (!term.trim()) {
+      onApply({ searchBy: "smart", searchTerm: "", smartIds: null, smartScores: null });
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const result = await window.electron.ipcRenderer.invoke("embedding:search", {
+        query: term,
+        topK,
+        threshold,
+      });
+      onApply({
+        searchBy:    "smart",
+        searchTerm:  term,
+        smartIds:    result.success ? result.results : [],
+        smartScores: result.success ? result.scores  : {},
+      });
+    } catch (err) {
+      console.error("Smart search error:", err);
+    }
+    setIsSearching(false);
+  }, [onApply]);
+
+  const handleSmartReset = useCallback(() => {
+    setSmartSearchTerm("");
+    setSmartThreshold(0.20);
+    setSmartTopK(200);
+    onApply({ searchBy: "smart", searchTerm: "", smartIds: null, smartScores: null });
+  }, [onApply]);
 
   // ── Reset on panel key change ──────────────────────────────────────────────
 
@@ -340,7 +514,6 @@ const ActionPanel = ({
             handleYearChange: handleExploreYear,
             handleAgeChange:  handleExploreAge,
             setFilters: (updater) => {
-              // Wrap setFilters to also reset sort/search for explore view
               explore.setFilters(updater);
               resetSort();
               resetSearch();
@@ -352,19 +525,55 @@ const ActionPanel = ({
 
       {type === "search" && (
         <div className="search-panel">
-          <select value={searchBy} onChange={e => { explore.resetFilters(); resetSort(); setSearchBy(e.target.value); }}>
+          <select
+            className="search-panel-type-select"
+            value={searchBy}
+            onChange={e => {
+              explore.resetFilters();
+              resetSort();
+              setSearchBy(e.target.value);
+              setSmartSearchTerm("");
+              // Clear any active smart search when switching away
+              if (e.target.value !== "smart") {
+                onApply({ searchBy: e.target.value, searchTerm: "" });
+              }
+            }}
+          >
             <option value="name">Name</option>
             <option value="media_id">ID</option>
+            <option value="smart">Smart</option>
           </select>
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={e => { explore.resetFilters(); resetSort(); setSearchTerm(e.target.value); }}
-            placeholder="Search..."
-          />
-          <div className="action-panel-reset">
-            <button onClick={resetSearch}><FontAwesomeIcon icon={faUndo} /></button>
-          </div>
+
+          {searchBy !== "smart" ? (
+            <>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={e => {
+                  explore.resetFilters();
+                  resetSort();
+                  setSearchTerm(e.target.value);
+                }}
+                placeholder="Search..."
+              />
+              <div className="action-panel-reset">
+                <button onClick={resetSearch}><FontAwesomeIcon icon={faUndo} /></button>
+              </div>
+            </>
+          ) : (
+            <SmartSearchInput
+              status={smartSearchStatus}
+              value={smartSearchTerm}
+              isSearching={isSearching}
+              onChange={setSmartSearchTerm}
+              onSearch={handleSmartSearch}
+              onReset={handleSmartReset}
+              threshold={smartThreshold}
+              setThreshold={setSmartThreshold}
+              topK={smartTopK}
+              setTopK={setSmartTopK}
+            />
+          )}
         </div>
       )}
 
@@ -398,7 +607,7 @@ const ActionPanel = ({
             <label>Hide Metadata: </label>
             <div className="slider-wrapper">
               <label className="switch">
-                <input type="checkbox" id="shuffle-chronological-checkbox" checked={shuffleSettings.hideInfo} onChange={e => setShuffleSettings(prev => ({ ...prev, hideInfo: e.target.checked }))} />
+                <input type="checkbox" checked={shuffleSettings.hideInfo} onChange={e => setShuffleSettings(prev => ({ ...prev, hideInfo: e.target.checked }))} />
                 <div className="slider round"></div>
               </label>
             </div>
@@ -407,7 +616,7 @@ const ActionPanel = ({
             <label>Smooth Transition: </label>
             <div className="slider-wrapper">
               <label className="switch">
-                <input type="checkbox" id="shuffle-chronological-checkbox" checked={shuffleSettings.smoothTransition} onChange={e => setShuffleSettings(prev => ({ ...prev, smoothTransition: e.target.checked }))} />
+                <input type="checkbox" checked={shuffleSettings.smoothTransition} onChange={e => setShuffleSettings(prev => ({ ...prev, smoothTransition: e.target.checked }))} />
                 <div className="slider round"></div>
               </label>
             </div>
@@ -416,7 +625,7 @@ const ActionPanel = ({
             <label>Chronological: </label>
             <div className="slider-wrapper">
               <label className="switch">
-                <input type="checkbox" id="shuffle-chronological-checkbox" checked={shuffleSettings.chronological} onChange={e => setShuffleSettings(prev => ({ ...prev, chronological: e.target.checked }))} />
+                <input type="checkbox" checked={shuffleSettings.chronological} onChange={e => setShuffleSettings(prev => ({ ...prev, chronological: e.target.checked }))} />
                 <div className="slider round"></div>
               </label>
             </div>

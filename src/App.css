@@ -252,6 +252,11 @@ body {
   font-size: 14px;
   border: 1px solid #4f4b52;
   border-radius: 2px;
+  cursor: pointer;
+}
+
+.sort-panel>button:hover {
+  background: #3e3942;
 }
 
 .sort-panel>button.active {
@@ -804,7 +809,6 @@ select:disabled {
   display: flex;
   gap: 10px;
   align-items: center;
-  height: 45px;
   user-select: none;
 }
 
@@ -1177,35 +1181,13 @@ select:focus {
   padding-bottom: 2px;
 }
 
-.storage-legend-app {
-  background-color: #570bd1;
-  width: 10px;
-  height: 10px;
-  border-radius: 5px;
-}
-
-.storage-legend-index {
-  background-color: #21bbf3;
-  width: 10px;
-  height: 10px;
-  border-radius: 5px;
-}
-
-.storage-legend-thumbs {
-  background-color: #a6a6a6;
-  width: 10px;
-  height: 10px;
-  border-radius: 5px;
-}
-
 .storage-legend-text {
   color: lightgray;
-  display: grid;
-  grid-template-columns: 10px auto;
+  display: flex;
   align-items: center;
   grid-gap: 6px;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.7;
 }
 
 .note-item-under-folder > div > span {
@@ -1794,4 +1776,239 @@ input[type="checkbox"] {
 }
 .slider-wrapper .slider.round:before {
   border-radius: 50%;
+}
+
+/* ============================================================
+   Smart Search — add to your main stylesheet
+   ============================================================ */
+
+/* ── Search panel wrapper (extends existing .search-panel) ── */
+.smart-search-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+}
+
+.smart-search-input-row {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.smart-search-input {
+  flex: 1;
+  min-width: 0;
+  width: 300px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+  outline: none;
+  padding: 2px 0;
+}
+
+.smart-search-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.smart-search-input::placeholder {
+  color: #666;
+  font-style: italic;
+}
+
+/* Go button */
+.smart-search-go-btn {
+  background: #2b272e;
+  border: 1px solid #4f4b52;
+  border-radius: 2px;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 3px 7px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.smart-search-go-btn:hover {
+  background: #3e3942;
+  color: #fff;
+}
+
+/* Spinner */
+.smart-search-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #555;
+  border-top-color: #a78bfa;
+  border-radius: 50%;
+  animation: smart-spin 0.7s linear infinite;
+  flex-shrink: 0;
+  position: relative;
+  top: 1px;
+}
+
+@keyframes smart-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Inline progress bar in search panel */
+.smart-search-progress {
+  position: relative;
+  height: 4px;
+  background: #2a2535;
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 0 2px;
+}
+
+.smart-search-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+.smart-search-progress-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: #888;
+  pointer-events: none;
+}
+
+
+/* ── Settings → Media tab: Smart Search status card ── */
+.smart-search-status-panel {
+  background: #100e14;
+  border: 1px solid #2e2a3a;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 40%;
+}
+
+.smart-search-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.smart-search-status-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ddd;
+}
+
+.smart-search-status-badge {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Progress bar track */
+.smart-search-status-bar-track {
+  height: 5px;
+  background: #201e26;
+  border: 1px solid #363636;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.smart-search-status-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.6s ease, background-color 0.4s ease;
+}
+
+.smart-search-status-counts {
+  font-size: 11px;
+  color: #666;
+}
+
+.smart-search-status-info {
+  font-size: 11px;
+  color: #555;
+  line-height: 1.4;
+}
+
+.smart-search-status-error {
+  font-size: 11px;
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.08);
+  border-radius: 4px;
+  padding: 6px 8px;
+  word-break: break-word;
+}
+
+.smart-search-options-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+ 
+.smart-search-option-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+  user-select: none;
+}
+ 
+.smart-search-option-input {
+  width: 62px;
+  background: #2b272e;
+  border: 1px solid #4f4b52;
+  border-radius: 2px;
+  color: white;
+  font-size: 12px;
+  padding: 1px 5px;
+  color-scheme: dark;
+}
+
+.smart-search-option-max {
+  width: 85px !important;
+}
+ 
+.smart-search-option-input:focus {
+  outline: none;
+  filter: brightness(1.2);
+}
+
+.search-panel-type-select {
+  max-height: 23.2px;
+}
+
+.tag-description {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 430px;
+}
+
+.settings-media-buttons {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #3f3f3f;
+}
+
+.tools-popup-content {
+  display: grid;
+  gap: 20px 25px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 15px;
+  padding: 0px 20px;
 }

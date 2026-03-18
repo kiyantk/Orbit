@@ -450,13 +450,18 @@ const ExplorerView = ({
     };
 
     const onMouseUp = () => {
-      dragPendingRef.current = null; // cancel pending drag → treat as click
+      dragPendingRef.current = null;
       if (!isDraggingRef.current) return;
-      if (isDraggingRef.current) dragJustFinishedRef.current = true;
+      dragJustFinishedRef.current = true;
       isDraggingRef.current = false;
       dragStartRef.current = null;
       dragRectRef.current = null;
       setDragContentRect(null);
+      // Clear the flag after the click event that may follow this mouseup has fired.
+      // If mouseup landed on empty space, no click fires and the flag would persist
+      // forever — eating the very next cell click. setTimeout(0) ensures it resets
+      // regardless of whether a click event follows.
+      setTimeout(() => { dragJustFinishedRef.current = false; }, 0);
     };
 
     window.addEventListener("mousemove", onMouseMove);
@@ -586,7 +591,10 @@ if (distFromTop < EDGE_SIZE) {
     loadingPages.current.clear();
     setTotalCount(null);
     fetchTotalCount();
-    fetchPageForIndex(0, true);
+    // Defer the first page fetch so the component can paint the loading
+    // state before the heavy data arrives, avoiding a visible freeze.
+    const t = setTimeout(() => fetchPageForIndex(0, true), 0);
+    return () => clearTimeout(t);
   }, [filters, fetchPageForIndex, fetchTotalCount]);
 
   // Reset scroll on filter change
@@ -653,7 +661,9 @@ if (distFromTop < EDGE_SIZE) {
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = async (e) => {
-      if (actionPanelType) return;
+      if (actionPanelType && !((e.key === "a" || e.key === "A") && e.ctrlKey)) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
 
       const isAddMode = explorerMode?.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory");
 
@@ -664,7 +674,10 @@ if (distFromTop < EDGE_SIZE) {
         if (addModeSelected.size === totalCount) {
           setAddModeSelected(new Set());
         } else {
-          setAddModeSelected(new Set(await fetchAllIds()));
+          const ids = await fetchAllIds();
+          // Merge with the existing selection so Ctrl+A across different
+          // filter states is additive rather than destructive.
+          setAddModeSelected((prev) => new Set([...prev, ...ids]));
         }
         return;
       }
