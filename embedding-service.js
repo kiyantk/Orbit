@@ -49,14 +49,18 @@ class EmbeddingService {
 
     this.total = 0;
     this.done  = 0;
+
+    this._lastEmit = null;
+    this._embeddingCache = null;
+    this._embeddingCacheSize = 0;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  start() {
+  start(modelCacheDir) {
     if (this._running || this._stopped) return;
     this._ensureTable();
-    this._spawnChild();
+    this._spawnChild(modelCacheDir);
   }
 
   pause()  { this._paused = true; }
@@ -127,22 +131,27 @@ class EmbeddingService {
         created_at INTEGER DEFAULT (strftime('%s', 'now'))
       )
     `);
+    // file_id IS the primary key, so it's already indexed — but the LEFT JOIN
+    // in _getNextFile needs the files side indexed too:
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_files_file_type ON files(file_type)
+    `);
   }
 
   // ── Child process ────────────────────────────────────────────────────────────
 
-  _spawnChild() {
+  _spawnChild(modelCacheDir) {
     const scriptPath = path.join(__dirname, "embedding-process.js");
     if (!fs.existsSync(scriptPath)) {
       this._initError = "embedding-process.js not found next to main.js";
       this._emitProgress();
       return;
     }
-
+  
     this._child = fork(scriptPath, [], {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
     });
-
+  
     this._child.stdout?.on("data", d => process.stdout.write(`[embed] ${d}`));
     this._child.stderr?.on("data", d => process.stderr.write(`[embed] ${d}`));
     this._child.on("message", (msg) => this._handleMessage(msg));
@@ -151,32 +160,33 @@ class EmbeddingService {
       console.warn(`[EmbeddingService] child exited (code=${code}, signal=${signal}), scheduling restart...`);
       this._pipelineReady = false;
       this._child = null;
-      // Reject any in-flight promises so callers don't hang forever
       this._imagePending?.reject(new Error("child exited"));
       this._imagePending = null;
       this._textPending?.reject(new Error("child exited"));
       this._textPending = null;
-      // Restart after the existing delay constant
       setTimeout(() => {
-        if (!this._stopped) this._spawnChild();
+        if (!this._stopped) this._spawnChild(modelCacheDir);
       }, CHILD_RESTART_DELAY_MS);
     });
     this._child.on("error", (err) => {
       console.error("[EmbeddingService] child process error:", err);
-      // The 'exit' event will fire after this and handle the restart
     });
+  
+    this._child.send({ type: "init", cacheDir: modelCacheDir });
+  }
 
-    // In dev:       <project>/models
-    // In prod:      <resources>/models  (copied there by extraResources)
-    const { app } = require("electron");
-    const modelCacheDir = app.isPackaged
-      ? path.join(process.resourcesPath, "models")
-      : path.join(__dirname, "models");
-
-    this._child.send({
-      type:     "init",
-      cacheDir: modelCacheDir,
-    });
+  _getEmbeddingCache() {
+    const currentSize = this.db.prepare(`SELECT COUNT(*) AS c FROM embeddings`).get()?.c ?? 0;
+    // Rebuild cache only if new embeddings were added
+    if (this._embeddingCache && currentSize === this._embeddingCacheSize) {
+      return this._embeddingCache;
+    }
+    const rows = this.db.prepare(`
+      SELECT e.file_id, e.embedding FROM embeddings e INNER JOIN files f ON f.id = e.file_id
+    `).all();
+    this._embeddingCache = rows;
+    this._embeddingCacheSize = currentSize;
+    return rows;
   }
 
   _handleMessage(msg) {
@@ -207,7 +217,8 @@ class EmbeddingService {
         } catch (err) {
           console.error("[EmbeddingService] DB write error:", err);
         }
-        this._emitProgress();
+        // Only emit progress every 50 files or every 5 seconds
+        if (this.done % 50 === 0) this._emitProgress();
         const ip = this._imagePending;
         this._imagePending = null;
         ip?.resolve();
@@ -351,13 +362,21 @@ class EmbeddingService {
   }
 
   _refreshCounts() {
-    try {
+    // Only refresh total occasionally — it barely changes
+    const now = Date.now();
+    if (!this._lastCountRefresh || now - this._lastCountRefresh > 10_000) {
       this.total = this.db.prepare(`SELECT COUNT(*) AS c FROM files WHERE file_type = 'image'`).get()?.c ?? 0;
-      this.done  = this.db.prepare(`SELECT COUNT(*) AS c FROM embeddings`).get()?.c ?? 0;
-    } catch {}
+      this._lastCountRefresh = now;
+    }
+    this.done = this.db.prepare(`SELECT COUNT(*) AS c FROM embeddings`).get()?.c ?? 0;
   }
 
   _emitProgress() {
+    const now = Date.now();
+    // Only emit at most once per second
+    if (this._lastEmit && now - this._lastEmit < 1000) return;
+    this._lastEmit = now;
+    
     const win = this.getMainWindow();
     if (!win || win.isDestroyed()) return;
     this._refreshCounts();

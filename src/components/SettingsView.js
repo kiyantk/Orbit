@@ -187,7 +187,7 @@ const SmartSearchStatus = () => {
             ? "All images are indexed. Use Smart Search to find photos by description."
             : status.modelReady
               ? "Running quietly in the background. The app will not be affected."
-              : "The CLIP model is downloaded once (~80 MB) and cached locally."}
+              : "Loading the local CLIP model..."}
         </div>
       )}
     </div>
@@ -492,8 +492,28 @@ const SettingsView = ({
                 </select>
               </SettingsRow>
               <SettingsRow>
-                <span>Item text:</span>
-                <select value={settings.itemText} onChange={handleSelect("itemText")} className="settings-itemstyle-select">
+                <span>Explorer layout:</span>
+                <select
+                  value={settings.explorerLayout}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateSettings({ explorerLayout: val, ...(val !== "grid" ? { noGutters: false } : {}) });
+                  }}
+                  className="settings-itemstyle-select"
+                >
+                  <option value="grid">Grid (default)</option>
+                  <option value="justified">Justified (collage)</option>
+                </select>
+              </SettingsRow>
+              <SettingsRow>
+                <span style={settings.explorerLayout !== "grid" ? { opacity: 0.4 } : {}}>Item text:</span>
+                <select
+                  value={settings.itemText}
+                  onChange={handleSelect("itemText")}
+                  className="settings-itemstyle-select"
+                  disabled={settings.explorerLayout !== "grid"}
+                  style={settings.explorerLayout !== "grid" ? { opacity: 0.4, cursor: "not-allowed" } : {}}
+                >
                   <option value="filename">Filename (default)</option>
                   <option value="datetime">Date</option>
                   <option value="none">None</option>
@@ -502,11 +522,25 @@ const SettingsView = ({
               <SettingsRow>
                 <div className="slider-wrapper">
                   <label className="switch">
-                    <input type="checkbox" checked={!!settings.noGutters} onChange={handleCheckbox("noGutters")} />
+                    <input
+                      type="checkbox"
+                      checked={!!settings.noGutters}
+                      onChange={handleCheckbox("noGutters")}
+                      disabled={settings.explorerLayout !== "grid"}
+                    />
                     <div className="slider round"></div>
                   </label>
                 </div>
-                <span>No gutters</span>
+                <span style={settings.explorerLayout !== "grid" ? { opacity: 0.4 } : {}}>No gutters</span>
+              </SettingsRow>
+              <SettingsRow>
+                <div className="slider-wrapper">
+                  <label className="switch">
+                    <input type="checkbox" checked={!!settings.explorerDateScroll} onChange={handleCheckbox("explorerDateScroll")} />
+                    <div className="slider round"></div>
+                  </label>
+                </div>
+                <span>Show timeline scrollbar</span>
               </SettingsRow>
             </div>
           )}
