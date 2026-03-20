@@ -1,374 +1,222 @@
 /**
- * embedding-service.js
+ * embedding-service.js  (proxy / coordinator — main-process safe)
+ *
+ * All heavy work (sharp, heic-decode, SQLite writes, child-process management)
+ * now runs inside embedding-worker.js (a Worker thread).  This file is the
+ * thin bridge between Electron's main process and that worker.
+ *
+ * Public API is unchanged so nothing else in main.js needs to change:
+ *   service.start()
+ *   service.pause() / service.resume() / service.stop()
+ *   service.getStatus()           → synchronous snapshot (best-effort)
+ *   service.embedText(text)       → Promise<Float32Array>
+ *   service._pipelineReady        → boolean (read by main.js search handler)
  */
 
-const path     = require("path");
-const fs       = require("fs");
-const { fork } = require("child_process");
+const path             = require("path");
+const { Worker }       = require("worker_threads");
 
-let sharp      = null;
-let heicDecode = null;
-
-function lazyLoadImageLibs() {
-  if (!sharp)      sharp      = require("sharp");
-  if (!heicDecode) heicDecode = require("heic-decode");
-}
-
-const INTER_FILE_DELAY_MS     = 400;
-const ERROR_BACKOFF_THRESHOLD = 5;
-const ERROR_BACKOFF_MS        = 30_000;
-const RECHECK_INTERVAL_MS     = 60_000;
-const CHILD_RESTART_DELAY_MS  = 8_000;
-
-const NEEDS_CONVERSION = new Set([".heic", ".heif", ".tif", ".tiff"]);
+// Timeout for embedText requests (ms). If the worker doesn't reply within
+// this window the promise rejects — prevents the search handler from hanging.
+const TEXT_EMBED_TIMEOUT_MS  = 15_000;
+const WORKER_RESTART_DELAY   = 5_000;
 
 class EmbeddingService {
   constructor(db, dataDir, getMainWindow) {
-    this.db            = db;
-    this.dataDir       = dataDir;
-    this.getMainWindow = getMainWindow;
+    // We keep references so we can (re)start the worker if it ever crashes.
+    this._dbPath        = db.name;          // better-sqlite3 exposes .name = file path
+    this._dataDir       = dataDir;
+    this._getMainWindow = getMainWindow;
 
-    this._child      = null;
-    this._paused     = false;
-    this._stopped    = false;
-    this._running    = false;
-    this._loopTimer  = null;
+    this._worker        = null;
+    this._stopped       = false;
 
+    // Mirrors of worker state — updated whenever the worker posts "progress"
     this._pipelineReady = false;
     this._initError     = null;
+    this._total         = 0;
+    this._done          = 0;
+    this._paused        = false;
 
-    // ── Pending slots ──────────────────────────────────────────────────────
-    // One slot for the background image loop, one slot for user text queries.
-    // They are completely independent so a search never blocks (or is blocked
-    // by) the background embed loop.
-    this._imagePending = null;  // { resolve, reject }
-    this._textPending  = null;  // { resolve, reject } — only one at a time
-
-    this._consecutiveErrors = 0;
-    this._skippedIds        = new Set();
-
-    this.total = 0;
-    this.done  = 0;
+    // Pending text-embed requests keyed by requestId
+    this._textCallbacks = new Map();   // requestId → { resolve, reject, timer }
+    this._nextRequestId = 1;
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────────
+  // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   start() {
-    if (this._running || this._stopped) return;
-    this._ensureTable();
-    this._spawnChild();
+    if (this._worker || this._stopped) return;
+    this._spawnWorker();
   }
 
-  pause()  { this._paused = true; }
+  pause()  {
+    this._paused = true;
+    this._worker?.postMessage({ type: "pause" });
+  }
+
   resume() {
-    if (this._paused) {
-      this._paused = false;
-      this._scheduleLoop(100);
-    }
+    this._paused = false;
+    this._worker?.postMessage({ type: "resume" });
   }
 
   stop() {
     this._stopped = true;
-    this._paused  = false;
-    clearTimeout(this._loopTimer);
-    this._running = false;
-    if (this._child) {
-      try { this._child.send({ type: "stop" }); } catch {}
-      setTimeout(() => { try { this._child.kill(); } catch {} }, 1000);
-      this._child = null;
+    if (this._worker) {
+      this._worker.postMessage({ type: "stop" });
+      // Give the worker a moment to clean up its child process, then terminate
+      setTimeout(() => {
+        try { this._worker?.terminate(); } catch {}
+        this._worker = null;
+      }, 2000);
     }
-    this._imagePending?.reject(new Error("stopped"));
-    this._imagePending = null;
-    this._textPending?.reject(new Error("stopped"));
-    this._textPending = null;
+    // Reject all pending text requests
+    for (const [id, cb] of this._textCallbacks) {
+      clearTimeout(cb.timer);
+      cb.reject(new Error("EmbeddingService stopped"));
+    }
+    this._textCallbacks.clear();
   }
 
+  // ── Status (synchronous best-effort snapshot) ───────────────────────────────
+
   getStatus() {
-    this._refreshCounts();
     return {
       modelReady: this._pipelineReady,
       initError:  this._initError,
-      total:      this.total,
-      done:       this.done,
+      total:      this._total,
+      done:       this._done,
       paused:     this._paused,
       stopped:    this._stopped,
-      percentage: this.total > 0 ? Math.round((this.done / this.total) * 100) : 0,
+      percentage: this._total > 0
+        ? Math.round((this._done / this._total) * 100)
+        : 0,
     };
   }
 
-  // ── Text embedding — independent of the image loop ─────────────────────────
-  // Queues one text request at a time. If a previous text request is still
-  // in flight it is replaced (the caller always wants the latest query).
+  // ── Text embedding ──────────────────────────────────────────────────────────
 
   embedText(text) {
     return new Promise((resolve, reject) => {
-      if (!this._child || !this._pipelineReady) {
+      if (!this._worker || !this._pipelineReady) {
         return reject(new Error("pipeline not ready"));
       }
 
-      // If a previous text request is pending, cancel it (stale query)
-      if (this._textPending) {
-        this._textPending.reject(new Error("superseded"));
-        this._textPending = null;
-      }
+      const requestId = this._nextRequestId++;
 
-      this._textPending = { resolve, reject };
-      this._child.send({ type: "embedText", text });
+      // Auto-timeout so the search handler never hangs
+      const timer = setTimeout(() => {
+        if (this._textCallbacks.has(requestId)) {
+          this._textCallbacks.delete(requestId);
+          reject(new Error("embedText timeout"));
+        }
+      }, TEXT_EMBED_TIMEOUT_MS);
+
+      this._textCallbacks.set(requestId, { resolve, reject, timer });
+      this._worker.postMessage({ type: "embedText", text, requestId });
     });
   }
 
-  // ── SQLite table ─────────────────────────────────────────────────────────────
+  // ── Worker management ───────────────────────────────────────────────────────
 
-  _ensureTable() {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS embeddings (
-        file_id    INTEGER PRIMARY KEY,
-        embedding  BLOB NOT NULL,
-        created_at INTEGER DEFAULT (strftime('%s', 'now'))
-      )
-    `);
-  }
+  _spawnWorker() {
+    const workerPath = path.join(__dirname, "embedding-worker.js");
 
-  // ── Child process ────────────────────────────────────────────────────────────
+    this._worker = new Worker(workerPath);
 
-  _spawnChild() {
-    const scriptPath = path.join(__dirname, "embedding-process.js");
-    if (!fs.existsSync(scriptPath)) {
-      this._initError = "embedding-process.js not found next to main.js";
-      this._emitProgress();
-      return;
-    }
-
-    this._child = fork(scriptPath, [], {
-      stdio: ["pipe", "pipe", "pipe", "ipc"],
-    });
-
-    this._child.stdout?.on("data", d => process.stdout.write(`[embed] ${d}`));
-    this._child.stderr?.on("data", d => process.stderr.write(`[embed] ${d}`));
-    this._child.on("message", (msg) => this._handleMessage(msg));
-    this._child.on("exit", (code, signal) => {
+    this._worker.on("message",  (msg) => this._handleWorkerMessage(msg));
+    this._worker.on("error",    (err) => console.error("[EmbeddingService] worker error:", err));
+    this._worker.on("exit", (code) => {
       if (this._stopped) return;
-      console.warn(`[EmbeddingService] child exited (code=${code}, signal=${signal}), scheduling restart...`);
+      console.warn(`[EmbeddingService] worker exited (code=${code}), restarting…`);
       this._pipelineReady = false;
-      this._child = null;
-      // Reject any in-flight promises so callers don't hang forever
-      this._imagePending?.reject(new Error("child exited"));
-      this._imagePending = null;
-      this._textPending?.reject(new Error("child exited"));
-      this._textPending = null;
-      // Restart after the existing delay constant
+      this._worker        = null;
+
+      // Reject all pending text requests — they belong to the dead worker
+      for (const [, cb] of this._textCallbacks) {
+        clearTimeout(cb.timer);
+        cb.reject(new Error("worker restarted"));
+      }
+      this._textCallbacks.clear();
+
       setTimeout(() => {
-        if (!this._stopped) this._spawnChild();
-      }, CHILD_RESTART_DELAY_MS);
-    });
-    this._child.on("error", (err) => {
-      console.error("[EmbeddingService] child process error:", err);
-      // The 'exit' event will fire after this and handle the restart
+        if (!this._stopped) this._spawnWorker();
+      }, WORKER_RESTART_DELAY);
     });
 
-    // In dev:       <project>/models
-    // In prod:      <resources>/models  (copied there by extraResources)
+    // Determine model cache dir the same way main.js does
     const { app } = require("electron");
     const modelCacheDir = app.isPackaged
       ? path.join(process.resourcesPath, "models")
       : path.join(__dirname, "models");
 
-    this._child.send({
-      type:     "init",
-      cacheDir: modelCacheDir,
+    this._worker.postMessage({
+      type:         "start",
+      dbPath:       this._dbPath,
+      dataDir:      this._dataDir,
+      modelCacheDir,
     });
   }
 
-  _handleMessage(msg) {
+  _handleWorkerMessage(msg) {
     switch (msg.type) {
 
-      case "ready":
-        this._pipelineReady = true;
-        this._initError     = null;
-        this._emitProgress();
-        this._scheduleLoop(500);
-        break;
+      // ── Background progress update ────────────────────────────────────────
+      case "progress": {
+        this._pipelineReady = msg.modelReady;
+        this._initError     = msg.initError  ?? null;
+        this._total         = msg.total;
+        this._done          = msg.done;
+        this._paused        = msg.paused;
 
-      case "initError":
-        this._pipelineReady = false;
-        this._initError     = msg.error;
-        this._emitProgress();
-        break;
-
-      // ── Image result ───────────────────────────────────────────────────────
-      case "embedResult": {
-        const buffer = Buffer.from(new Float32Array(msg.embedding).buffer);
-        try {
-          this.db.prepare(
-            `INSERT OR REPLACE INTO embeddings (file_id, embedding) VALUES (?, ?)`
-          ).run(msg.fileId, buffer);
-          this._consecutiveErrors = 0;
-          this.done++;
-        } catch (err) {
-          console.error("[EmbeddingService] DB write error:", err);
+        // Forward to renderer (same event name as before)
+        const win = this._getMainWindow();
+        if (win && !win.isDestroyed()) {
+          win.webContents.send("embedding-progress", {
+            modelReady: msg.modelReady,
+            initError:  msg.initError,
+            total:      msg.total,
+            done:       msg.done,
+            paused:     msg.paused,
+            percentage: msg.percentage,
+          });
         }
-        this._emitProgress();
-        const ip = this._imagePending;
-        this._imagePending = null;
-        ip?.resolve();
         break;
       }
 
-      case "embedError": {
-        console.warn("[EmbeddingService] embed error for file", msg.fileId, ":", msg.error);
-        this._skippedIds.add(msg.fileId);
-        // Do NOT increment _consecutiveErrors here. This file is permanently
-        // skipped, so it cannot recur and doesn't indicate a systemic problem.
-        this._emitProgress();
-        const ip = this._imagePending;
-        this._imagePending = null;
-        ip?.resolve();
-        break;
-      }
-
-      // ── Text result ────────────────────────────────────────────────────────
+      // ── Text embedding response ───────────────────────────────────────────
       case "textResult": {
-        const tp = this._textPending;
-        this._textPending = null;
-        tp?.resolve(msg.embedding);
+        const cb = this._textCallbacks.get(msg.requestId);
+        if (cb) {
+          clearTimeout(cb.timer);
+          this._textCallbacks.delete(msg.requestId);
+          cb.resolve(msg.embedding);
+        }
         break;
       }
 
       case "textError": {
-        const tp = this._textPending;
-        this._textPending = null;
-        tp?.reject(new Error(msg.error));
+        const cb = this._textCallbacks.get(msg.requestId);
+        if (cb) {
+          clearTimeout(cb.timer);
+          this._textCallbacks.delete(msg.requestId);
+          // Don't reject on "superseded" — that's an expected race, not an error
+          if (msg.error === "superseded") {
+            cb.reject(new Error("superseded"));
+          } else {
+            cb.reject(new Error(msg.error));
+          }
+        }
+        break;
+      }
+
+      // ── Log forwarding ────────────────────────────────────────────────────
+      case "log": {
+        const fn = console[msg.level] ?? console.log;
+        fn(`[embed-worker] ${msg.message}`);
         break;
       }
     }
-  }
-
-  // ── Processing loop ──────────────────────────────────────────────────────────
-
-  _scheduleLoop(delayMs = INTER_FILE_DELAY_MS) {
-    clearTimeout(this._loopTimer);
-    if (this._stopped) return;
-    this._running   = true;
-    this._loopTimer = setTimeout(() => this._loop(), delayMs);
-  }
-
-  async _loop() {
-    if (this._stopped || this._paused) { this._running = false; return; }
-    if (!this._pipelineReady)          { this._running = false; return; }
- 
-    // Backoff only triggers for conversion failures (not child embed errors).
-    // After waiting, reset the counter so the next batch gets a fresh start.
-    if (this._consecutiveErrors >= ERROR_BACKOFF_THRESHOLD) {
-      console.warn(`[EmbeddingService] ${this._consecutiveErrors} consecutive conversion errors, backing off ${ERROR_BACKOFF_MS}ms`);
-      this._consecutiveErrors = 0;
-      this._scheduleLoop(ERROR_BACKOFF_MS);
-      return;
-    }
- 
-    const file = this._getNextFile();
-    if (!file) {
-      this._refreshCounts();
-      this._emitProgress();
-      this._running   = false;
-      this._loopTimer = setTimeout(() => { this._running = true; this._loop(); }, RECHECK_INTERVAL_MS);
-      return;
-    }
- 
-    const ext = path.extname(file.path).toLowerCase();
-    if (NEEDS_CONVERSION.has(ext)) {
-      const imageBuffer = await this._convertToJpegBuffer(file);
-      if (!imageBuffer) {
-        // Conversion failed — skip permanently, count as a conversion error
-        this._skippedIds.add(file.id);
-        this._consecutiveErrors++;
-        this._scheduleLoop(INTER_FILE_DELAY_MS);
-        return;
-      }
-      // Conversion succeeded — send buffer, reset conversion error streak
-      this._consecutiveErrors = 0;
-      await new Promise((resolve) => {
-        this._imagePending = { resolve, reject: resolve };
-        this._child.send({
-          type: "embed",
-          fileId: file.id,
-          filePath: file.path,
-          imageBuffer: imageBuffer.toString("base64"),
-        });
-      });
-    } else {
-      // Normal image — send path directly, no conversion error tracking needed
-      await new Promise((resolve) => {
-        this._imagePending = { resolve, reject: resolve };
-        this._child.send({ type: "embed", fileId: file.id, filePath: file.path });
-      });
-    }
- 
-    this._scheduleLoop(INTER_FILE_DELAY_MS);
-  }
-
-  // ── HEIC / TIFF → JPEG ────────────────────────────────────────────────────
-
-  async _convertToJpegBuffer(file) {
-    const ext = path.extname(file.path).toLowerCase();
-    try {
-      lazyLoadImageLibs();
-      if (ext === ".heic" || ext === ".heif") {
-        const inputBuffer = fs.readFileSync(file.path);
-        const heicImage   = await heicDecode({ buffer: inputBuffer });
-        return await sharp(heicImage.data, {
-          raw: { width: heicImage.width, height: heicImage.height, channels: 4 },
-        })
-          .resize(512, 512, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 85 })
-          .toBuffer();
-      }
-      if (ext === ".tif" || ext === ".tiff") {
-        return await sharp(file.path)
-          .resize(512, 512, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 85 })
-          .toBuffer();
-      }
-    } catch (err) {
-      console.warn(`[EmbeddingService] conversion failed for ${file.path}:`, err.message);
-    }
-    return null;
-  }
-
-  // ── DB helpers ────────────────────────────────────────────────────────────────
-
-  _getNextFile() {
-    const skipped    = [...this._skippedIds];
-    const excludeSQL = skipped.length ? `AND f.id NOT IN (${skipped.join(",")})` : "";
-    return this.db.prepare(`
-      SELECT f.id, f.path
-      FROM   files f
-      LEFT   JOIN embeddings e ON f.id = e.file_id
-      WHERE  f.file_type = 'image'
-        AND  e.file_id IS NULL
-        ${excludeSQL}
-      LIMIT 1
-    `).get() ?? null;
-  }
-
-  _refreshCounts() {
-    try {
-      this.total = this.db.prepare(`SELECT COUNT(*) AS c FROM files WHERE file_type = 'image'`).get()?.c ?? 0;
-      this.done  = this.db.prepare(`SELECT COUNT(*) AS c FROM embeddings`).get()?.c ?? 0;
-    } catch {}
-  }
-
-  _emitProgress() {
-    const win = this.getMainWindow();
-    if (!win || win.isDestroyed()) return;
-    this._refreshCounts();
-    win.webContents.send("embedding-progress", {
-      modelReady: this._pipelineReady,
-      initError:  this._initError,
-      total:      this.total,
-      done:       this.done,
-      paused:     this._paused,
-      percentage: this.total > 0 ? Math.round((this.done / this.total) * 100) : 0,
-    });
   }
 }
 
