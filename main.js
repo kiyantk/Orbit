@@ -324,9 +324,7 @@ const defaultConfig = {
   itemText: "filename", // "filename", "datetime" or "none"
   noGutters: false,
   preloadHeic: false,
-  driveLetterMap: {},
-  explorerLayout: "grid",
-  explorerDateScroll: false
+  driveLetterMap: {}
 };
 
 // Database
@@ -434,33 +432,11 @@ function initDatabase() {
   }
 }
 
-let embeddingWorker = null;
-const pendingTextRequests = new Map(); // reqId → { resolve, reject }
-let reqIdCounter = 0;
-
 function startEmbeddingService() {
-  if (embeddingWorker) return;
+  if (embeddingService) return;
   initDatabase();
-
-  const modelCacheDir = app.isPackaged
-    ? path.join(process.resourcesPath, "models")
-    : path.join(__dirname, "models");
-
-  embeddingWorker = new Worker(path.join(__dirname, "embedding-worker.js"), {
-    workerData: { dbPath, dataDir, modelCacheDir }
-  });
-
-  embeddingWorker.on("message", (msg) => {
-    if (msg.type === "embedding-progress") {
-      mainWindow?.webContents.send("embedding-progress", msg.payload);
-    }
-  });
-
-  embeddingWorker.on("error", (err) => console.error("[EmbeddingWorker]", err));
-  embeddingWorker.on("exit",  (code) => {
-    console.warn("[EmbeddingWorker] exited with code", code);
-    embeddingWorker = null;
-  });
+  embeddingService = new EmbeddingService(db, dataDir, () => mainWindow);
+  embeddingService.start();
 }
 
 ipcMain.handle("fix-media-ids", async () => {
@@ -2883,21 +2859,13 @@ ipcMain.handle("save-drive-letter-map", (event, map) => {
 
 /** Return current embedding progress */
 ipcMain.handle("embedding:get-status", () => {
-  return new Promise((resolve) => {
-    if (!embeddingWorker) return resolve({ modelReady: false, total: 0, done: 0, percentage: 0 });
-    const reqId = ++reqIdCounter;
-    // One-shot listener pattern
-    const handler = (msg) => {
-      if (msg.type === "status") { embeddingWorker.off("message", handler); resolve(msg.payload); }
-    };
-    embeddingWorker.on("message", handler);
-    embeddingWorker.postMessage({ type: "getStatus" });
-  });
+  if (!embeddingService) return { modelReady: false, total: 0, done: 0, percentage: 0 };
+  return embeddingService.getStatus();
 });
  
 /** Pause/resume from the renderer (optional — e.g. during active media browsing) */
-ipcMain.handle("embedding:pause",  () => { embeddingWorker?.postMessage({ type: "pause" });  return { ok: true }; });
-ipcMain.handle("embedding:resume", () => { embeddingWorker?.postMessage({ type: "resume" }); return { ok: true }; });
+ipcMain.handle("embedding:pause",  () => { embeddingService?.pause();  return { ok: true }; });
+ipcMain.handle("embedding:resume", () => { embeddingService?.resume(); return { ok: true }; });
  
 /**
  * Smart search: find the top-N most similar images to a text query.
@@ -2979,22 +2947,61 @@ ipcMain.handle("embedding:resume", () => { embeddingWorker?.postMessage({ type: 
 // });
 
 ipcMain.handle("embedding:search", async (event, { query, topK = 200, threshold = 0.20 }) => {
-  if (!embeddingWorker) return { success: false, error: "not ready", results: [] };
-
-  return new Promise((resolve, reject) => {
-    const reqId = ++reqIdCounter;
-    const handler = (msg) => {
-      if (msg.reqId !== reqId) return;
-      embeddingWorker.off("message", handler);
-      if (msg.type === "searchResult") {
-        resolve({ success: true, results: msg.results, scores: msg.scores });
-      } else {
-        resolve({ success: false, error: msg.error, results: [] });
-      }
+  if (!embeddingService?._pipelineReady) {
+    return { success: false, error: "Model not ready yet", results: [] };
+  }
+ 
+  try {
+    const textVecArray = await embeddingService.embedText(query);
+ 
+    // Always re-normalise the text vector here, regardless of what the child did.
+    // CLIPTextModelWithProjection returns a projection that may not be unit length.
+    const textRaw  = new Float32Array(textVecArray);
+    const textNorm = Math.sqrt(textRaw.reduce((s, v) => s + v * v, 0)) || 1;
+    const textVec  = textRaw.map(v => v / textNorm);
+ 
+    initDatabase();
+    const rows = db.prepare(`
+      SELECT e.file_id, e.embedding
+      FROM   embeddings e
+      INNER  JOIN files f ON f.id = e.file_id
+    `).all();
+ 
+    if (!rows.length) return { success: true, results: [], scores: {} };
+ 
+    const scored = rows.map(row => {
+      const imgRaw = new Float32Array(
+        row.embedding.buffer,
+        row.embedding.byteOffset,
+        row.embedding.byteLength / 4
+      );
+ 
+      // Re-normalise image vector too — belt-and-suspenders in case the
+      // pipeline's normalize:true produced vectors that drifted from unit length.
+      const imgNorm = Math.sqrt(imgRaw.reduce((s, v) => s + v * v, 0)) || 1;
+ 
+      let dot = 0;
+      for (let i = 0; i < textVec.length; i++) dot += textVec[i] * (imgRaw[i] / imgNorm);
+ 
+      return { fileId: row.file_id, score: dot };
+    });
+ 
+    scored.sort((a, b) => b.score - a.score);
+ 
+    const SIMILARITY_THRESHOLD = threshold;
+    const filtered = scored
+      .filter(r => r.score >= SIMILARITY_THRESHOLD)
+      .slice(0, topK);
+ 
+    return {
+      success: true,
+      results: filtered.map(r => r.fileId),
+      scores:  Object.fromEntries(filtered.map(r => [r.fileId, r.score])),
     };
-    embeddingWorker.on("message", handler);
-    embeddingWorker.postMessage({ type: "search", query, topK, threshold, reqId });
-  });
+  } catch (err) {
+    console.error("embedding:search error:", err);
+    return { success: false, error: err.message, results: [] };
+  }
 });
 
 // Helper for use in Express routes and open-in-default-viewer:
