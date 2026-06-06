@@ -1,12 +1,22 @@
 import React, { useEffect, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faArrowRight } from "@fortawesome/free-solid-svg-icons";
+import TagPill from "./TagPill";
 
-const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem }) => {
+const ContextMenu = ({
+  x,
+  y,
+  item,
+  onClose,
+  revealFromContextMenu,
+  onRemoveItem,
+  onFindSimilar,
+}) => {
   const menuRef = useRef(null);
   const [showTags, setShowTags] = useState(false);
   const [tags, setTags] = useState([]);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [hasEmbedding, setHasEmbedding] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -18,6 +28,12 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
+  useEffect(() => {
+    window.electron.ipcRenderer
+      .invoke("embedding:has-embedding", item.id)
+      .then(setHasEmbedding);
+  }, [item.id]);
+
   // Load tags when submenu opens
   useEffect(() => {
     if (showTags) {
@@ -26,17 +42,6 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
       });
     }
   }, [showTags]);
-
-  const getContrastColor = (hex) => {
-    if (!hex) return "#000";
-    const c = hex.substring(1);
-    const rgb = parseInt(c, 16);
-    const r = (rgb >> 16) & 0xff;
-    const g = (rgb >> 8) & 0xff;
-    const b = rgb & 0xff;
-    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    return luminance > 150 ? "#000" : "#fff";
-  };
 
   // Toggle tag assignment for current item
   const handleTagToggle = async (tag) => {
@@ -54,8 +59,8 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
         prev.map((t) =>
           t.id === tag.id
             ? { ...t, media_ids: t.media_ids.filter((id) => id !== item.id) }
-            : t
-        )
+            : t,
+        ),
       );
     } else {
       // Tag
@@ -67,8 +72,8 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
         prev.map((t) =>
           t.id === tag.id
             ? { ...t, media_ids: [...(t.media_ids || []), item.id] }
-            : t
-        )
+            : t,
+        ),
       );
     }
   };
@@ -76,7 +81,7 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
   const revealFromCtx = () => {
     revealFromContextMenu(item);
     onClose();
-  }
+  };
 
   return (
     <div
@@ -122,6 +127,24 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
         <div
           style={{
             padding: "6px 12px",
+            cursor: hasEmbedding ? "pointer" : "default",
+            whiteSpace: "nowrap",
+            textAlign: "left",
+            opacity: hasEmbedding ? 1 : 0.4,
+          }}
+          className={hasEmbedding ? "context-menu-item" : ""}
+          onMouseEnter={() => setShowTags(false)}
+          onClick={() => {
+            if (!hasEmbedding) return;
+            onFindSimilar(item);
+            onClose();
+          }}
+        >
+          Find similar
+        </div>
+        <div
+          style={{
+            padding: "6px 12px",
             cursor: "pointer",
             whiteSpace: "nowrap",
             textAlign: "left",
@@ -130,7 +153,8 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
           className="context-menu-item"
           onMouseEnter={() => setShowTags(true)}
         >
-          Add Tag <FontAwesomeIcon style={{ float: "right" }} icon={faArrowRight} />
+          Add Tag{" "}
+          <FontAwesomeIcon style={{ float: "right" }} icon={faArrowRight} />
         </div>
         <div
           style={{
@@ -146,7 +170,7 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
         >
           Remove
         </div>
-        <span className="context-menu-filename">{ item.filename }</span>
+        <span className="context-menu-filename">{item.filename}</span>
       </div>
 
       {/* Tag submenu */}
@@ -187,18 +211,7 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
                   checked={isTagged}
                   onChange={() => handleTagToggle(tag)}
                 />
-                <span
-                  className="tag-pill"
-                  style={{
-                    backgroundColor: tag.color || "#555",
-                    color: getContrastColor(tag.color),
-                    marginRight: 4,
-                    padding: "2px 6px",
-                    borderRadius: 4,
-                  }}
-                >
-                  {tag.name}
-                </span>
+                <TagPill tag={tag} style={{ marginRight: 4 }} />
               </label>
             );
           })}
@@ -221,7 +234,8 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
                 <strong>{item.filename}</strong>
                 <br />
                 from the index?
-                <br /><br />
+                <br />
+                <br />
                 This does not delete the original file.
                 <br />
                 This action cannot be undone.
@@ -241,9 +255,9 @@ const ContextMenu = ({ x, y, item, onClose, revealFromContextMenu, onRemoveItem 
                 className="settings-save-btn"
                 style={{ backgroundColor: "#ff6b6b" }}
                 onClick={() => {
-                  onRemoveItem(item.id)
-                  setShowRemoveConfirm(false)
-                  onClose()
+                  onRemoveItem(item.id);
+                  setShowRemoveConfirm(false);
+                  onClose();
                 }}
               >
                 Yes

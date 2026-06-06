@@ -1,0 +1,26 @@
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+
+  padding: 3px 8px;
+
+  border-radius: 4px;
+  outline: 2px solid;
+
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1;
+
+  white-space: nowrap;
+  user-select: none;
+
+  /* Remove blurry/glowy appearance */
+  box-shadow: none;
+
+  /* No animations */
+  transition: none;
+
+  /* Make text render sharper */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}

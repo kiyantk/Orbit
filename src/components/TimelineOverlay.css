@@ -1,0 +1,76 @@
+.tl-rail {
+  position: absolute;
+  right: 15px;
+  top: 0;
+  width: 52px;
+  z-index: 20;
+  cursor: ns-resize;
+  user-select: none;
+  background: linear-gradient(90deg, transparent, #00000070);
+}
+
+.tl-year {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.tl-year-label {
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  transition: color 0.1s;
+}
+
+.tl-year-label.active {
+  font-weight: 500;
+  color: white;
+}
+
+.tl-year-label.inactive {
+  font-weight: 400;
+  color: rgb(225, 225, 225);
+}
+
+.tl-hover-line {
+  position: absolute;
+  left: 0;
+  right: -1px;
+  height: 1px;
+  background: #7c7386;
+  pointer-events: none;
+}
+
+.tl-pill {
+  position: absolute;
+  right: 25px;
+  margin-bottom: 5px;
+  border: 1px solid #484050;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+  background: #15131a;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 0.1s, transform 0.1s;
+  transform-origin: right center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  z-index: 21;
+  user-select: none;
+}
+
+.tl-pill.visible {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.tl-pill.hidden {
+  opacity: 0;
+  transform: translateY(-50%) translateX(6px);
+}

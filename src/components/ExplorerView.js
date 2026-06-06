@@ -1,12 +1,17 @@
 // ExplorerView.jsx
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { FixedSizeGrid as Grid } from "react-window";
-import InfiniteLoader from "react-window-infinite-loader";
+import { Grid, AutoSizer, InfiniteLoader } from "react-virtualized";
 import "./ExplorerView.css";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faArrowRight, faVideo, faXmark } from "@fortawesome/free-solid-svg-icons";
+import {
+  faArrowRight,
+  faVideo,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
 import ContextMenu from "./ContextMenu";
 import { SnackbarProvider, enqueueSnackbar } from "notistack";
+import TimelineOverlay from "./TimelineOverlay";
+import OverviewMosaic from "./OverviewMosaic";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const BASE_COLUMN_WIDTH = 130;
@@ -52,6 +57,7 @@ const ExplorerView = ({
   explorerMode,
   setExplorerMode,
   explorerScale,
+  onFindSimilar,
 }) => {
   const [totalCount, setTotalCount] = useState(null);
   const [containerWidth, setContainerWidth] = useState(1200);
@@ -63,11 +69,16 @@ const ExplorerView = ({
   const [itemToReveal, setItemToReveal] = useState(null);
   const [noGutters, setNoGutters] = useState(false);
   const [, forceUpdate] = useState(0);
+  const [currentScrollTop, setCurrentScrollTop] = useState(0);
+  const [monthData, setMonthData] = useState(null);
+  const [actualScrollHeight, setActualScrollHeight] = useState(0);
+  const overviewIndexRef = useRef([]);
+  const overviewRequestId = useRef(0);
 
   // ─── Drag-select state ────────────────────────────────────────────────────
   const [dragContentRect, setDragContentRect] = useState(null); // { left, top, width, height } in content coords (drives visual)
 
-  const itemsRef = useRef({});
+  const itemsRef = useRef([]);
   const idToIndex = useRef(new Map());
   const loadingPages = useRef(new Set());
   const gridRef = useRef(null);
@@ -78,12 +89,12 @@ const ExplorerView = ({
   const loadMoreTimeout = useRef(null);
 
   // ─── Drag-select refs ─────────────────────────────────────────────────────
-  const dragStartRef = useRef(null);         // { x, y } viewport coords at mousedown
-  const dragScrollTopRef = useRef(0);        // live scrollTop during drag
-  const dragStartScrollTop = useRef(0);      // scrollTop captured at mousedown
+  const dragStartRef = useRef(null); // { x, y } viewport coords at mousedown
+  const dragScrollTopRef = useRef(0); // live scrollTop during drag
+  const dragStartScrollTop = useRef(0); // scrollTop captured at mousedown
   const dragPreExisting = useRef(new Set()); // selection snapshot before drag started
   const isDraggingRef = useRef(false);
-  const dragRectRef = useRef(null);          // mirrors dragRect without triggering re-renders mid-drag
+  const dragRectRef = useRef(null); // mirrors dragRect without triggering re-renders mid-drag
   const lastMouseY = useRef(0);
   const dragPendingRef = useRef(null); // { x, y, addModeSelected snapshot } while waiting to confirm drag
   const dragJustFinishedRef = useRef(false);
@@ -92,13 +103,18 @@ const ExplorerView = ({
   const columnWidth = BASE_COLUMN_WIDTH * scale;
   const rowHeight = BASE_ROW_HEIGHT * scale;
   const gutterSize = noGutters ? 0 : GUTTER;
-  const columnCount = Math.max(1, Math.floor(containerWidth / (columnWidth + gutterSize)));
+  const columnCount = Math.max(
+    1,
+    Math.floor(containerWidth / (columnWidth + gutterSize)),
+  );
   const rowCount = totalCount ? Math.ceil(totalCount / columnCount) : 0;
   const gridHeight = Math.max(400, window.innerHeight - 71);
+  const totalHeight = rowCount * rowHeight;
+  const isOverviewMode = scale < 0.4;
 
   // Cell size including gutter (what react-window uses as stride)
   const cellStride = columnWidth + gutterSize;
-  const rowStride  = rowHeight;   // react-window rowHeight already accounts for the cell height
+  const rowStride = rowHeight; // react-window rowHeight already accounts for the cell height
 
   // ─── Item text label ──────────────────────────────────────────────────────
   const getItemName = useCallback(
@@ -106,7 +122,8 @@ const ExplorerView = ({
       const mode = currentSettings?.itemText ?? "filename";
       if (mode === "none") return undefined;
       if (mode === "datetime") {
-        if (item.create_date_local) return formatLocalDateString(item.create_date_local);
+        if (item.create_date_local)
+          return formatLocalDateString(item.create_date_local);
         if (item.create_date) return formatTimestamp(item.create_date);
         const earliest = [item.created, item.modified].filter(Boolean);
         if (earliest.length) return formatTimestamp(Math.min(...earliest));
@@ -114,14 +131,14 @@ const ExplorerView = ({
       }
       return item.filename;
     },
-    [currentSettings?.itemText]
+    [currentSettings?.itemText],
   );
 
   // ─── Item store helpers ───────────────────────────────────────────────────
   const addItems = useCallback((rows, offset) => {
     rows.forEach((row, i) => {
       const idx = offset + i;
-      itemsRef.current[idx] = row;
+      itemsRef.current[offset + i] = row;
       idToIndex.current.set(row.id, idx);
     });
     forceUpdate((x) => x + 1);
@@ -149,12 +166,15 @@ const ExplorerView = ({
         loadingPages.current.delete(pageIndex);
       }
     },
-    [filters, currentSettings, addItems]
+    [filters, currentSettings, addItems],
   );
 
   const fetchTotalCount = useCallback(async () => {
     try {
-      const count = await window.electron.ipcRenderer.invoke("get-filtered-files-count", { filters });
+      const count = await window.electron.ipcRenderer.invoke(
+        "get-filtered-files-count",
+        { filters },
+      );
       const n = Number(count) || 0;
       setTotalCount(n);
       filteredCountUpdated(n || null);
@@ -192,7 +212,7 @@ const ExplorerView = ({
         }, 50);
       });
     },
-    [fetchPageForIndex]
+    [fetchPageForIndex],
   );
 
   // ─── Tags ─────────────────────────────────────────────────────────────────
@@ -208,19 +228,26 @@ const ExplorerView = ({
       const tag = freshTags?.[0];
       if (!tag) return;
 
-      const isTagged = Array.isArray(tag.media_ids) && tag.media_ids.includes(item.id);
+      const isTagged =
+        Array.isArray(tag.media_ids) && tag.media_ids.includes(item.id);
       if (isTagged) {
-        await window.electron.ipcRenderer.invoke("tag:remove-item", { tagId: tag.id, mediaId: item.id });
+        await window.electron.ipcRenderer.invoke("tag:remove-item", {
+          tagId: tag.id,
+          mediaId: item.id,
+        });
         enqueueSnackbar(`Removed tag '${tag.name}' from selected item`);
       } else {
-        await window.electron.ipcRenderer.invoke("tag:add-item", { tagId: tag.id, mediaId: item.id });
+        await window.electron.ipcRenderer.invoke("tag:add-item", {
+          tagId: tag.id,
+          mediaId: item.id,
+        });
         enqueueSnackbar(`Added tag '${tag.name}' to selected item`);
       }
 
       await getTags();
       onTagAssign(item);
     },
-    [getTags, onTagAssign]
+    [getTags, onTagAssign],
   );
 
   // ─── Selection helpers ────────────────────────────────────────────────────
@@ -229,7 +256,7 @@ const ExplorerView = ({
       onSelect(item, type);
       setSelectedItem(item);
     },
-    [onSelect]
+    [onSelect],
   );
 
   const handleClick = useCallback(
@@ -241,7 +268,7 @@ const ExplorerView = ({
         handleSelect(item, "single");
       }
     },
-    [handleSelect]
+    [handleSelect],
   );
 
   const handleAddModeClick = useCallback((item) => {
@@ -272,12 +299,19 @@ const ExplorerView = ({
   // ─── HEIC prefetch ────────────────────────────────────────────────────────
   const handleMouseEnter = useCallback(
     (item) => {
-      if (!currentSettings?.preloadHeic || item.extension !== ".heic" || !folderStatuses[item.folder_path]) return;
+      if (
+        !currentSettings?.preloadHeic ||
+        item.extension !== ".heic" ||
+        !folderStatuses[item.folder_path]
+      )
+        return;
       prefetchTimer.current = setTimeout(() => {
-        fetch(`http://localhost:54055/prefetch-heic/${encodeURIComponent(item.path)}`).catch(() => {});
+        fetch(
+          `http://localhost:54055/prefetch-heic/${encodeURIComponent(item.path)}`,
+        ).catch(() => {});
       }, 300);
     },
-    [currentSettings?.preloadHeic, folderStatuses]
+    [currentSettings?.preloadHeic, folderStatuses],
   );
 
   const handleMouseLeave = useCallback(
@@ -285,10 +319,12 @@ const ExplorerView = ({
       if (!currentSettings?.preloadHeic) return;
       clearTimeout(prefetchTimer.current);
       if (item?.extension === ".heic") {
-        fetch(`http://localhost:54055/cancel-heic/${encodeURIComponent(item.path)}`).catch(() => {});
+        fetch(
+          `http://localhost:54055/cancel-heic/${encodeURIComponent(item.path)}`,
+        ).catch(() => {});
       }
     },
-    [currentSettings?.preloadHeic]
+    [currentSettings?.preloadHeic],
   );
 
   // ─── Scroll handling ──────────────────────────────────────────────────────
@@ -296,12 +332,16 @@ const ExplorerView = ({
     ({ scrollTop, scrollUpdateWasRequested }) => {
       // Keep drag scroll tracker in sync
       dragScrollTopRef.current = scrollTop;
+      setCurrentScrollTop(scrollTop);
 
       if (scrollUpdateWasRequested || isRestoringScrollRef.current) return;
-      anchorIndexRef.current = Math.max(0, Math.floor(scrollTop / rowHeight) * columnCount);
+      anchorIndexRef.current = Math.max(
+        0,
+        Math.floor(scrollTop / rowHeight) * columnCount,
+      );
       if (scrollTop !== 0) setScrollPosition(scrollTop);
     },
-    [rowHeight, columnCount, setScrollPosition]
+    [rowHeight, columnCount, setScrollPosition],
   );
 
   // ─── Drag-select: compute which indices are within a rect ─────────────────
@@ -318,11 +358,17 @@ const ExplorerView = ({
 
       // Which columns are touched?
       const colStart = Math.max(0, Math.floor(left / cellStride));
-      const colEnd   = Math.min(columnCount - 1, Math.floor((right - 1) / cellStride));
+      const colEnd = Math.min(
+        columnCount - 1,
+        Math.floor((right - 1) / cellStride),
+      );
 
       // Which rows are touched?
       const rowStart = Math.max(0, Math.floor(top / rowStride));
-      const rowEnd   = Math.min(Math.ceil(totalCount / columnCount) - 1, Math.floor((bottom - 1) / rowStride));
+      const rowEnd = Math.min(
+        Math.ceil(totalCount / columnCount) - 1,
+        Math.floor((bottom - 1) / rowStride),
+      );
 
       const indices = [];
       for (let r = rowStart; r <= rowEnd; r++) {
@@ -333,7 +379,7 @@ const ExplorerView = ({
       }
       return indices;
     },
-    [totalCount, columnCount, cellStride, rowStride]
+    [totalCount, columnCount, cellStride, rowStride],
   );
 
   // ─── Drag-select: apply rect to selection ────────────────────────────────
@@ -341,38 +387,38 @@ const ExplorerView = ({
     (viewportRect) => {
       if (!nodeRef.current) return;
 
-    const gridEl = nodeRef.current.querySelector(".explorer-grid");
-    const gridBounds = (gridEl ?? nodeRef.current).getBoundingClientRect();
-        
-    const gridOriginX = gridBounds.left;
-    const gridOriginY = gridBounds.top;
+      const gridEl = nodeRef.current.querySelector(".explorer-grid");
+      const gridBounds = (gridEl ?? nodeRef.current).getBoundingClientRect();
+
+      const gridOriginX = gridBounds.left;
+      const gridOriginY = gridBounds.top;
 
       // Convert the two viewport anchor points to container-relative coords.
       // x1/y1 is where the drag started, x2/y2 is the current mouse position.
       const relStartX = viewportRect.x1 - gridOriginX;
       const relStartY = viewportRect.y1 - gridOriginY;
-      const relCurX   = viewportRect.x2 - gridOriginX;
-      const relCurY   = viewportRect.y2 - gridOriginY;
+      const relCurX = viewportRect.x2 - gridOriginX;
+      const relCurY = viewportRect.y2 - gridOriginY;
 
       // Convert both points to content-space using their respective scrollTops.
       // The start point is anchored to the scrollTop captured at mousedown; the
       // current point uses live scrollTop. Scrolling therefore expands/contracts
       // the content rect naturally without flickering previously-covered rows.
       const startContentY = relStartY + dragStartScrollTop.current;
-      const curContentY   = relCurY   + dragScrollTopRef.current;
+      const curContentY = relCurY + dragScrollTopRef.current;
 
       const contentRect = {
-        left:   Math.min(relStartX, relCurX),
-        top:    Math.min(startContentY, curContentY),
-        right:  Math.max(relStartX, relCurX),
+        left: Math.min(relStartX, relCurX),
+        top: Math.min(startContentY, curContentY),
+        right: Math.max(relStartX, relCurX),
         bottom: Math.max(startContentY, curContentY),
       };
 
       // Update the visual overlay in content-space coords
       setDragContentRect({
-        left:   contentRect.left,
-        top:    contentRect.top,
-        width:  contentRect.right  - contentRect.left,
+        left: contentRect.left,
+        top: contentRect.top,
+        width: contentRect.right - contentRect.left,
         height: contentRect.bottom - contentRect.top,
       });
 
@@ -396,12 +442,15 @@ const ExplorerView = ({
         return next;
       });
     },
-    [getIndicesInRect]
+    [getIndicesInRect],
   );
 
   // ─── Drag-select mouse handlers ───────────────────────────────────────────
   const isAddModeActive = useCallback(() => {
-    return explorerMode?.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory");
+    return (
+      explorerMode?.enabled &&
+      (explorerMode.type === "tag" || explorerMode.type === "memory")
+    );
   }, [explorerMode]);
 
   const handleGridMouseDown = useCallback(
@@ -417,7 +466,7 @@ const ExplorerView = ({
         selection: new Set(addModeSelected),
       };
     },
-    [isAddModeActive, addModeSelected]
+    [isAddModeActive, addModeSelected],
   );
 
   // Global mousemove / mouseup during drag (attached to window)
@@ -430,15 +479,18 @@ const ExplorerView = ({
         if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
           // Commit the drag
           isDraggingRef.current = true;
-          dragStartRef.current = { x: dragPendingRef.current.x, y: dragPendingRef.current.y };
+          dragStartRef.current = {
+            x: dragPendingRef.current.x,
+            y: dragPendingRef.current.y,
+          };
           dragStartScrollTop.current = dragPendingRef.current.scrollTop;
           dragPreExisting.current = dragPendingRef.current.selection;
           dragPendingRef.current = null;
         }
       }
-    
+
       if (!isDraggingRef.current || !dragStartRef.current) return;
-    
+
       const rect = {
         x1: dragStartRef.current.x,
         y1: dragStartRef.current.y,
@@ -461,7 +513,9 @@ const ExplorerView = ({
       // If mouseup landed on empty space, no click fires and the flag would persist
       // forever — eating the very next cell click. setTimeout(0) ensures it resets
       // regardless of whether a click event follows.
-      setTimeout(() => { dragJustFinishedRef.current = false; }, 0);
+      setTimeout(() => {
+        dragJustFinishedRef.current = false;
+      }, 0);
     };
 
     window.addEventListener("mousemove", onMouseMove);
@@ -493,34 +547,41 @@ const ExplorerView = ({
   }, [applyDragRect, totalCount]); // re-bind when grid mounts or totalCount changes
 
   useEffect(() => {
-    const EDGE_SIZE = 60;    // px from edge that triggers scroll
-    const MAX_SPEED = 12;    // px per frame at the very edge
+    const EDGE_SIZE = 60; // px from edge that triggers scroll
+    const MAX_SPEED = 12; // px per frame at the very edge
     let rafId = null;
 
     const tick = () => {
-  if (isDraggingRef.current) {
-    const gridOuter = nodeRef.current?.querySelector("#explorer-grid-outer");
-    if (gridOuter) {
-      const bounds = gridOuter.getBoundingClientRect();
-      const mouseY = lastMouseY.current;
-      const distFromTop    = mouseY - bounds.top;
-      const distFromBottom = bounds.bottom - mouseY;
-      let speed = 0;
-if (distFromTop < EDGE_SIZE) {
-  speed = -MAX_SPEED * (1 - Math.max(0, distFromTop) / EDGE_SIZE);
-} else if (distFromBottom < EDGE_SIZE) {
-  speed = MAX_SPEED * (1 - Math.max(0, distFromBottom) / EDGE_SIZE);
-}
-      if (speed !== 0) {
-        const newScrollTop = Math.max(0, dragScrollTopRef.current + speed);
-        gridRef.current?.scrollTo({ scrollTop: newScrollTop });
-        dragScrollTopRef.current = newScrollTop;
-        if (dragRectRef.current) applyDragRect(dragRectRef.current);
+      if (isDraggingRef.current) {
+        const gridOuter = nodeRef.current?.querySelector(
+          "#explorer-grid-outer",
+        );
+        if (gridOuter) {
+          const bounds = gridOuter.getBoundingClientRect();
+          const mouseY = lastMouseY.current;
+          const distFromTop = mouseY - bounds.top;
+          const distFromBottom = bounds.bottom - mouseY;
+          let speed = 0;
+          if (distFromTop < EDGE_SIZE) {
+            speed = -MAX_SPEED * (1 - Math.max(0, distFromTop) / EDGE_SIZE);
+          } else if (distFromBottom < EDGE_SIZE) {
+            speed = MAX_SPEED * (1 - Math.max(0, distFromBottom) / EDGE_SIZE);
+          }
+          if (speed !== 0) {
+            const newScrollTop = Math.max(0, dragScrollTopRef.current + speed);
+            const rowIndex = Math.floor(newScrollTop / rowHeight);
+
+            gridRef.current.scrollToCell({
+              rowIndex,
+              columnIndex: 0,
+            });
+            dragScrollTopRef.current = newScrollTop;
+            if (dragRectRef.current) applyDragRect(dragRectRef.current);
+          }
+        }
       }
-    }
-  }
-  rafId = requestAnimationFrame(tick); // always keep the loop alive
-};
+      rafId = requestAnimationFrame(tick); // always keep the loop alive
+    };
 
     const onMouseMove = (e) => {
       lastMouseY.current = e.clientY;
@@ -540,7 +601,7 @@ if (distFromTop < EDGE_SIZE) {
       resetFilters();
       setItemToReveal(item);
     },
-    [resetFilters]
+    [resetFilters],
   );
 
   // ─── Container ref / resize ───────────────────────────────────────────────
@@ -553,9 +614,11 @@ if (distFromTop < EDGE_SIZE) {
 
   // Settings init
   useEffect(() => {
-    window.electron.ipcRenderer.invoke("get-indexed-files-count").then((count) => {
-      setTotalCount(Number(count || 0));
-    });
+    window.electron.ipcRenderer
+      .invoke("get-indexed-files-count")
+      .then((count) => {
+        setTotalCount(Number(count || 0));
+      });
     if (currentSettings) setNoGutters(currentSettings.noGutters);
   }, [currentSettings]);
 
@@ -575,7 +638,10 @@ if (distFromTop < EDGE_SIZE) {
       if (!e.ctrlKey) return;
       e.preventDefault();
       setScale((prev) => {
-        const next = Math.min(3, Math.max(0.5, prev + (e.deltaY < 0 ? 0.1 : -0.1)));
+        const next = Math.min(
+          3,
+          Math.max(0.1, prev + (e.deltaY < 0 ? 0.1 : -0.1)),
+        );
         onScale(next.toFixed(2));
         return next;
       });
@@ -602,11 +668,47 @@ if (distFromTop < EDGE_SIZE) {
     setScrollPosition(0);
   }, [filters, setScrollPosition]);
 
+  useEffect(() => {
+    if (!currentSettings?.explorerDateScroll) return;
+    setMonthData(null);
+    window.electron.ipcRenderer
+      .invoke("fetch-timeline-months", {
+        filters: filters || {},
+        sortOrder: filters?.sortOrder ?? "desc",
+      })
+      .then((data) => {
+        if (data?.length) setMonthData(data);
+      });
+  }, [filters, currentSettings?.explorerDateScroll]);
+
+  useEffect(() => {
+    const update = () => {
+      const container =
+        gridRef.current?._scrollingContainer ||
+        gridRef.current?.Grid?._scrollingContainer;
+
+      if (container) {
+        setActualScrollHeight(container.scrollHeight);
+      }
+    };
+
+    update();
+
+    const t = setTimeout(update, 500);
+    return () => clearTimeout(t);
+  }, [columnCount, rowHeight, totalCount]);
+
   // Restore scroll on mount
   useEffect(() => {
     const timer = setTimeout(() => {
       if (gridRef.current && scrollPosition) {
-        gridRef.current.scrollTo({ scrollTop: scrollPosition });
+        const row = Math.floor(scrollPosition / rowHeight);
+        const col = 0;
+
+        gridRef.current.scrollToCell({
+          rowIndex: row,
+          columnIndex: col,
+        });
       }
     }, 100);
     return () => clearTimeout(timer);
@@ -618,10 +720,9 @@ if (distFromTop < EDGE_SIZE) {
     const index = Math.min(anchorIndexRef.current, totalCount - 1);
     isRestoringScrollRef.current = true;
     requestAnimationFrame(() => {
-      gridRef.current?.scrollToItem({
+      gridRef.current?.scrollToCell({
         rowIndex: Math.floor(index / columnCount),
         columnIndex: index % columnCount,
-        align: "start",
       });
       requestAnimationFrame(() => {
         isRestoringScrollRef.current = false;
@@ -629,43 +730,66 @@ if (distFromTop < EDGE_SIZE) {
     });
   }, [scale, rowHeight, columnCount, totalCount]);
 
+  useEffect(() => {
+  const requestId = ++overviewRequestId.current;
+
+  (async () => {
+    const res = await window.electron.ipcRenderer.invoke(
+      "fetch-file-overview",
+      { filters: filters || {}, settings: currentSettings }
+    );
+
+    if (requestId !== overviewRequestId.current) return;
+
+    overviewIndexRef.current = res?.rows || [];
+    forceUpdate(x => x + 1); // IMPORTANT: ref change won't re-render
+  })();
+}, [scale, totalCount, filters, currentSettings]);
+
   // IPC: item removed
   useEffect(() => {
     const handleItemRemoved = ({ ids }) => {
       const idList = Array.isArray(ids) ? ids : [ids];
-    
+
       idList.forEach((id) => {
         const index = idToIndex.current.get(id);
         if (index == null) return;
         delete itemsRef.current[index];
         idToIndex.current.delete(id);
       });
-    
+
       setTotalCount((prev) => (prev ? prev - idList.length : prev));
-    
+
       // Rebuild idToIndex
       const rebuilt = new Map();
       Object.entries(itemsRef.current).forEach(([idx, item]) => {
         rebuilt.set(item.id, Number(idx));
       });
       idToIndex.current = rebuilt;
-    
+
       if (idList.includes(selectedItem?.id)) setSelectedItem(null);
       itemDeleted();
     };
 
     window.electron.ipcRenderer.on("item-removed", handleItemRemoved);
-    return () => window.electron.ipcRenderer.removeListener("item-removed", handleItemRemoved);
+    return () =>
+      window.electron.ipcRenderer.removeListener(
+        "item-removed",
+        handleItemRemoved,
+      );
   }, [selectedItem, itemDeleted]);
 
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = async (e) => {
-      if (actionPanelType && !((e.key === "a" || e.key === "A") && e.ctrlKey)) return;
+      if (actionPanelType && !((e.key === "a" || e.key === "A") && e.ctrlKey))
+        return;
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
-      const isAddMode = explorerMode?.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory");
+      const isAddMode =
+        explorerMode?.enabled &&
+        (explorerMode.type === "tag" || explorerMode.type === "memory");
 
       // Ctrl+A: select all / deselect all in add mode
       if ((e.key === "a" || e.key === "A") && e.ctrlKey) {
@@ -691,7 +815,12 @@ if (distFromTop < EDGE_SIZE) {
         return;
       }
 
-      const deltas = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: columnCount, ArrowUp: -columnCount };
+      const deltas = {
+        ArrowRight: 1,
+        ArrowLeft: -1,
+        ArrowDown: columnCount,
+        ArrowUp: -columnCount,
+      };
       const delta = deltas[e.key];
       if (!delta) return;
 
@@ -704,16 +833,25 @@ if (distFromTop < EDGE_SIZE) {
         setSelectedItem(nextItem);
         onSelect(nextItem, "single");
       }
-      gridRef.current?.scrollToItem({
+      gridRef.current?.scrollToCell({
         rowIndex: Math.floor(nextIndex / columnCount),
         columnIndex: nextIndex % columnCount,
-        align: "smart",
       });
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedItem, totalCount, explorerMode, addModeSelected, fetchAllIds, onSelect, columnCount, tagCurrentlySelected, actionPanelType]);
+  }, [
+    selectedItem,
+    totalCount,
+    explorerMode,
+    addModeSelected,
+    fetchAllIds,
+    onSelect,
+    columnCount,
+    tagCurrentlySelected,
+    actionPanelType,
+  ]);
 
   // Explorer mode: pre-populate add selection
   useEffect(() => {
@@ -732,7 +870,10 @@ if (distFromTop < EDGE_SIZE) {
     let cancelled = false;
 
     const revealItem = async (item) => {
-      const itemIndex = await window.electron.ipcRenderer.invoke("get-index-of-item", { itemId: item.media_id });
+      const itemIndex = await window.electron.ipcRenderer.invoke(
+        "get-index-of-item",
+        { itemId: item.media_id },
+      );
       if (itemIndex == null || cancelled) return;
 
       const pageIndex = Math.floor(itemIndex / PAGE_SIZE);
@@ -753,11 +894,13 @@ if (distFromTop < EDGE_SIZE) {
       }
       if (!gridRef.current || cancelled) return;
 
-      const col = Math.max(1, Math.floor(containerWidth / (columnWidth + gutterSize)));
-      gridRef.current.scrollToItem({
+      const col = Math.max(
+        1,
+        Math.floor(containerWidth / (columnWidth + gutterSize)),
+      );
+      gridRef.current.scrollToCell({
         rowIndex: Math.floor(itemIndex / col),
         columnIndex: itemIndex % col,
-        align: "center",
       });
 
       const revealedItem = itemsRef.current[itemIndex];
@@ -768,11 +911,21 @@ if (distFromTop < EDGE_SIZE) {
     };
 
     revealItem(itemToReveal);
-    return () => { cancelled = true; };
-  }, [itemToReveal, containerWidth, columnWidth, gutterSize, currentSettings, addItems, handleSelect]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    itemToReveal,
+    containerWidth,
+    columnWidth,
+    gutterSize,
+    currentSettings,
+    addItems,
+    handleSelect,
+  ]);
 
   // ─── Cell renderer ────────────────────────────────────────────────────────
-  const Cell = React.memo(({ columnIndex, rowIndex, style }) => {
+  const Cell = React.memo(({ columnIndex, rowIndex, style, key }) => {
     const index = rowIndex * columnCount + columnIndex;
     if (!totalCount || index >= totalCount) return null;
 
@@ -781,7 +934,7 @@ if (distFromTop < EDGE_SIZE) {
 
     if (!item) {
       return (
-        <div style={cellStyle}>
+        <div key={key} style={style}>
           <div
             className="thumb-skeleton"
             style={{ height: rowHeight - 16, borderRadius: noGutters ? 0 : 6 }}
@@ -791,12 +944,17 @@ if (distFromTop < EDGE_SIZE) {
     }
 
     const folderAvailable = folderStatuses[item.folder_path] ?? true;
-    const thumbSrc = item.thumbnail_path ? `orbit://thumbs/${item.id}_thumb.jpg` : null;
+    const thumbSrc = item.thumbnail_path
+      ? `orbit://thumbs/${item.id}_thumb.jpg`
+      : null;
     const isNoGutterNoText = noGutters && currentSettings?.itemText === "none";
-    const hideText = scale === 0.5 || currentSettings?.itemText === "none";
+    const hideText = scale <= 0.5 || currentSettings?.itemText === "none";
 
-    const isInAddMode = explorerMode?.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory");
-    const isInRemoveMode = explorerMode?.enabled && explorerMode.type === "remove";
+    const isInAddMode =
+      explorerMode?.enabled &&
+      (explorerMode.type === "tag" || explorerMode.type === "memory");
+    const isInRemoveMode =
+      explorerMode?.enabled && explorerMode.type === "remove";
 
     const cellClass = [
       "thumb-cell",
@@ -804,10 +962,10 @@ if (distFromTop < EDGE_SIZE) {
       isInAddMode && addModeSelected.has(item.id)
         ? "thumb-selected-addmode"
         : isInRemoveMode && removeModeSelected.has(item.id)
-        ? "thumb-selected-removemode"
-        : selectedItem?.id === item.id
-        ? "thumb-selected"
-        : "thumb-item",
+          ? "thumb-selected-removemode"
+          : selectedItem?.id === item.id
+            ? "thumb-selected"
+            : "thumb-item",
     ]
       .filter(Boolean)
       .join(" ");
@@ -841,7 +999,7 @@ if (distFromTop < EDGE_SIZE) {
           title={`${item.filename}\n${formatLocalDateString(item.create_date_local) || formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
           style={{
             width: "100%",
-            height: scale === 0.5 || isNoGutterNoText ? "100%" : rowHeight - 36,
+            height: scale <= 0.5 || isNoGutterNoText ? "100%" : rowHeight - 36,
             borderRadius: noGutters ? 0 : 6,
           }}
         >
@@ -850,8 +1008,14 @@ if (distFromTop < EDGE_SIZE) {
               alt={item.filename}
               src={thumbSrc}
               className="thumb-img"
-              style={{ objectFit: noGutters ? "cover" : "contain", borderRadius: noGutters ? 0 : 6 }}
-              onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = ""; }}
+              style={{
+                objectFit: noGutters ? "cover" : "contain",
+                borderRadius: noGutters ? 0 : 6,
+              }}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = "";
+              }}
               draggable={false}
             />
           ) : (
@@ -864,13 +1028,21 @@ if (distFromTop < EDGE_SIZE) {
             </div>
           )}
 
-          {!folderAvailable && <div className="thumb-video-unavailable">Unavailable</div>}
+          {!folderAvailable && (
+            <div className="thumb-video-unavailable">Unavailable</div>
+          )}
         </div>
 
         <div
           className={`thumb-filename${!folderAvailable ? " thumb-filename-unavailable" : ""}${hideText ? " thumb-hidden" : ""}`}
           title={getItemName(item)}
-          style={{ marginTop: 4, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          style={{
+            marginTop: 4,
+            fontSize: 12,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
         >
           {getItemName(item)}
         </div>
@@ -922,12 +1094,20 @@ if (distFromTop < EDGE_SIZE) {
           <br />
           Please add at least one folder with images or videos in{" "}
           <strong>
-            Settings <FontAwesomeIcon className="explorer-arrow-right" icon={faArrowRight} /> Media
+            Settings{" "}
+            <FontAwesomeIcon
+              className="explorer-arrow-right"
+              icon={faArrowRight}
+            />{" "}
+            Media
           </strong>{" "}
           to see them here.
         </p>
         <br />
-        <button className="welcome-popup-select-folders-btn" onClick={openSettings}>
+        <button
+          className="welcome-popup-select-folders-btn"
+          onClick={openSettings}
+        >
           Open Settings
         </button>
       </div>
@@ -949,8 +1129,21 @@ if (distFromTop < EDGE_SIZE) {
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────
-  const isAddMode = explorerMode?.enabled && (explorerMode.type === "tag" || explorerMode.type === "memory");
+  const isAddMode =
+    explorerMode?.enabled &&
+    (explorerMode.type === "tag" || explorerMode.type === "memory");
   const isRemoveMode = explorerMode?.enabled && explorerMode.type === "remove";
+  const canShowDateScroll =
+    scale >= 0.4 &&
+    (!filters ||
+      !filters.sortBy ||
+      (filters &&
+        filters.sortBy &&
+        (filters.sortBy === "media_id" ||
+          filters.sortBy === "create_date_local" ||
+          filters.sortBy === "created"))) &&
+    (!filters || filters.searchBy !== "smart") &&
+    (!filters || !filters._smartSearch);
 
   return (
     <div
@@ -959,40 +1152,78 @@ if (distFromTop < EDGE_SIZE) {
       style={{ height: "100%", width: "100%" }}
       onMouseDown={handleGridMouseDown}
     >
-      <div className="explorer-main" style={{ height: "100%", padding: "12px 0px" }}>
+      <div
+        className="explorer-main"
+        style={{ height: "100%", padding: "12px 0px" }}
+      >
         <InfiniteLoader
-          isItemLoaded={isItemLoaded}
-          itemCount={totalCount}
-          loadMoreItems={loadMoreItems}
-          threshold={columnCount * 4}
+          isRowLoaded={({ index }) => isItemLoaded(index)}
+          loadMoreRows={({ startIndex, stopIndex }) =>
+            loadMoreItems(startIndex, stopIndex)
+          }
+          rowCount={totalCount}
         >
-          {({ onItemsRendered, ref }) => (
+          {({ onRowsRendered, registerChild }) => (
             <div id="explorer-grid-outer" style={{ position: "relative" }}>
-              <Grid
-                key={filters ? JSON.stringify(filters) : "nofilter"}
-                ref={(grid) => { ref(grid); gridRef.current = grid; }}
-                columnCount={columnCount}
-                columnWidth={columnWidth + gutterSize}
-                height={gridHeight}
-                rowCount={rowCount}
-                rowHeight={rowHeight}
-                width={containerWidth}
-                onScroll={handleScroll}
-                className="explorer-grid"
-                onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex, visibleColumnStartIndex, visibleColumnStopIndex }) => {
-                  const startIndex = visibleRowStartIndex * columnCount + visibleColumnStartIndex;
-                  const stopIndex = visibleRowStopIndex * columnCount + visibleColumnStopIndex;
-                  onItemsRendered({
-                    overscanStartIndex: startIndex,
-                    overscanStopIndex: stopIndex,
-                    visibleStartIndex: startIndex,
-                    visibleStopIndex: stopIndex,
-                  });
-                }}
-              >
-                {Cell}
-              </Grid>
+              {scale < 0.4 ? (
+                <OverviewMosaic
+                  scale={scale}
+                  items={overviewIndexRef.current}
+                  totalCount={totalCount}
+                  containerWidth={containerWidth}
+                  containerHeight={gridHeight}
+                  scrollTop={currentScrollTop}
+                  onSelectItem={(item) => handleSelect(item, "single")}
+                />
+              ) : (
+                <Grid
+                  ref={(grid) => {
+                    registerChild(grid);
+                    gridRef.current = grid;
+                  }}
+                  columnCount={columnCount}
+                  columnWidth={columnWidth + gutterSize}
+                  height={gridHeight}
+                  rowCount={rowCount}
+                  rowHeight={rowHeight}
+                  width={containerWidth}
+                  onScroll={handleScroll}
+                  className="explorer-grid"
+                  cellRenderer={(props) => <Cell {...props} />} // ✅ THIS is required
+                  onSectionRendered={({
+                    rowStartIndex,
+                    rowStopIndex,
+                    columnStartIndex,
+                    columnStopIndex,
+                  }) => {
+                    const startIndex =
+                      rowStartIndex * columnCount + columnStartIndex;
+                    const stopIndex =
+                      rowStopIndex * columnCount + columnStopIndex;
+
+                    onRowsRendered({
+                      startIndex,
+                      stopIndex,
+                    });
+                  }}
+                />
+              )}
               <DragSelectOverlay />
+
+              {currentSettings?.explorerDateScroll && canShowDateScroll && (
+                <TimelineOverlay
+                  itemsRef={itemsRef}
+                  totalCount={totalCount}
+                  columnCount={columnCount}
+                  rowHeight={rowHeight}
+                  gridRef={gridRef}
+                  scrollTop={currentScrollTop}
+                  totalHeight={actualScrollHeight}
+                  monthData={monthData}
+                  gridHeight={gridHeight}
+                  sortOrder={filters?.sortOrder ?? "desc"}
+                />
+              )}
             </div>
           )}
         </InfiniteLoader>
@@ -1011,7 +1242,12 @@ if (distFromTop < EDGE_SIZE) {
           >
             Remove Selected ({removeModeSelected.size})
           </BannerButton>
-          <BannerButton onClick={() => { setExplorerMode({ enabled: false, value: null, type: "" }); setRemoveModeSelected(new Set()); }}>
+          <BannerButton
+            onClick={() => {
+              setExplorerMode({ enabled: false, value: null, type: "" });
+              setRemoveModeSelected(new Set());
+            }}
+          >
             <FontAwesomeIcon icon={faXmark} />
           </BannerButton>
         </FloatingBanner>
@@ -1023,7 +1259,10 @@ if (distFromTop < EDGE_SIZE) {
           <BannerButton
             onClick={() => {
               setExplorerMode({ enabled: false, value: null, type: "" });
-              const invoke = explorerMode.type === "tag" ? "tag:set-items" : "memory:set-items";
+              const invoke =
+                explorerMode.type === "tag"
+                  ? "tag:set-items"
+                  : "memory:set-items";
               const key = explorerMode.type === "tag" ? "tagId" : "memoryId";
               window.electron.ipcRenderer.invoke(invoke, {
                 [key]: explorerMode.value,
@@ -1033,7 +1272,11 @@ if (distFromTop < EDGE_SIZE) {
           >
             Save {explorerMode.type} ({addModeSelected.size} items)
           </BannerButton>
-          <BannerButton onClick={() => setExplorerMode({ enabled: false, value: null, type: "" })}>
+          <BannerButton
+            onClick={() =>
+              setExplorerMode({ enabled: false, value: null, type: "" })
+            }
+          >
             <FontAwesomeIcon icon={faXmark} />
           </BannerButton>
         </FloatingBanner>
@@ -1047,6 +1290,7 @@ if (distFromTop < EDGE_SIZE) {
           onClose={() => setContextMenu(null)}
           revealFromContextMenu={revealFromContextMenu}
           onRemoveItem={handleRemoveItem}
+          onFindSimilar={onFindSimilar}
         />
       )}
 
@@ -1081,7 +1325,13 @@ const btnStyle = {
   cursor: "pointer",
 };
 
-const FloatingBanner = ({ children }) => <div style={bannerStyle}>{children}</div>;
-const BannerButton = ({ children, onClick }) => <button style={btnStyle} onClick={onClick}>{children}</button>;
+const FloatingBanner = ({ children }) => (
+  <div style={bannerStyle}>{children}</div>
+);
+const BannerButton = ({ children, onClick }) => (
+  <button style={btnStyle} onClick={onClick}>
+    {children}
+  </button>
+);
 
 export default ExplorerView;

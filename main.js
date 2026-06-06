@@ -23,7 +23,6 @@ const crypto = require("crypto");
 let embeddingService = null;
 let _textPipeline = null;
 
-
 if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
 
 let mainWindow;
@@ -109,206 +108,224 @@ app.whenReady().then(() => {
       return new Response("Not Found", { status: 404 });
     }
   });
-  
 
   const express = require("express");
   const appServer = express();
   const serverPort = 54055;
 
   appServer.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
-  next();
-});
-
-const heicCache = new Map();
-const HEIC_CACHE_MAX = 15;
-let activeWorkers = 0;
-const MAX_WORKERS = 2; // only 2 decodes at a time
-const prefetchQueue = [];
-const activeWorkerMap = new Map();
-
-function decodeHeic(filePath) {
-  if (heicCache.has(filePath)) return heicCache.get(filePath);
-
-  if (heicCache.size >= HEIC_CACHE_MAX) {
-    heicCache.delete(heicCache.keys().next().value);
-  }
-
-  const promise = new Promise((resolve, reject) => {
-    const run = () => {
-      activeWorkers++;
-      const worker = new Worker(path.join(__dirname, "heic-worker.js"), {
-        workerData: { filePath }
-      });
-      activeWorkerMap.set(filePath, worker);
-
-      worker.on("message", (msg) => {
-        activeWorkers--;
-        activeWorkerMap.delete(filePath);
-        if (prefetchQueue.length > 0) prefetchQueue.shift()();
-        if (msg.success) resolve(Buffer.from(msg.buffer));
-        else reject(new Error(msg.error));
-      });
-      worker.on("error", (err) => {
-        activeWorkers--;
-        activeWorkerMap.delete(filePath);
-        if (prefetchQueue.length > 0) prefetchQueue.shift()();
-        reject(err);
-      });
-    };
-
-    if (activeWorkers < MAX_WORKERS) {
-      run();
-    } else {
-      run.filePath = filePath;
-      prefetchQueue.push(run);
-    }
+    res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+    next();
   });
 
-  promise.catch(() => heicCache.delete(filePath));
-  heicCache.set(filePath, promise);
-  return promise;
-}
+  const heicCache = new Map();
+  const HEIC_CACHE_MAX = 15;
+  let activeWorkers = 0;
+  const MAX_WORKERS = 2; // only 2 decodes at a time
+  const prefetchQueue = [];
+  const activeWorkerMap = new Map();
 
-function getSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(configPath, "utf8"));
-  } catch {
-    return defaultConfig;
+  function decodeHeic(filePath) {
+    if (heicCache.has(filePath)) return heicCache.get(filePath);
+
+    if (heicCache.size >= HEIC_CACHE_MAX) {
+      heicCache.delete(heicCache.keys().next().value);
+    }
+
+    const promise = new Promise((resolve, reject) => {
+      const run = () => {
+        activeWorkers++;
+        const worker = new Worker(path.join(__dirname, "heic-worker.js"), {
+          workerData: { filePath },
+        });
+        activeWorkerMap.set(filePath, worker);
+
+        worker.on("message", (msg) => {
+          activeWorkers--;
+          activeWorkerMap.delete(filePath);
+          if (prefetchQueue.length > 0) prefetchQueue.shift()();
+          if (msg.success) resolve(Buffer.from(msg.buffer));
+          else reject(new Error(msg.error));
+        });
+        worker.on("error", (err) => {
+          activeWorkers--;
+          activeWorkerMap.delete(filePath);
+          if (prefetchQueue.length > 0) prefetchQueue.shift()();
+          reject(err);
+        });
+      };
+
+      if (activeWorkers < MAX_WORKERS) {
+        run();
+      } else {
+        run.filePath = filePath;
+        prefetchQueue.push(run);
+      }
+    });
+
+    promise.catch(() => heicCache.delete(filePath));
+    heicCache.set(filePath, promise);
+    return promise;
   }
-}
 
-appServer.get("/cancel-heic/*", (req, res) => {
-  const filePath = applyDriveLetterMap(
-    decodeURIComponent(req.path.replace("/cancel-heic/", "")),
-    getDriveLetterMap()
-  );
-  
-  const worker = activeWorkerMap.get(filePath);
-  if (worker) {
-    worker.terminate();
-    activeWorkerMap.delete(filePath);
-    activeWorkers--;
-    heicCache.delete(filePath); // remove incomplete cache entry
-    if (prefetchQueue.length > 0) prefetchQueue.shift()(); // let next in queue run
-  } else {
-    // Still in queue, just remove it
-    const idx = prefetchQueue.findIndex(fn => fn.filePath === filePath);
-    if (idx !== -1) prefetchQueue.splice(idx, 1);
+  function getSettings() {
+    try {
+      return JSON.parse(fs.readFileSync(configPath, "utf8"));
+    } catch {
+      return defaultConfig;
+    }
   }
 
-  res.sendStatus(204);
-});
+  appServer.get("/cancel-heic/*", (req, res) => {
+    const filePath = applyDriveLetterMap(
+      decodeURIComponent(req.path.replace("/cancel-heic/", "")),
+      getDriveLetterMap(),
+    );
 
-appServer.get("/prefetch-heic/*", (req, res) => {
-  const filePath = applyDriveLetterMap(
-    decodeURIComponent(req.path.replace("/prefetch-heic/", "")),
-    getDriveLetterMap()
-  );
-  if (fs.existsSync(filePath)) decodeHeic(filePath); // fire and forget, starts caching
-  res.sendStatus(204);
-});
+    const worker = activeWorkerMap.get(filePath);
+    if (worker) {
+      worker.terminate();
+      activeWorkerMap.delete(filePath);
+      activeWorkers--;
+      heicCache.delete(filePath); // remove incomplete cache entry
+      if (prefetchQueue.length > 0) prefetchQueue.shift()(); // let next in queue run
+    } else {
+      // Still in queue, just remove it
+      const idx = prefetchQueue.findIndex((fn) => fn.filePath === filePath);
+      if (idx !== -1) prefetchQueue.splice(idx, 1);
+    }
 
-async function decodeHeicSimple(filePath) {
-  const inputBuffer = fs.readFileSync(filePath);
-  const heicImage = await heicDecode({ buffer: inputBuffer });
-  return sharp(heicImage.data, {
-    raw: { width: heicImage.width, height: heicImage.height, channels: 4 },
-  }).jpeg({ quality: 80 }).toBuffer();
-}
+    res.sendStatus(204);
+  });
+
+  appServer.get("/prefetch-heic/*", (req, res) => {
+    const filePath = applyDriveLetterMap(
+      decodeURIComponent(req.path.replace("/prefetch-heic/", "")),
+      getDriveLetterMap(),
+    );
+    if (fs.existsSync(filePath)) decodeHeic(filePath); // fire and forget, starts caching
+    res.sendStatus(204);
+  });
+
+  async function decodeHeicSimple(filePath) {
+    const inputBuffer = fs.readFileSync(filePath);
+    const heicImage = await heicDecode({ buffer: inputBuffer });
+    return sharp(heicImage.data, {
+      raw: { width: heicImage.width, height: heicImage.height, channels: 4 },
+    })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+  }
 
   // Serve files from any path on disk
-appServer.get("/files/*", async (req, res) => {
-  const rawPath = decodeURIComponent(req.path.replace("/files/", ""));
-  const filePath = applyDriveLetterMap(rawPath, getDriveLetterMap());
+  appServer.get("/files/*", async (req, res) => {
+    const rawPath = decodeURIComponent(req.path.replace("/files/", ""));
+    const filePath = applyDriveLetterMap(rawPath, getDriveLetterMap());
 
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send("Not found");
-  }
-
-  const ext = path.extname(filePath).toLowerCase();
-
-  const rawExtensions = [
-    ".dng", ".cr2", ".nef", ".arw", ".orf", ".rw2",
-    ".raw", ".raf", ".pef", ".srw", ".x3f", ".kdc",
-    ".dcr", ".mrw", ".erf", ".3fr", ".mef", ".rwl", ".iiq"
-  ];
-
-  try {
-    if (ext === ".heic") {
-      const settings = getSettings();
-      if (settings.preloadHeic) {
-        const outputBuffer = await decodeHeic(filePath); // worker + cache path
-        return res.type("jpeg").send(outputBuffer);
-      } else {
-        const outputBuffer = await decodeHeicSimple(filePath); // old simple path
-        return res.type("jpeg").send(outputBuffer);
-      }
-    } else if (ext === ".tif" || ext === ".tiff") {
-      const outputBuffer = await sharp(filePath)
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      res.type("jpeg").send(outputBuffer);
-
-    } else if (rawExtensions.includes(ext)) {
-      try {
-        const hash = crypto.createHash('md5').update(filePath).digest('hex');
-        const tmpRaw = path.join(os.tmpdir(), `orbit_raw_${hash}.jpg`);
-      
-        if (!fs.existsSync(tmpRaw)) {
-          const dcraw = require("dcraw");
-          const rawBuffer = fs.readFileSync(filePath);
-          // dcraw with -e flag extracts the embedded thumbnail/preview
-          const jpegBuffer = dcraw(rawBuffer, { extractThumbnail: true });
-          fs.writeFileSync(tmpRaw, jpegBuffer);
-        }
-      
-        return res.type("jpeg").sendFile(tmpRaw);
-      } catch (err) {
-        console.error("RAW preview extraction failed:", err.message);
-        return res.status(500).send("RAW not supported on this system");
-      }
-    } else if (ext === '.avi' || ext === '.wmv' || ext === '.3gp') {
-      const hash = crypto.createHash('md5').update(filePath).digest('hex');
-      const tmpPath = path.join(os.tmpdir(), `orbit_${hash}.mp4`);
-
-      // Serve cached transcode if it exists
-      if (fs.existsSync(tmpPath)) {
-        return res.sendFile(tmpPath);
-      }
-    
-      // Otherwise transcode to temp file first, then serve
-      await new Promise((resolve, reject) => {
-        ffmpeg(filePath)
-          .outputFormat("mp4")
-          .videoCodec("libx264")
-          .audioCodec("aac")
-          .outputOptions(["-preset ultrafast", "-crf 28", "-movflags +faststart"])
-          .on("error", reject)
-          .on("end", resolve)
-          .save(tmpPath);
-      });
-    
-      res.sendFile(tmpPath);
-    } else {
-      // Default: just serve file
-      res.sendFile(filePath);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send("Not found");
     }
-  } catch (err) {
-    console.error(`Failed to convert ${ext} file:`, err);
-    res.status(500).send("Conversion failed");
-  }
-});
+
+    const ext = path.extname(filePath).toLowerCase();
+
+    const rawExtensions = [
+      ".dng",
+      ".cr2",
+      ".nef",
+      ".arw",
+      ".orf",
+      ".rw2",
+      ".raw",
+      ".raf",
+      ".pef",
+      ".srw",
+      ".x3f",
+      ".kdc",
+      ".dcr",
+      ".mrw",
+      ".erf",
+      ".3fr",
+      ".mef",
+      ".rwl",
+      ".iiq",
+    ];
+
+    try {
+      if (ext === ".heic") {
+        const settings = getSettings();
+        if (settings.preloadHeic) {
+          const outputBuffer = await decodeHeic(filePath); // worker + cache path
+          return res.type("jpeg").send(outputBuffer);
+        } else {
+          const outputBuffer = await decodeHeicSimple(filePath); // old simple path
+          return res.type("jpeg").send(outputBuffer);
+        }
+      } else if (ext === ".tif" || ext === ".tiff") {
+        const outputBuffer = await sharp(filePath)
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        res.type("jpeg").send(outputBuffer);
+      } else if (rawExtensions.includes(ext)) {
+        try {
+          const hash = crypto.createHash("md5").update(filePath).digest("hex");
+          const tmpRaw = path.join(os.tmpdir(), `orbit_raw_${hash}.jpg`);
+
+          if (!fs.existsSync(tmpRaw)) {
+            const dcraw = require("dcraw");
+            const rawBuffer = fs.readFileSync(filePath);
+            // dcraw with -e flag extracts the embedded thumbnail/preview
+            const jpegBuffer = dcraw(rawBuffer, { extractThumbnail: true });
+            fs.writeFileSync(tmpRaw, jpegBuffer);
+          }
+
+          return res.type("jpeg").sendFile(tmpRaw);
+        } catch (err) {
+          console.error("RAW preview extraction failed:", err.message);
+          return res.status(500).send("RAW not supported on this system");
+        }
+      } else if (ext === ".avi" || ext === ".wmv" || ext === ".3gp") {
+        const hash = crypto.createHash("md5").update(filePath).digest("hex");
+        const tmpPath = path.join(os.tmpdir(), `orbit_${hash}.mp4`);
+
+        // Serve cached transcode if it exists
+        if (fs.existsSync(tmpPath)) {
+          return res.sendFile(tmpPath);
+        }
+
+        // Otherwise transcode to temp file first, then serve
+        await new Promise((resolve, reject) => {
+          ffmpeg(filePath)
+            .outputFormat("mp4")
+            .videoCodec("libx264")
+            .audioCodec("aac")
+            .outputOptions([
+              "-preset ultrafast",
+              "-crf 28",
+              "-movflags +faststart",
+            ])
+            .on("error", reject)
+            .on("end", resolve)
+            .save(tmpPath);
+        });
+
+        res.sendFile(tmpPath);
+      } else {
+        // Default: just serve file
+        res.sendFile(filePath);
+      }
+    } catch (err) {
+      console.error(`Failed to convert ${ext} file:`, err);
+      res.status(500).send("Conversion failed");
+    }
+  });
 
   appServer.listen(serverPort, () => {
     console.log(`Local file server running on http://localhost:${serverPort}`);
   });
 
-
   mainWindow.loadURL("http://localhost:3000");
   // mainWindow.loadFile(path.join(__dirname, 'index.html'));
 });
-
 
 let dataDir;
 let configPath;
@@ -320,11 +337,12 @@ const defaultConfig = {
   birthDate: null,
   adjustHeicColors: true,
   defaultSort: "media_id",
-  openMemoriesIn: "explorer", // "explorer", "shuffle" or "map" 
+  openMemoriesIn: "explorer", // "explorer", "shuffle" or "map"
   itemText: "filename", // "filename", "datetime" or "none"
   noGutters: false,
   preloadHeic: false,
-  driveLetterMap: {}
+  memoriesLayout: "list",
+  driveLetterMap: {},
 };
 
 // Database
@@ -339,10 +357,10 @@ function initPaths() {
 }
 
 function initDatabase() {
-  if(!db) {
-  db = new Database(dbPath);
+  if (!db) {
+    db = new Database(dbPath);
 
-  db.exec(`
+    db.exec(`
     CREATE TABLE IF NOT EXISTS files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       media_id INTEGER UNIQUE,
@@ -382,7 +400,7 @@ function initDatabase() {
     )
   `);
 
-  db.exec(`
+    db.exec(`
     CREATE TABLE IF NOT EXISTS folders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       path TEXT NOT NULL UNIQUE,
@@ -390,7 +408,7 @@ function initDatabase() {
     )
   `);
 
-  db.exec(`
+    db.exec(`
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -401,7 +419,7 @@ function initDatabase() {
     )
   `);
 
-  db.exec(`
+    db.exec(`
     CREATE TABLE IF NOT EXISTS memories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -413,7 +431,7 @@ function initDatabase() {
     )
   `);
 
-  db.exec(`
+    db.exec(`
     CREATE TABLE IF NOT EXISTS removed_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       path TEXT NOT NULL UNIQUE,
@@ -422,13 +440,13 @@ function initDatabase() {
     )
   `);
 
-  db.exec(`
+    db.exec(`
     CREATE INDEX IF NOT EXISTS idx_files_create_date_local ON files(create_date_local);
     CREATE INDEX IF NOT EXISTS idx_files_create_date ON files(create_date);
     CREATE INDEX IF NOT EXISTS idx_files_filename ON files(filename);
     CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
     CREATE INDEX IF NOT EXISTS idx_files_created ON files(created);
-  `);      
+  `);
   }
 }
 
@@ -445,25 +463,32 @@ ipcMain.handle("fix-media-ids", async () => {
 
     db.transaction(() => {
       // Step 1: move existing media_id out of the way
-      db.prepare(`
+      db.prepare(
+        `
         UPDATE files
         SET media_id = -id
-      `).run();
+      `,
+      ).run();
 
       // Step 2: reassign correctly ordered media_ids
-      const rows = db.prepare(`
+      const rows = db
+        .prepare(
+          `
         SELECT id
         FROM files
         ORDER BY
           COALESCE(create_date, MIN(created, modified)) ASC,
           id ASC
-      `).all();
+      `,
+        )
+        .all();
 
       let counter = 1;
       for (const row of rows) {
-        db.prepare(
-          "UPDATE files SET media_id = ? WHERE id = ?"
-        ).run(counter, row.id);
+        db.prepare("UPDATE files SET media_id = ? WHERE id = ?").run(
+          counter,
+          row.id,
+        );
         counter++;
       }
     })();
@@ -479,9 +504,7 @@ ipcMain.handle("tags:get-all", async () => {
   try {
     initDatabase();
 
-    const rows = db
-      .prepare("SELECT * FROM tags ORDER BY last_used DESC")
-      .all();
+    const rows = db.prepare("SELECT * FROM tags ORDER BY last_used DESC").all();
 
     return rows.map((row) => ({
       ...row,
@@ -497,17 +520,34 @@ ipcMain.handle("tags:save", async (event, tag) => {
   initDatabase();
 
   if (tag.id) {
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE tags SET name = ?, description = ?, color = ?, media_ids = ?
       WHERE id = ?
-    `).run(tag.name, tag.description, tag.color, JSON.stringify(tag.media_ids || []), tag.id);
+    `,
+    ).run(
+      tag.name,
+      tag.description,
+      tag.color,
+      JSON.stringify(tag.media_ids || []),
+      tag.id,
+    );
 
     return { success: true, updated: true };
   } else {
-    const info = db.prepare(`
+    const info = db
+      .prepare(
+        `
       INSERT INTO tags (name, description, color, media_ids)
       VALUES (?, ?, ?, ?)
-    `).run(tag.name, tag.description, tag.color, JSON.stringify(tag.media_ids || []));
+    `,
+      )
+      .run(
+        tag.name,
+        tag.description,
+        tag.color,
+        JSON.stringify(tag.media_ids || []),
+      );
     return { success: true, id: info.lastInsertRowid };
   }
 });
@@ -518,11 +558,14 @@ ipcMain.handle("tags:delete", async (event, id) => {
   return { success: true };
 });
 
-
 // Config handlers
 ipcMain.handle("get-settings", async () => {
   if (!fs.existsSync(configPath))
-    fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2), "utf8");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify(defaultConfig, null, 2),
+      "utf8",
+    );
 
   return JSON.parse(fs.readFileSync(configPath, "utf8"));
 });
@@ -536,7 +579,6 @@ ipcMain.handle("save-settings", async (event, settings) => {
     return { success: false, error: err.message };
   }
 });
-
 
 ipcMain.handle("open-orbit-location", () => {
   let appPath = app.getAppPath();
@@ -553,7 +595,7 @@ ipcMain.handle("open-data-location", () => {
   shell.openPath(dataDir);
 });
 
-ipcMain.handle('open-in-default-viewer', async (event, rawPath) => {
+ipcMain.handle("open-in-default-viewer", async (event, rawPath) => {
   try {
     const filePath = applyDriveLetterMap(rawPath, getDriveLetterMap());
     await shell.openPath(filePath);
@@ -575,306 +617,306 @@ ipcMain.handle("select-folders", async () => {
 
 function applyIdsFilter(db, ids) {
   db.prepare(`DROP TABLE IF EXISTS temp_ids`).run();
-  db.prepare(`CREATE TEMP TABLE temp_ids (id INTEGER PRIMARY KEY, rank INTEGER)`).run();
- 
+  db.prepare(
+    `CREATE TEMP TABLE temp_ids (id INTEGER PRIMARY KEY, rank INTEGER)`,
+  ).run();
+
   const insert = db.prepare(`INSERT INTO temp_ids (id, rank) VALUES (?, ?)`);
   const insertMany = db.transaction((ids) => {
     ids.forEach((id, i) => insert.run(id, i));
   });
- 
+
   insertMany(ids);
- 
+
   return "id IN (SELECT id FROM temp_ids)";
+}
+
+function buildWhereClause(rawFilters = {}, options = {}) {
+  const filters = rawFilters ?? {};
+  const clauses = [];
+  const params = [];
+
+  const localDateExpr =
+    options.localDateExpr ??
+    `
+    CASE
+      WHEN create_date_local IS NOT NULL
+        THEN date(create_date_local)
+      WHEN create_date IS NOT NULL
+        THEN date(datetime(create_date, 'unixepoch', 'localtime'))
+      ELSE
+        date(datetime(MIN(created, modified), 'unixepoch', 'localtime'))
+    END
+  `;
+
+  const add = (sql, value) => {
+    clauses.push(sql);
+    if (value !== undefined) params.push(value);
+  };
+
+  // shared filters
+  if (Array.isArray(filters.ids) && filters.ids.length) {
+    clauses.push(applyIdsFilter(db, filters.ids));
+  }
+
+  if (filters.dateFrom) {
+    add(`${localDateExpr} >= date(?)`, filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    add(`${localDateExpr} <= date(?)`, filters.dateTo);
+  }
+  if (filters.dateExact) {
+    add(`${localDateExpr} = date(?)`, filters.dateExact);
+  }
+
+  if (filters.device) add("device_model = ?", filters.device);
+  if (filters.folder) add("folder_path = ?", filters.folder);
+  if (filters.filetype) add("extension = ?", filters.filetype);
+  if (filters.mediaType) add("file_type = ?", filters.mediaType);
+  if (filters.lens) add("lens_model = ?", filters.lens);
+  if (filters.country) add("country = ?", filters.country);
+
+  if (filters.tagId) {
+    clauses.push(`
+      id IN (
+        SELECT value
+        FROM tags, json_each(tags.media_ids)
+        WHERE tags.id = ?
+      )
+    `);
+    params.push(Number(filters.tagId));
+  }
+
+  if (filters.searchBy && filters.searchTerm) {
+    if (filters.searchBy === "media_id") {
+      add("media_id = ?", filters.searchTerm);
+    } else if (filters.searchBy === "name") {
+      add("filename LIKE ?", `%${filters.searchTerm}%`);
+    }
+  }
+
+  // global safety filter
+  if (!options.allowUndated !== true) {
+    clauses.push(`(
+      create_date_local IS NOT NULL
+      OR create_date IS NOT NULL
+      OR created IS NOT NULL
+      OR modified IS NOT NULL
+    )`);
+  }
+
+  return {
+    sql: clauses.length ? "WHERE " + clauses.join(" AND ") : "",
+    params,
+  };
 }
 
 // Fetch paginated files for the UI
 // Args: { offset: number, limit: number }
 // Returns: array of rows [{ id, filename, thumbnail_path, path, width, height, file_type }]
-ipcMain.handle("fetch-files", async (event, { offset = 0, limit = 200, filters = {}, settings = {}, idsOnly = false }) => {
-  try {
-    initDatabase();
+ipcMain.handle(
+  "fetch-files",
+  async (
+    event,
+    { offset = 0, limit = 200, filters = {}, settings = {}, idsOnly = false },
+  ) => {
+    try {
+      initDatabase();
 
-    let whereClauses = [];
-    const params = [];
+      const { sql: whereSQL, params } = buildWhereClause(filters);
 
-    filters = filters ?? {};
-
-    if (Array.isArray(filters.ids) && filters.ids.length > 0) {
-      whereClauses.push(applyIdsFilter(db, filters.ids));
-    }
-
-    const localDateExpr = `
-      CASE
-        WHEN create_date_local IS NOT NULL
-          THEN date(create_date_local)
-        WHEN create_date IS NOT NULL
-          THEN date(datetime(create_date, 'unixepoch', 'localtime'))
-        ELSE
-          date(datetime(MIN(created, modified), 'unixepoch', 'localtime'))
-      END
-    `;
-
-    if (filters.dateFrom) {
-      whereClauses.push(`${localDateExpr} >= date(?)`);
-      params.push(filters.dateFrom); // e.g. "2024-01-01"
-    }
-    if (filters.dateTo) {
-      whereClauses.push(`${localDateExpr} <= date(?)`);
-      params.push(filters.dateTo); // e.g. "2024-12-31"
-    }
-    if (filters.dateExact) {
-      whereClauses.push(`${localDateExpr} = date(?)`);
-      params.push(filters.dateExact); // e.g. "2024-03-15"
-    }
-    if (filters.device) {
-      whereClauses.push("device_model = ?");
-      params.push(filters.device);
-    }
-    if (filters.folder) {
-      whereClauses.push("folder_path = ?");
-      params.push(filters.folder);
-    }
-    if (filters.filetype) {
-      whereClauses.push("extension = ?");
-      params.push(filters.filetype);
-    }
-    if (filters.mediaType) {
-      whereClauses.push("file_type = ?");
-      params.push(filters.mediaType);
-    }
-    if (filters.country) {
-      whereClauses.push("country = ?");
-      params.push(filters.country);
-    }
-    if (filters.tagId) {
-      whereClauses.push(`
-        id IN (
-          SELECT value
-          FROM tags, json_each(tags.media_ids)
-          WHERE tags.id = ?
-        )
-      `);
-      params.push(Number(filters.tagId));
-    }
-
-
-    // --- search ---
-    if (filters.searchBy && filters.searchTerm) {
-      if (filters.searchBy === "media_id") {
-        whereClauses.push("media_id = ?");
-        params.push(filters.searchTerm);
-      } else if (filters.searchBy === "name") {
-        whereClauses.push("filename LIKE ?");
-        params.push(`%${filters.searchTerm}%`);
-      }
-    }
-
-    // --- sorting ---
-    let orderSQL = "";
-    if (filters.sortBy === "random") {
-      orderSQL = "ORDER BY RANDOM()";
-    } else if (Array.isArray(filters.ids) && filters.ids.length > 0 && filters._smartSearch) {
-      // Smart search: preserve similarity rank order supplied by the caller.
-      // temp_ids.rank was populated in the same order as filters.ids.
-      orderSQL = `ORDER BY (SELECT rank FROM temp_ids WHERE temp_ids.id = files.id) ASC`;
-    } else {
-      const validSorts = ["media_id", "filename", "create_date_local", "created", "size"];
-      const safeSortBy = validSorts.includes(filters.sortBy)
-        ? filters.sortBy
-        : (settings && settings.defaultSort ? settings.defaultSort : "media_id");
-      const safeSortOrder = filters.sortOrder ? filters.sortOrder.toUpperCase() : "DESC";
-      if (filters.sortBy === "create_date_local") {
-        orderSQL = `ORDER BY
+      // --- sorting ---
+      let orderSQL = "";
+      if (filters.sortBy === "random") {
+        orderSQL = "ORDER BY RANDOM()";
+      } else if (
+        Array.isArray(filters.ids) &&
+        filters.ids.length > 0 &&
+        filters._smartSearch
+      ) {
+        // Smart search: preserve similarity rank order supplied by the caller.
+        // temp_ids.rank was populated in the same order as filters.ids.
+        orderSQL = `ORDER BY (SELECT rank FROM temp_ids WHERE temp_ids.id = files.id) ASC`;
+      } else {
+        const validSorts = [
+          "media_id",
+          "filename",
+          "create_date_local",
+          "created",
+          "size",
+        ];
+        const safeSortBy = validSorts.includes(filters.sortBy)
+          ? filters.sortBy
+          : settings && settings.defaultSort
+            ? settings.defaultSort
+            : "media_id";
+        const safeSortOrder = filters.sortOrder
+          ? filters.sortOrder.toUpperCase()
+          : "DESC";
+        if (filters.sortBy === "create_date_local") {
+          orderSQL = `ORDER BY
           CASE
             WHEN create_date_local IS NOT NULL THEN create_date_local
             ELSE datetime(create_date, 'unixepoch', 'localtime')
           END ${safeSortOrder}`;
-      } else {
-        orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
+        } else {
+          orderSQL = `ORDER BY ${safeSortBy} ${safeSortOrder}`;
+        }
       }
-    }
 
-    const whereSQL = whereClauses.length ? "WHERE " + whereClauses.join(" AND ") : "";
+      if (idsOnly) {
+        const stmt = db.prepare(`SELECT id FROM files ${whereSQL} ${orderSQL}`);
+        const rows = stmt.all(...params);
+        return { success: true, rows, totalCount: rows.length };
+      }
 
-    if (idsOnly) {
-      const stmt = db.prepare(`SELECT id FROM files ${whereSQL} ${orderSQL}`);
-      const rows = stmt.all(...params);
-      return { success: true, rows, totalCount: rows.length };
-    }
+      const countStmt = db.prepare(
+        `SELECT COUNT(*) as count FROM files ${whereSQL}`,
+      );
+      const totalCount = countStmt.get(...params).count;
 
-    const countStmt = db.prepare(`SELECT COUNT(*) as count FROM files ${whereSQL}`);
-    const totalCount = countStmt.get(...params).count;
-    
-    const stmt = db.prepare(`
+      const stmt = db.prepare(`
       SELECT *
       FROM files
       ${whereSQL}
       ${orderSQL}
       LIMIT ? OFFSET ?
     `);
-    
-    const rows = stmt.all(...params, limit, offset);
 
-    const map = getDriveLetterMap();
-    const mappedRows = rows.map(r => ({
-      ...r,
-      path: applyDriveLetterMap(r.path, map),
-      folder_path: applyDriveLetterMap(r.folder_path, map),
-    }));
+      const rows = stmt.all(...params, limit, offset);
 
-    return { success: true, rows: mappedRows, totalCount };
-  } catch (err) {
-    console.error("fetch-files error:", err);
-    return { success: false, error: err.message, rows: [], totalCount: 0 };
-  }
+      const map = getDriveLetterMap();
+      const mappedRows = rows.map((r) => ({
+        ...r,
+        path: applyDriveLetterMap(r.path, map),
+        folder_path: applyDriveLetterMap(r.folder_path, map),
+      }));
+
+      return { success: true, rows: mappedRows, totalCount };
+    } catch (err) {
+      console.error("fetch-files error:", err);
+      return { success: false, error: err.message, rows: [], totalCount: 0 };
+    }
+  },
+);
+
+ipcMain.handle("fetch-file-overview", async (event, { filters = {}, settings = {} }) => {
+  initDatabase();
+
+  const { sql: whereSQL, params } = buildWhereClause(filters);
+
+  const stmt = db.prepare(`
+    SELECT id, thumbnail_path
+    FROM files
+    ${whereSQL}
+    ORDER BY media_id DESC
+  `);
+
+  const rows = stmt.all(...params);
+
+  return { success: true, rows };
 });
 
-ipcMain.handle("fetch-map-data", async (event, { filters = {}, settings = {} } = {}) => {
-  try {
-    initDatabase();
+ipcMain.handle(
+  "fetch-map-data",
+  async (event, { filters = {}, settings = {} } = {}) => {
+    try {
+      initDatabase();
 
-    let whereClauses = ["latitude IS NOT NULL", "longitude IS NOT NULL"];
-    const params = [];
+      const { sql, params } = buildWhereClause(filters, {
+        allowUndated: true,
+      });
 
-    filters = filters ?? {};
+      const whereSQL = [
+        "latitude IS NOT NULL",
+        "longitude IS NOT NULL",
+        sql.replace(/^WHERE\s*/, ""),
+      ]
+        .filter(Boolean)
+        .join(" AND ");
 
-    if (Array.isArray(filters.ids) && filters.ids.length > 0) {
-      whereClauses.push(applyIdsFilter(db, filters.ids));
-    }
-
-    const localDateExpr = `
-      CASE
-        WHEN create_date_local IS NOT NULL
-          THEN date(create_date_local)
-        WHEN create_date IS NOT NULL
-          THEN date(datetime(create_date, 'unixepoch', 'localtime'))
-        ELSE
-          date(datetime(MIN(created, modified), 'unixepoch', 'localtime'))
-      END
-    `;
-
-    if (filters.dateFrom) {
-      whereClauses.push(`${localDateExpr} >= date(?)`);
-      params.push(filters.dateFrom);
-    }
-    if (filters.dateTo) {
-      whereClauses.push(`${localDateExpr} <= date(?)`);
-      params.push(filters.dateTo);
-    }
-    if (filters.dateExact) {
-      whereClauses.push(`${localDateExpr} = date(?)`);
-      params.push(filters.dateExact);
-    }
-    if (filters.device) {
-      whereClauses.push("device_model = ?");
-      params.push(filters.device);
-    }
-    if (filters.folder) {
-      whereClauses.push("folder_path = ?");
-      params.push(filters.folder);
-    }
-    if (filters.filetype) {
-      whereClauses.push("extension = ?");
-      params.push(filters.filetype);
-    }
-    if (filters.mediaType) {
-      whereClauses.push("file_type = ?");
-      params.push(filters.mediaType);
-    }
-    if (filters.country) {
-      whereClauses.push("country = ?");
-      params.push(filters.country);
-    }
-    if (filters.tagId) {
-      whereClauses.push(`
-        id IN (
-          SELECT value
-          FROM tags, json_each(tags.media_ids)
-          WHERE tags.id = ?
-        )
-      `);
-      params.push(Number(filters.tagId));
-    }
-
-    const whereSQL = "WHERE " + whereClauses.join(" AND ");
-
-    const rows = db.prepare(`
+      const rows = db
+        .prepare(
+          `
       SELECT latitude, longitude, altitude, country, create_date, filename, device_model
       FROM files
       ${whereSQL}
-    `).all(...params);
+    `,
+        )
+        .all(...params);
 
-    const points = [];
-    const heat = [];
-    const countryCounts = {};
-    const countryBounds = {};
-    let lineSegments = [];
-    let currentSegment = [];
-    let lastPoint = null;
+      const points = [];
+      const heat = [];
+      const countryCounts = {};
+      const countryBounds = {};
+      let lineSegments = [];
+      let currentSegment = [];
+      let lastPoint = null;
 
-    const haversineDistance = (a, b) => {
-      const R = 6371;
-      const toRad = x => (x * Math.PI) / 180;
-      const dLat = toRad(b[0] - a[0]);
-      const dLon = toRad(b[1] - a[1]);
-      const lat1 = toRad(a[0]);
-      const lat2 = toRad(b[0]);
-      const h =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
-      return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-    };
+      const haversineDistance = (a, b) => {
+        const R = 6371;
+        const toRad = (x) => (x * Math.PI) / 180;
+        const dLat = toRad(b[0] - a[0]);
+        const dLon = toRad(b[1] - a[1]);
+        const lat1 = toRad(a[0]);
+        const lat2 = toRad(b[0]);
+        const h =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+        return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+      };
 
-    for (const item of rows) {
-      const latlng = [item.latitude, item.longitude];
-      points.push({
-        lat: item.latitude,
-        lng: item.longitude,
-        popup: {
-          filename: item.filename,
-          date: item.create_date,
-          device: item.device_model,
-          country: item.country,
-          altitude: item.altitude,
-        },
-      });
-      heat.push([item.latitude, item.longitude, 1]);
-      if (item.altitude && item.altitude <= 1500 && item.country) {
-        countryCounts[item.country] = (countryCounts[item.country] || 0) + 1;
-        (countryBounds[item.country] ||= []).push(latlng);
-        if (lastPoint) {
-          const dist = haversineDistance(lastPoint, latlng);
-          if (dist > 200) {
-            if (currentSegment.length > 1) lineSegments.push(currentSegment);
-            currentSegment = [];
+      for (const item of rows) {
+        const latlng = [item.latitude, item.longitude];
+        points.push({
+          lat: item.latitude,
+          lng: item.longitude,
+          popup: {
+            filename: item.filename,
+            date: item.create_date,
+            device: item.device_model,
+            country: item.country,
+            altitude: item.altitude,
+          },
+        });
+        heat.push([item.latitude, item.longitude, 1]);
+        if (item.altitude && item.altitude <= 1500 && item.country) {
+          countryCounts[item.country] = (countryCounts[item.country] || 0) + 1;
+          (countryBounds[item.country] ||= []).push(latlng);
+          if (lastPoint) {
+            const dist = haversineDistance(lastPoint, latlng);
+            if (dist > 200) {
+              if (currentSegment.length > 1) lineSegments.push(currentSegment);
+              currentSegment = [];
+            }
           }
+          currentSegment.push(latlng);
+          lastPoint = latlng;
         }
-        currentSegment.push(latlng);
-        lastPoint = latlng;
       }
+
+      if (currentSegment.length > 1) lineSegments.push(currentSegment);
+
+      return {
+        success: true,
+        points,
+        heat,
+        lines: lineSegments,
+        countryCounts,
+        countryBounds,
+      };
+    } catch (err) {
+      console.error("fetch-map-data error:", err);
+      return { success: false, error: err.message };
     }
-
-    if (currentSegment.length > 1) lineSegments.push(currentSegment);
-
-    return {
-      success: true,
-      points,
-      heat,
-      lines: lineSegments,
-      countryCounts,
-      countryBounds,
-    };
-  } catch (err) {
-    console.error("fetch-map-data error:", err);
-    return { success: false, error: err.message };
-  }
-});
+  },
+);
 
 // Load the mapped JSON once on startup
-const countriesPath = path.join(__dirname, 'countries_mapped.json');
-const countriesMap = JSON.parse(fs.readFileSync(countriesPath, 'utf8'));
+const countriesPath = path.join(__dirname, "countries_mapped.json");
+const countriesMap = JSON.parse(fs.readFileSync(countriesPath, "utf8"));
 
-ipcMain.handle('get-country-name', async (event, isoCode) => {
+ipcMain.handle("get-country-name", async (event, isoCode) => {
   if (!isoCode) return null;
 
   // Normalize code to uppercase
@@ -884,91 +926,17 @@ ipcMain.handle('get-country-name', async (event, isoCode) => {
   return countriesMap[code] || null;
 });
 
-
-ipcMain.handle("get-filtered-files-count", async (event, { filters }) => {
+ipcMain.handle("get-filtered-files-count", async (event, args = {}) => {
   try {
     initDatabase();
 
-    let query = "SELECT COUNT(*) as count FROM files";
-    const conditions = [];
-    const params = [];
+    const filters = args.filters ?? {};
 
-    filters = filters ?? {};
+    const { sql, params } = buildWhereClause(filters);
 
-    if (Array.isArray(filters.ids) && filters.ids.length > 0) {
-      conditions.push(applyIdsFilter(db, filters.ids));
-    }
-
-    if (filters) {
-      const localDateExpr = `
-        CASE
-          WHEN create_date_local IS NOT NULL
-            THEN date(create_date_local)
-          WHEN create_date IS NOT NULL
-            THEN date(datetime(create_date, 'unixepoch', 'localtime'))
-          ELSE
-            date(datetime(MIN(created, modified), 'unixepoch', 'localtime'))
-        END
-      `;
-
-      if (filters.dateFrom) {
-        conditions.push(`${localDateExpr} >= date(?)`);
-        params.push(filters.dateFrom);
-      }
-      if (filters.dateTo) {
-        conditions.push(`${localDateExpr} <= date(?)`);
-        params.push(filters.dateTo);
-      }
-      if (filters.dateExact) {
-        conditions.push(`${localDateExpr} = date(?)`);
-        params.push(filters.dateExact);
-      }
-      if (filters.device) {
-        conditions.push("device_model = ?");
-        params.push(filters.device);
-      }
-      if (filters.filetype) {
-        conditions.push("extension = ?");
-        params.push(filters.filetype);
-      }
-      if (filters.folder) {
-        conditions.push("folder_path = ?");
-        params.push(filters.folder);
-      }
-      if (filters.mediaType) {
-        conditions.push("file_type = ?");
-        params.push(filters.mediaType);
-      }
-      if (filters.country) {
-        conditions.push("country = ?");
-        params.push(filters.country);
-      }
-      if (filters.tagId) {
-        conditions.push(`
-          id IN (
-            SELECT value
-            FROM tags, json_each(tags.media_ids)
-            WHERE tags.id = ?
-          )
-        `);
-        params.push(Number(filters.tagId));
-      }
-      if (filters.searchBy && filters.searchTerm) {
-        if (filters.searchBy === "media_id") {
-          conditions.push("media_id = ?");
-          params.push(filters.searchTerm);
-        } else if (filters.searchBy === "name") {
-          conditions.push("filename LIKE ?");
-          params.push(`%${filters.searchTerm}%`);
-        }
-      }
-    }
-
-    if (conditions.length > 0) {
-      query += " WHERE " + conditions.join(" AND ");
-    }
-
-    const result = db.prepare(query).get(params);
+    const result = db
+      .prepare(`SELECT COUNT(*) as count FROM files ${sql}`)
+      .get(...params);
 
     return result?.count || 0;
   } catch (err) {
@@ -981,15 +949,20 @@ ipcMain.handle("tag:add-item", async (event, { tagId, mediaId }) => {
   try {
     initDatabase();
 
-    const tagRow = db.prepare("SELECT media_ids FROM tags WHERE id = ?").get(tagId);
+    const tagRow = db
+      .prepare("SELECT media_ids FROM tags WHERE id = ?")
+      .get(tagId);
     if (!tagRow) throw new Error(`Tag ${tagId} not found`);
 
     const ids = JSON.parse(tagRow.media_ids || "[]");
     if (!ids.includes(mediaId)) ids.push(mediaId);
 
     const now = Date.now();
-    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
-      .run(JSON.stringify(ids), now, tagId);
+    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?").run(
+      JSON.stringify(ids),
+      now,
+      tagId,
+    );
 
     return { success: true, ids };
   } catch (err) {
@@ -1002,14 +975,21 @@ ipcMain.handle("tag:remove-item", async (event, { tagId, mediaId }) => {
   try {
     initDatabase();
 
-    const tagRow = db.prepare("SELECT media_ids FROM tags WHERE id = ?").get(tagId);
+    const tagRow = db
+      .prepare("SELECT media_ids FROM tags WHERE id = ?")
+      .get(tagId);
     if (!tagRow) throw new Error(`Tag ${tagId} not found`);
 
-    const ids = JSON.parse(tagRow.media_ids || "[]").filter((id) => id !== mediaId);
+    const ids = JSON.parse(tagRow.media_ids || "[]").filter(
+      (id) => id !== mediaId,
+    );
 
     const now = Date.now();
-    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
-      .run(JSON.stringify(ids), now, tagId);
+    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?").run(
+      JSON.stringify(ids),
+      now,
+      tagId,
+    );
 
     return { success: true, ids };
   } catch (err) {
@@ -1023,40 +1003,40 @@ ipcMain.handle("index-files", async (event, folders) => {
     initDatabase();
 
     for (const folder of folders) {
-        // Load existing files for this folder
-        const existingPaths = loadIndexedPaths();
+      // Load existing files for this folder
+      const existingPaths = loadIndexedPaths();
 
-        db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)").run(folder);
+      db.prepare("INSERT OR IGNORE INTO folders (path) VALUES (?)").run(folder);
 
-        // Count total files once for progress tracking
-        const totalFiles = countTotalFiles(folder, existingPaths);
-        let processedFiles = 0;
+      // Count total files once for progress tracking
+      const totalFiles = countTotalFiles(folder, existingPaths);
+      let processedFiles = 0;
 
-        // Send initial progress
+      // Send initial progress
+      if (mainWindow) {
+        mainWindow.webContents.send("indexing-progress", {
+          filename: "",
+          processed: 0,
+          total: totalFiles,
+          percentage: 0,
+        });
+      }
+
+      // New async call style
+      await indexFilesRecursively(folder, existingPaths, (processed) => {
+        processedFiles = processed;
+        const percentage =
+          totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0;
+
         if (mainWindow) {
           mainWindow.webContents.send("indexing-progress", {
             filename: "",
-            processed: 0,
+            processed: processedFiles,
             total: totalFiles,
-            percentage: 0,
+            percentage,
           });
         }
-
-        // New async call style
-        await indexFilesRecursively(folder, existingPaths, (processed) => {
-          processedFiles = processed;
-          const percentage =
-            totalFiles > 0 ? Math.round((processedFiles / totalFiles) * 100) : 0;
-
-          if (mainWindow) {
-            mainWindow.webContents.send("indexing-progress", {
-              filename: "",
-              processed: processedFiles,
-              total: totalFiles,
-              percentage,
-            });
-          }
-        });
+      });
     }
 
     return { success: true, message: "Files indexed successfully" };
@@ -1068,16 +1048,51 @@ ipcMain.handle("index-files", async (event, folders) => {
 
 async function generateThumbnail(filePath, id) {
   const ext = path.extname(filePath).toLowerCase();
-  const imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"];
-  const videoExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".3gp", ".flv"];
+  const imageExtensions = [
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".tif",
+    ".webp",
+  ];
+  const videoExtensions = [
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mkv",
+    ".webm",
+    ".wmv",
+    ".3gp",
+    ".flv",
+  ];
   const rawExtensions = [
-    ".dng", ".cr2", ".nef", ".arw", ".orf", ".rw2",
-    ".raw", ".raf", ".pef", ".srw", ".x3f", ".kdc",
-    ".dcr", ".mrw", ".erf", ".3fr", ".mef", ".rwl", ".iiq"
+    ".dng",
+    ".cr2",
+    ".nef",
+    ".arw",
+    ".orf",
+    ".rw2",
+    ".raw",
+    ".raf",
+    ".pef",
+    ".srw",
+    ".x3f",
+    ".kdc",
+    ".dcr",
+    ".mrw",
+    ".erf",
+    ".3fr",
+    ".mef",
+    ".rwl",
+    ".iiq",
   ];
 
   const thumbnailsDir = path.join(dataDir, "thumbnails");
-  if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true });
+  if (!fs.existsSync(thumbnailsDir))
+    fs.mkdirSync(thumbnailsDir, { recursive: true });
 
   const thumbnailFilename = `${id}_thumb.jpg`;
   const thumbnailPath = path.join(thumbnailsDir, thumbnailFilename);
@@ -1118,7 +1133,7 @@ async function generateThumbnail(filePath, id) {
             timestamps: ["10%"], // capture a frame ~10% into the video
             filename: thumbnailFilename,
             folder: thumbnailsDir,
-            size: "200x?"
+            size: "200x?",
           });
       });
 
@@ -1139,9 +1154,13 @@ ipcMain.handle("minimize-app", (event) => {
 
 ipcMain.handle("fetch-heic-missing-thumbnails", async () => {
   initDatabase();
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT id, path FROM files WHERE extension = '.heic' AND thumbnail_path IS NULL
-  `).all();
+  `,
+    )
+    .all();
   return { success: true, files: rows };
 });
 
@@ -1169,21 +1188,23 @@ ipcMain.handle("cleanup-heic-temp", async () => {
 });
 
 ipcMain.handle("generate-heic-script", async (event, files) => {
-    const thumbsPath = path.join(dataDir, "thumbs");
-    const tempJsonPath = path.join(dataDir, "heic_missing.json");
-    const tempScriptPath = path.join(dataDir, "generate_heic_thumbs.py");
+  const thumbsPath = path.join(dataDir, "thumbs");
+  const tempJsonPath = path.join(dataDir, "heic_missing.json");
+  const tempScriptPath = path.join(dataDir, "generate_heic_thumbs.py");
 
-    // 🧹 cleanup old files first
-    [thumbsPath, tempJsonPath, tempScriptPath].forEach((p) => {
-      if (fs.existsSync(p)) {
-        fs.rmSync(p, { recursive: true, force: true });
-      }
-    });
+  // 🧹 cleanup old files first
+  [thumbsPath, tempJsonPath, tempScriptPath].forEach((p) => {
+    if (fs.existsSync(p)) {
+      fs.rmSync(p, { recursive: true, force: true });
+    }
+  });
   const jsonPath = path.join(dataDir, "heic_missing.json");
   fs.writeFileSync(jsonPath, JSON.stringify(files, null, 2));
 
   const pythonScriptPath = path.join(dataDir, "generate_heic_thumbs.py");
-fs.writeFileSync(pythonScriptPath, `
+  fs.writeFileSync(
+    pythonScriptPath,
+    `
 import json
 import os
 from PIL import Image
@@ -1228,15 +1249,14 @@ def main():
 
 if __name__ == "__main__":
     main()
-`);
-
+`,
+  );
 
   shell.showItemInFolder(pythonScriptPath); // highlight file in Explorer
   shell.showItemInFolder(jsonPath);
 
   return { success: true, message: "Python script and JSON ready!" };
 });
-
 
 // Metadata extraction using exiftool
 async function extractMetadata(filePath) {
@@ -1264,7 +1284,7 @@ async function extractMetadata(filePath) {
     aperture: null,
     focal_length: null,
     focal_length_35mm: null,
-    country: null
+    country: null,
   };
 
   const ext = path.extname(filePath).toLowerCase();
@@ -1285,11 +1305,11 @@ async function extractMetadata(filePath) {
 
     // RAW camera formats
     ".dng",
-    ".cr2",   // Canon
-    ".nef",   // Nikon
-    ".arw",   // Sony
-    ".orf",   // Olympus
-    ".rw2",   // Panasonic
+    ".cr2", // Canon
+    ".nef", // Nikon
+    ".arw", // Sony
+    ".orf", // Olympus
+    ".rw2", // Panasonic
 
     // Vector / other
     ".svg",
@@ -1344,20 +1364,27 @@ async function extractMetadata(filePath) {
     if (exifData.GPSLatitude && exifData.GPSLongitude) {
       metadata.latitude = exifData.GPSLatitude;
       metadata.longitude = exifData.GPSLongitude;
-      metadata.country = lookup(exifData.GPSLatitude, exifData.GPSLongitude, true)
+      metadata.country = lookup(
+        exifData.GPSLatitude,
+        exifData.GPSLongitude,
+        true,
+      );
     }
 
     // Altitude
     if (exifData.GPSAltitude) metadata.altitude = exifData.GPSAltitude;
-    
+
     // Create date priority:
     // 1. DateTimeOriginal — camera shutter time, already local, most accurate
     // 2. CreationDate    — MOV/MP4 field, includes timezone offset (e.g. "2024:01:01 00:09:28+01:00")
     // 3. CreateDate      — UTC-only fallback, least reliable for local time
     const rawDate = exifData.DateTimeOriginal ?? exifData.CreationDate ?? null;
     if (rawDate) {
-      const dateStr = typeof rawDate === "object" ? rawDate.toString() : rawDate;
-      const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').replace('T', ' ');
+      const dateStr =
+        typeof rawDate === "object" ? rawDate.toString() : rawDate;
+      const normalised = dateStr
+        .replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3")
+        .replace("T", " ");
       metadata.create_date_local = normalised.substring(0, 19);
       metadata.create_date = Math.floor(new Date(normalised).getTime() / 1000);
     } else {
@@ -1365,15 +1392,23 @@ async function extractMetadata(filePath) {
       const fromFilename = parseFilenameDateTime(filePath);
       if (fromFilename) {
         metadata.create_date_local = fromFilename;
-        metadata.create_date = Math.floor(new Date(fromFilename).getTime() / 1000);
+        metadata.create_date = Math.floor(
+          new Date(fromFilename).getTime() / 1000,
+        );
       } else {
         // Fallback 4: CreateDate (UTC) — store as-is, create_date_local will be wrong by UTC offset
         const utcRaw = exifData.CreateDate;
         if (utcRaw) {
-          const dateStr = typeof utcRaw === "object" ? utcRaw.toString() : utcRaw;
-          const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+          const dateStr =
+            typeof utcRaw === "object" ? utcRaw.toString() : utcRaw;
+          const normalised = dateStr.replace(
+            /^(\d{4}):(\d{2}):(\d{2})/,
+            "$1-$2-$3",
+          );
           metadata.create_date_local = null; // explicitly null — UTC is not local time
-          metadata.create_date = Math.floor(new Date(normalised).getTime() / 1000);
+          metadata.create_date = Math.floor(
+            new Date(normalised).getTime() / 1000,
+          );
         }
       }
     }
@@ -1382,9 +1417,10 @@ async function extractMetadata(filePath) {
     metadata.iso = exifData.ISO || null;
     metadata.software = exifData.Software || null;
     metadata.offset_time_original = exifData.OffsetTimeOriginal || null;
-    metadata.megapixels = (exifData.ExifImageWidth && exifData.ExifImageHeight)
-      ? (exifData.ExifImageWidth * exifData.ExifImageHeight) / 1_000_000
-      : null;
+    metadata.megapixels =
+      exifData.ExifImageWidth && exifData.ExifImageHeight
+        ? (exifData.ExifImageWidth * exifData.ExifImageHeight) / 1_000_000
+        : null;
     metadata.exposure_time = exifData.ExposureTime || null;
     metadata.color_space = exifData.ColorSpace || null;
     metadata.flash = exifData.Flash || null;
@@ -1401,10 +1437,10 @@ async function extractMetadata(filePath) {
 const pLimit = require("p-limit");
 const os = require("os");
 const cpuCount = os.cpus().length;
-const METADATA_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 2));  // 1 task per 2 cores
+const METADATA_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 2)); // 1 task per 2 cores
 const THUMBNAIL_CONCURRENCY = Math.max(1, Math.floor(cpuCount / 3)); // 1 task per 3 cores
-const BATCH_SIZE = 1000;             // insert batch size
-const dbWriteLimit = pLimit(1)
+const BATCH_SIZE = 1000; // insert batch size
+const dbWriteLimit = pLimit(1);
 
 // Count total files for progress tracking
 function countTotalFiles(folderPath, existingPaths = new Set()) {
@@ -1417,7 +1453,8 @@ function countTotalFiles(folderPath, existingPaths = new Set()) {
     if (entry.isDirectory()) {
       total += countTotalFiles(fullPath, existingPaths);
     } else if (entry.isFile()) {
-      if (!existingPaths.has(fullPath)) {  // Only count files not yet indexed
+      if (!existingPaths.has(fullPath)) {
+        // Only count files not yet indexed
         total++;
       }
     }
@@ -1443,13 +1480,17 @@ async function* walkDir(dir) {
 function loadIndexedPaths() {
   const rows = db.prepare("SELECT path FROM files").all();
   const removedRows = db.prepare("SELECT path FROM removed_files").all();
-  const set = new Set(rows.map(r => r.path));
+  const set = new Set(rows.map((r) => r.path));
   for (const r of removedRows) set.add(r.path);
   return set;
 }
 
 // Main indexing function
-async function indexFilesRecursively(rootFolder, existingPaths, progressCallback) {
+async function indexFilesRecursively(
+  rootFolder,
+  existingPaths,
+  progressCallback,
+) {
   const insertStmt = db.prepare(`
     INSERT OR REPLACE INTO files 
     (media_id, filename, path, size, created, modified, extension, folder_path,
@@ -1501,63 +1542,129 @@ async function indexFilesRecursively(rootFolder, existingPaths, progressCallback
   }
 }
 
-ipcMain.handle("fetch-options", async (event, {birthDate = null}) => {
+ipcMain.handle("fetch-options", async (event, { birthDate = null }) => {
   try {
     initDatabase();
 
-    const devices = db.prepare("SELECT DISTINCT device_model FROM files WHERE device_model IS NOT NULL").all().map(r => r.device_model);
+    const devices = db
+      .prepare(
+        "SELECT DISTINCT device_model FROM files WHERE device_model IS NOT NULL",
+      )
+      .all()
+      .map((r) => r.device_model);
     const driveMap = getDriveLetterMap();
-    const folders = db.prepare("SELECT DISTINCT folder_path FROM files WHERE folder_path IS NOT NULL").all().map(r => ({
-      value: r.folder_path,
-      label: applyDriveLetterMap(r.folder_path, driveMap),
-    }));
-    const filetypes = db.prepare("SELECT DISTINCT extension FROM files WHERE extension IS NOT NULL").all().map(r => r.extension);
-    const mediaTypes = db.prepare("SELECT DISTINCT file_type FROM files WHERE file_type IS NOT NULL").all().map(r => r.file_type);
-    const countries = db.prepare("SELECT DISTINCT country FROM files WHERE country IS NOT NULL").all().map(r => r.country);
-    const tags = db.prepare(`
+    const folders = db
+      .prepare(
+        "SELECT DISTINCT folder_path FROM files WHERE folder_path IS NOT NULL",
+      )
+      .all()
+      .map((r) => ({
+        value: r.folder_path,
+        label: applyDriveLetterMap(r.folder_path, driveMap),
+      }));
+    const filetypes = db
+      .prepare(
+        "SELECT DISTINCT extension FROM files WHERE extension IS NOT NULL",
+      )
+      .all()
+      .map((r) => r.extension);
+    const mediaTypes = db
+      .prepare(
+        "SELECT DISTINCT file_type FROM files WHERE file_type IS NOT NULL",
+      )
+      .all()
+      .map((r) => r.file_type);
+    const countries = db
+      .prepare("SELECT DISTINCT country FROM files WHERE country IS NOT NULL")
+      .all()
+      .map((r) => r.country);
+    const tags = db
+      .prepare(
+        `
       SELECT id, name
       FROM tags
       WHERE media_ids IS NOT NULL AND json_array_length(media_ids) > 0
-    `).all();
+    `,
+      )
+      .all();
+    const lenses = db
+      .prepare(
+        "SELECT DISTINCT lens_model FROM files WHERE lens_model IS NOT NULL",
+      )
+      .all()
+      .map((r) => r.lens_model);
 
-    const dateRange = db.prepare(`
+    const dateRange = db
+      .prepare(
+        `
       SELECT
         MIN(CASE WHEN create_date_local IS NOT NULL THEN date(create_date_local) ELSE date(datetime(create_date, 'unixepoch', 'localtime')) END) AS min,
         MAX(CASE WHEN create_date_local IS NOT NULL THEN date(create_date_local) ELSE date(datetime(create_date, 'unixepoch', 'localtime')) END) AS max
       FROM files
       WHERE create_date_local IS NOT NULL OR create_date IS NOT NULL
-    `).get();
-
+    `,
+      )
+      .get();
 
     let minDate = "";
     let maxDate = "";
     let years = [];
 
     if (dateRange?.min && dateRange?.max) {
-      minDate = dateRange.min;  // already "YYYY-MM-DD" from SQLite date()
+      minDate = dateRange.min; // already "YYYY-MM-DD" from SQLite date()
       maxDate = dateRange.max;
 
       const startYear = new Date(minDate).getFullYear();
       const endYear = new Date(maxDate).getFullYear();
-      years = Array.from({ length: endYear - startYear + 1 }, (_, i) => endYear - i);
+      years = Array.from(
+        { length: endYear - startYear + 1 },
+        (_, i) => endYear - i,
+      );
     }
 
     let ages = [];
 
     if (dateRange?.min && dateRange?.max && birthDate) {
-      const minAge = ageOnDate(birthDate, new Date(dateRange.min).getTime() / 1000);
-      const maxAge = ageOnDate(birthDate, new Date(dateRange.max).getTime() / 1000);
-    
-      ages = Array.from(
-        { length: maxAge - minAge + 1 },
-        (_, i) => minAge + i
+      const minAge = ageOnDate(
+        birthDate,
+        new Date(dateRange.min).getTime() / 1000,
       );
+      const maxAge = ageOnDate(
+        birthDate,
+        new Date(dateRange.max).getTime() / 1000,
+      );
+
+      ages = Array.from({ length: maxAge - minAge + 1 }, (_, i) => minAge + i);
     }
 
-    return { devices, folders, filetypes, mediaTypes, countries, minDate, maxDate, years, tags, ages };
+    return {
+      devices,
+      folders,
+      filetypes,
+      mediaTypes,
+      countries,
+      minDate,
+      maxDate,
+      years,
+      tags,
+      ages,
+      lenses,
+    };
   } catch (err) {
     console.error("fetch-options error", err);
-    return { devices: [], folders: [], filetypes: [], mediaTypes: [], countries: [], minDate: "", maxDate: "", years: [], tags: [] };
+    return {
+      devices: [],
+      folders: [],
+      filetypes: [],
+      mediaTypes: [],
+      countries: [],
+      minDate: "",
+      maxDate: "",
+      years: [],
+      tags: [],
+      ages: [],
+      lenses: [],
+    };
   }
 });
 
@@ -1573,13 +1680,16 @@ function ageOnDate(birthDate, epochSeconds) {
   return age;
 }
 
-
 ipcMain.handle("fix-thumbnails", async () => {
   try {
     const limitThumb = pLimit(THUMBNAIL_CONCURRENCY);
 
     // Find all rows without thumbnails
-    const rows = db.prepare("SELECT id, path, folder_path FROM files WHERE thumbnail_path IS NULL").all();
+    const rows = db
+      .prepare(
+        "SELECT id, path, folder_path FROM files WHERE thumbnail_path IS NULL",
+      )
+      .all();
 
     if (rows.length === 0) {
       return { success: true, message: "No missing thumbnails found." };
@@ -1587,17 +1697,108 @@ ipcMain.handle("fix-thumbnails", async () => {
 
     for (const row of rows) {
       try {
-        const thumbPath = await limitThumb(() => generateThumbnail(row.path, row.id));
+        const thumbPath = await limitThumb(() =>
+          generateThumbnail(row.path, row.id),
+        );
 
         if (thumbPath) {
-          db.prepare("UPDATE files SET thumbnail_path = ? WHERE id = ?").run(thumbPath, row.id);
+          db.prepare("UPDATE files SET thumbnail_path = ? WHERE id = ?").run(
+            thumbPath,
+            row.id,
+          );
         }
       } catch (err) {
         console.error(`Failed to generate thumbnail for ${row.path}:`, err);
       }
     }
 
-    return { success: true, message: `Thumbnails fixed for ${rows.length} files.` };
+    return {
+      success: true,
+      message: `Thumbnails fixed for ${rows.length} files.`,
+    };
+  } catch (err) {
+    console.error(err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("generate-derived-thumbnails", async (event, size = 64) => {
+  try {
+    const pLimit = require("p-limit");
+    const limit = pLimit(THUMBNAIL_CONCURRENCY);
+
+    const path = require("path");
+    const fs = require("fs");
+
+    const thumbnailsDir = path.join(dataDir, "thumbnails");
+
+    // Get all files that already have a base thumbnail
+    const rows = db
+      .prepare(
+        `
+        SELECT id, thumbnail_path
+        FROM files
+        WHERE thumbnail_path IS NOT NULL
+      `,
+      )
+      .all();
+
+    if (rows.length === 0) {
+      return { success: true, message: "No base thumbnails found." };
+    }
+
+    let created = 0;
+    let skipped = 0;
+
+    const tasks = rows.map((row) =>
+  limit(async () => {
+    try {
+      const baseThumb = path.join(
+        thumbnailsDir,
+        `${row.id}_thumb.jpg`,
+      );
+
+      const derivedPath = path.join(
+        thumbnailsDir,
+        `${row.id}_thumb_${size}.jpg`,
+      );
+
+      // Skip if base doesn't exist
+      if (!fs.existsSync(baseThumb)) {
+        skipped++;
+        return;
+      }
+
+      // Skip if already exists
+      if (fs.existsSync(derivedPath)) {
+        skipped++;
+        return;
+      }
+
+      await sharp(baseThumb)
+        .resize(size, size, {
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: 70 })
+        .toFile(derivedPath);
+
+      created++;
+    } catch (err) {
+      console.error(`Failed derived thumbnail for id=${row.id}`, err);
+    }
+  }),
+);
+
+    await Promise.all(tasks);
+
+    return {
+      success: true,
+      message: `Derived ${size}px thumbnails created.`,
+      created,
+      skipped,
+      total: rows.length,
+    };
   } catch (err) {
     console.error(err);
     return { success: false, error: err.message };
@@ -1608,81 +1809,87 @@ ipcMain.handle("fix-thumbnails", async () => {
 async function insertBatch(rows, insertStmt, rootFolder, limitThumb) {
   // Transactional insert
   await dbWriteLimit(async () => {
-  const insertMany = db.transaction((batch) => {
-    let nextMediaId = (db.prepare("SELECT MAX(media_id) as max FROM files").get()?.max || 0) + 1;
-    for (const row of batch) {
-      try {
-        row.metadata.country = Array.isArray(row.metadata.country)
-          ? row.metadata.country.join(", ")
-          : row.metadata.country ?? null;
+    const insertMany = db.transaction((batch) => {
+      let nextMediaId =
+        (db.prepare("SELECT MAX(media_id) as max FROM files").get()?.max || 0) +
+        1;
+      for (const row of batch) {
+        try {
+          row.metadata.country = Array.isArray(row.metadata.country)
+            ? row.metadata.country.join(", ")
+            : (row.metadata.country ?? null);
 
-        const info = insertStmt.run(
-          nextMediaId++,
-          row.fileName,
-          row.fullPath,
-          row.stats.size,
-          Math.floor(row.stats.birthtimeMs / 1000),
-          Math.floor(row.stats.mtimeMs / 1000),
-          path.extname(row.fileName).toLowerCase(),
-          rootFolder,
-          row.metadata.file_type,
-          row.metadata.device_model,
-          row.metadata.camera_make,
-          row.metadata.camera_model,
-          row.metadata.width,
-          row.metadata.height,
-          row.metadata.orientation,
-          row.metadata.latitude,
-          row.metadata.longitude,
-          row.metadata.altitude,
-          row.metadata.create_date,
-          row.metadata.create_date_local,
-          null, // thumbnail path updated later
-          row.metadata.lens_model,
-          row.metadata.iso,
-          row.metadata.software,
-          row.metadata.offset_time_original,
-          row.metadata.megapixels,
-          row.metadata.exposure_time,
-          row.metadata.color_space,
-          row.metadata.flash,
-          row.metadata.aperture,
-          row.metadata.focal_length,
-          row.metadata.focal_length_35mm,
-          row.metadata.country
-        );
-        row.id = info.lastInsertRowid;
-      } catch (err) {
+          const info = insertStmt.run(
+            nextMediaId++,
+            row.fileName,
+            row.fullPath,
+            row.stats.size,
+            Math.floor(row.stats.birthtimeMs / 1000),
+            Math.floor(row.stats.mtimeMs / 1000),
+            path.extname(row.fileName).toLowerCase(),
+            rootFolder,
+            row.metadata.file_type,
+            row.metadata.device_model,
+            row.metadata.camera_make,
+            row.metadata.camera_model,
+            row.metadata.width,
+            row.metadata.height,
+            row.metadata.orientation,
+            row.metadata.latitude,
+            row.metadata.longitude,
+            row.metadata.altitude,
+            row.metadata.create_date,
+            row.metadata.create_date_local,
+            null, // thumbnail path updated later
+            row.metadata.lens_model,
+            row.metadata.iso,
+            row.metadata.software,
+            row.metadata.offset_time_original,
+            row.metadata.megapixels,
+            row.metadata.exposure_time,
+            row.metadata.color_space,
+            row.metadata.flash,
+            row.metadata.aperture,
+            row.metadata.focal_length,
+            row.metadata.focal_length_35mm,
+            row.metadata.country,
+          );
+          row.id = info.lastInsertRowid;
+        } catch (err) {
           console.error("Error inserting row:", {
             row: row,
-            error: err.message
+            error: err.message,
           });
           throw err; // rethrow so transaction fails
         }
-    }
-  });
+      }
+    });
 
-  // Inserts are serialized
-  insertMany(rows);
-});
+    // Inserts are serialized
+    insertMany(rows);
+  });
 
   // Generate thumbnails concurrently
   const thumbsToUpdate = [];
   await Promise.all(
     rows
-      .filter(r => ["image", "video"].includes(r.metadata.file_type))
-      .map(r => limitThumb(async () => {
-        const thumbPath = await generateThumbnail(r.fullPath, r.id);
-        if (thumbPath) {
-          thumbsToUpdate.push({ id: r.id, thumbPath });
-        }
-      }))
+      .filter((r) => ["image", "video"].includes(r.metadata.file_type))
+      .map((r) =>
+        limitThumb(async () => {
+          const thumbPath = await generateThumbnail(r.fullPath, r.id);
+          if (thumbPath) {
+            thumbsToUpdate.push({ id: r.id, thumbPath });
+          }
+        }),
+      ),
   );
 
   if (thumbsToUpdate.length > 0) {
     // Prepare once, reuse in a single transaction
     await dbWriteLimit(() => {
-      const updateStmt = db.prepare(`UPDATE files SET thumbnail_path = ? WHERE id = ?`);
+      const updateStmt = db.prepare(
+        `UPDATE files SET thumbnail_path = ? WHERE id = ?`,
+      );
       const updateMany = db.transaction((updates) => {
         for (const u of updates) {
           updateStmt.run(u.thumbPath, u.id);
@@ -1710,11 +1917,11 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
     initDatabase();
 
     // Get all files in this folder
-    const files = db.prepare(
-      "SELECT id, thumbnail_path FROM files WHERE folder_path = ?"
-    ).all(folderPath);
+    const files = db
+      .prepare("SELECT id, thumbnail_path FROM files WHERE folder_path = ?")
+      .all(folderPath);
 
-    const fileIds = new Set(files.map(f => f.id));
+    const fileIds = new Set(files.map((f) => f.id));
 
     // Delete thumbnails from disk
     for (const { thumbnail_path } of files) {
@@ -1722,7 +1929,11 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
         try {
           fs.unlinkSync(thumbnail_path);
         } catch (err) {
-          console.warn("Failed to delete thumbnail:", thumbnail_path, err.message);
+          console.warn(
+            "Failed to delete thumbnail:",
+            thumbnail_path,
+            err.message,
+          );
         }
       }
     }
@@ -1735,25 +1946,33 @@ ipcMain.handle("remove-folder-data", async (event, folderPath) => {
       db.prepare("DELETE FROM folders WHERE path = ?").run(folderPath);
 
       // Delete removed_files entries from this source
-      db.prepare("DELETE FROM removed_files WHERE folder_path = ?").run(folderPath);
+      db.prepare("DELETE FROM removed_files WHERE folder_path = ?").run(
+        folderPath,
+      );
 
       // Clean up tags
       const allTags = db.prepare("SELECT id, media_ids FROM tags").all();
-      const updateTag = db.prepare("UPDATE tags SET media_ids = ? WHERE id = ?");
+      const updateTag = db.prepare(
+        "UPDATE tags SET media_ids = ? WHERE id = ?",
+      );
       for (const tag of allTags) {
         const mediaIds = JSON.parse(tag.media_ids || "[]");
-        const filtered = mediaIds.filter(mid => !fileIds.has(Number(mid)));
+        const filtered = mediaIds.filter((mid) => !fileIds.has(Number(mid)));
         if (filtered.length !== mediaIds.length) {
           updateTag.run(JSON.stringify(filtered), tag.id);
         }
       }
 
       // Clean up memories
-      const allMemories = db.prepare("SELECT id, media_ids FROM memories").all();
-      const updateMemory = db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?");
+      const allMemories = db
+        .prepare("SELECT id, media_ids FROM memories")
+        .all();
+      const updateMemory = db.prepare(
+        "UPDATE memories SET media_ids = ? WHERE id = ?",
+      );
       for (const memory of allMemories) {
         const mediaIds = JSON.parse(memory.media_ids || "[]");
-        const filtered = mediaIds.filter(mid => !fileIds.has(Number(mid)));
+        const filtered = mediaIds.filter((mid) => !fileIds.has(Number(mid)));
         if (filtered.length !== mediaIds.length) {
           updateMemory.run(JSON.stringify(filtered), memory.id);
         }
@@ -1774,7 +1993,7 @@ ipcMain.handle("remove-item-from-index", async (event, ids) => {
     // Accept a single id or an array of ids
     const idList = Array.isArray(ids) ? ids : [ids];
 
-    if (!idList.length || idList.some(id => !id)) {
+    if (!idList.length || idList.some((id) => !id)) {
       throw new Error("No valid ID(s) provided");
     }
 
@@ -1783,9 +2002,13 @@ ipcMain.handle("remove-item-from-index", async (event, ids) => {
     db.transaction(() => {
       for (const id of idSet) {
         // 1. Record path in removed_files before deleting
-        const removed = db.prepare("SELECT path, folder_path FROM files WHERE id = ?").get(id);
+        const removed = db
+          .prepare("SELECT path, folder_path FROM files WHERE id = ?")
+          .get(id);
         if (removed?.path) {
-          db.prepare("INSERT OR IGNORE INTO removed_files (path, folder_path) VALUES (?, ?)").run(removed.path, removed.folder_path);
+          db.prepare(
+            "INSERT OR IGNORE INTO removed_files (path, folder_path) VALUES (?, ?)",
+          ).run(removed.path, removed.folder_path);
         }
 
         // 2. Remove item from DB
@@ -1794,21 +2017,27 @@ ipcMain.handle("remove-item-from-index", async (event, ids) => {
 
       // 3. Remove id(s) from all tags' media_ids
       const allTags = db.prepare("SELECT id, media_ids FROM tags").all();
-      const updateTag = db.prepare("UPDATE tags SET media_ids = ? WHERE id = ?");
+      const updateTag = db.prepare(
+        "UPDATE tags SET media_ids = ? WHERE id = ?",
+      );
       for (const tag of allTags) {
         const mediaIds = JSON.parse(tag.media_ids || "[]");
-        const filtered = mediaIds.filter(mid => !idSet.has(Number(mid)));
+        const filtered = mediaIds.filter((mid) => !idSet.has(Number(mid)));
         if (filtered.length !== mediaIds.length) {
           updateTag.run(JSON.stringify(filtered), tag.id);
         }
       }
 
       // 4. Remove id(s) from all memories' media_ids
-      const allMemories = db.prepare("SELECT id, media_ids FROM memories").all();
-      const updateMemory = db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?");
+      const allMemories = db
+        .prepare("SELECT id, media_ids FROM memories")
+        .all();
+      const updateMemory = db.prepare(
+        "UPDATE memories SET media_ids = ? WHERE id = ?",
+      );
       for (const memory of allMemories) {
         const mediaIds = JSON.parse(memory.media_ids || "[]");
-        const filtered = mediaIds.filter(mid => !idSet.has(Number(mid)));
+        const filtered = mediaIds.filter((mid) => !idSet.has(Number(mid)));
         if (filtered.length !== mediaIds.length) {
           updateMemory.run(JSON.stringify(filtered), memory.id);
         }
@@ -1822,7 +2051,11 @@ ipcMain.handle("remove-item-from-index", async (event, ids) => {
         try {
           fs.unlinkSync(thumbnailPath);
         } catch (err) {
-          console.warn("Failed to delete thumbnail:", thumbnailPath, err.message);
+          console.warn(
+            "Failed to delete thumbnail:",
+            thumbnailPath,
+            err.message,
+          );
         }
       }
     }
@@ -1886,7 +2119,13 @@ ipcMain.handle("get-storage-usage", async () => {
     const thumbSize = getDirectorySize(thumbsPath);
 
     // Per-table row counts + byte estimates via dbstat
-    const tableNames = ["files", "embeddings", "memories", "tags", "removed_files"];
+    const tableNames = [
+      "files",
+      "embeddings",
+      "memories",
+      "tags",
+      "removed_files",
+    ];
     const tables = {};
 
     for (const t of tableNames) {
@@ -1899,12 +2138,16 @@ ipcMain.handle("get-storage-usage", async () => {
     }
 
     try {
-      const statRows = db.prepare(`
+      const statRows = db
+        .prepare(
+          `
         SELECT name, SUM(payload) as payload_bytes
         FROM dbstat
         WHERE aggregate = TRUE
         GROUP BY name
-      `).all();
+      `,
+        )
+        .all();
       for (const r of statRows) {
         if (tables[r.name]) tables[r.name].bytes = r.payload_bytes ?? 0;
       }
@@ -1947,7 +2190,7 @@ ipcMain.handle("generate-thumbnails", async () => {
   }
 });
 
-ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
+ipcMain.handle("get-index-of-item", async (event, { itemId }) => {
   try {
     if (!db) return null;
 
@@ -1963,7 +2206,7 @@ ipcMain.handle('get-index-of-item', async (event, { itemId }) => {
 
     return row.idx; // 0-based index
   } catch (err) {
-    console.error('get-index-of-item error:', err);
+    console.error("get-index-of-item error:", err);
     return null;
   }
 });
@@ -1982,26 +2225,50 @@ ipcMain.handle("fetch-years", async () => {
     END
   `;
 
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT
-      ${datePart('%Y')} AS year,
+      ${datePart("%Y")} AS year,
       COUNT(*) AS total,
       GROUP_CONCAT(id) AS ids
     FROM files
     WHERE create_date_local IS NOT NULL OR create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
     GROUP BY year
     ORDER BY year DESC
-  `).all();
+  `,
+    )
+    .all();
 
-  const thumbRows = db.prepare(`
+  const thumbRows = db
+    .prepare(
+      `
     SELECT id, thumbnail_path,
-      ${datePart('%Y')} AS year
+      ${datePart("%Y")} AS year
     FROM files
     WHERE file_type = 'image'
       AND thumbnail_path IS NOT NULL
       AND (create_date_local IS NOT NULL OR create_date IS NOT NULL)
-    ORDER BY RANDOM()
-  `).all();
+    ORDER BY
+      (
+        CASE WHEN camera_make IS NOT NULL THEN 4 ELSE 0 END +
+        CASE WHEN camera_model IS NOT NULL THEN 3 ELSE 0 END +
+        CASE WHEN lens_model IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN focal_length IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN iso IS NOT NULL THEN 1 ELSE 0 END +
+        CASE WHEN aperture IS NOT NULL THEN 1 ELSE 0 END +
+        CASE WHEN latitude IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN longitude IS NOT NULL THEN 2 ELSE 0 END
+      ) DESC,
+          
+      ABS((CAST(width AS REAL) / height) - 1.3) ASC,
+          
+      megapixels DESC,
+          
+      RANDOM()
+  `,
+    )
+    .all();
 
   const thumbsByYear = {};
   for (const t of thumbRows) {
@@ -2031,28 +2298,52 @@ ipcMain.handle("fetch-months", async () => {
     END
   `;
 
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT
-      ${datePart('%Y')} AS year,
-      ${datePart('%m')} AS month,
+      ${datePart("%Y")} AS year,
+      ${datePart("%m")} AS month,
       COUNT(*) AS total,
       GROUP_CONCAT(id) AS ids
     FROM files
     WHERE create_date_local IS NOT NULL OR create_date IS NOT NULL OR created IS NOT NULL OR modified IS NOT NULL
     GROUP BY year, month
     ORDER BY year DESC, month DESC
-  `).all();
+  `,
+    )
+    .all();
 
-  const thumbRows = db.prepare(`
+  const thumbRows = db
+    .prepare(
+      `
     SELECT id, thumbnail_path,
-      ${datePart('%Y')} AS year,
-      ${datePart('%m')} AS month
+      ${datePart("%Y")} AS year,
+      ${datePart("%m")} AS month
     FROM files
     WHERE file_type = 'image'
       AND thumbnail_path IS NOT NULL
       AND (create_date_local IS NOT NULL OR create_date IS NOT NULL)
-    ORDER BY RANDOM()
-  `).all();
+    ORDER BY
+      (
+        CASE WHEN camera_make IS NOT NULL THEN 4 ELSE 0 END +
+        CASE WHEN camera_model IS NOT NULL THEN 3 ELSE 0 END +
+        CASE WHEN lens_model IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN focal_length IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN iso IS NOT NULL THEN 1 ELSE 0 END +
+        CASE WHEN aperture IS NOT NULL THEN 1 ELSE 0 END +
+        CASE WHEN latitude IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN longitude IS NOT NULL THEN 2 ELSE 0 END
+      ) DESC,
+          
+      ABS((CAST(width AS REAL) / height) - 1.3) ASC,
+          
+      megapixels DESC,
+          
+      RANDOM()
+  `,
+    )
+    .all();
 
   const thumbsByMonth = {};
   for (const t of thumbRows) {
@@ -2073,23 +2364,29 @@ ipcMain.handle("fetch-months", async () => {
 ipcMain.handle("fetch-trips", async (_, options = {}) => {
   initDatabase();
 
-  const home = db.prepare(`
+  const home = db
+    .prepare(
+      `
     SELECT country
     FROM files
     WHERE country IS NOT NULL
     GROUP BY country
     ORDER BY COUNT(*) DESC
     LIMIT 1
-  `).get()?.country;
+  `,
+    )
+    .get()?.country;
 
   if (!home) return [];
 
   const MAX_GAP_DAYS = options.maxGapDays ?? 4;
   const MIN_TRIP_PHOTOS = options.minTripPhotos ?? 500;
-  const MIN_COUNTRY_PERCENT = options.minCountryPercent ?? 0.20;
-  const MIN_MAIN_COUNTRIES_PERCENT = options.minMainCountriesPercent ?? 0.50;
+  const MIN_COUNTRY_PERCENT = options.minCountryPercent ?? 0.2;
+  const MIN_MAIN_COUNTRIES_PERCENT = options.minMainCountriesPercent ?? 0.5;
 
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT
       id,
       country,
@@ -2102,7 +2399,9 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
     WHERE country IS NOT NULL
       AND country != ?
     ORDER BY date ASC
-  `).all(home);
+  `,
+    )
+    .all(home);
 
   // Group into trips
   const trips = [];
@@ -2118,7 +2417,8 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
     }
     current.end = row.date;
     current.ids.push(row.id);
-    current.countryCounts[row.country] = (current.countryCounts[row.country] || 0) + 1;
+    current.countryCounts[row.country] =
+      (current.countryCounts[row.country] || 0) + 1;
   }
   if (current) trips.push(current);
 
@@ -2128,14 +2428,20 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
     .map((t) => {
       const totalPhotos = t.ids.length;
       const countryPercent = Object.fromEntries(
-        Object.entries(t.countryCounts).map(([code, count]) => [code, count / totalPhotos])
+        Object.entries(t.countryCounts).map(([code, count]) => [
+          code,
+          count / totalPhotos,
+        ]),
       );
 
       const mainCountries = Object.entries(countryPercent)
         .filter(([_, pct]) => pct >= MIN_COUNTRY_PERCENT)
         .map(([code]) => code);
 
-      const mainTotalPercent = mainCountries.reduce((sum, c) => sum + countryPercent[c], 0);
+      const mainTotalPercent = mainCountries.reduce(
+        (sum, c) => sum + countryPercent[c],
+        0,
+      );
       if (mainTotalPercent < MIN_MAIN_COUNTRIES_PERCENT) return null;
 
       return {
@@ -2160,7 +2466,7 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
   db.exec(`DELETE FROM trip_thumb_lookup`);
 
   const insertLookup = db.prepare(
-    `INSERT INTO trip_thumb_lookup (file_id, trip_id) VALUES (?, ?)`
+    `INSERT INTO trip_thumb_lookup (file_id, trip_id) VALUES (?, ?)`,
   );
   const insertMany = db.transaction((trips) => {
     for (const trip of trips) {
@@ -2172,20 +2478,41 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
   insertMany(filtered);
 
   // Single join query — no variable limit concerns
-  const thumbRows = db.prepare(`
+  const thumbRows = db
+    .prepare(
+      `
     SELECT f.id, f.thumbnail_path, t.trip_id
     FROM files f
     INNER JOIN trip_thumb_lookup t ON f.id = t.file_id
     WHERE f.file_type = 'image'
       AND f.thumbnail_path IS NOT NULL
-    ORDER BY RANDOM()
-  `).all();
+    ORDER BY
+      (
+        CASE WHEN camera_make IS NOT NULL THEN 4 ELSE 0 END +
+        CASE WHEN camera_model IS NOT NULL THEN 3 ELSE 0 END +
+        CASE WHEN lens_model IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN focal_length IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN iso IS NOT NULL THEN 1 ELSE 0 END +
+        CASE WHEN aperture IS NOT NULL THEN 1 ELSE 0 END +
+        CASE WHEN latitude IS NOT NULL THEN 2 ELSE 0 END +
+        CASE WHEN longitude IS NOT NULL THEN 2 ELSE 0 END
+      ) DESC,
+          
+      ABS((CAST(width AS REAL) / height) - 1.3) ASC,
+          
+      megapixels DESC,
+          
+      RANDOM()
+  `,
+    )
+    .all();
 
   // Group thumbnails by trip, cap at 20
   const thumbsByTrip = {};
   for (const row of thumbRows) {
     if (!thumbsByTrip[row.trip_id]) thumbsByTrip[row.trip_id] = [];
-    if (thumbsByTrip[row.trip_id].length < 20) thumbsByTrip[row.trip_id].push(row);
+    if (thumbsByTrip[row.trip_id].length < 20)
+      thumbsByTrip[row.trip_id].push(row);
   }
 
   return filtered.map((t) => ({
@@ -2198,13 +2525,13 @@ ipcMain.handle("fetch-trips", async (_, options = {}) => {
 ipcMain.handle("fetch-on-this-day", async () => {
   try {
     initDatabase();
- 
+
     const now = new Date();
     // Zero-pad month and day so they match SQLite's strftime output
     const todayMM = String(now.getMonth() + 1).padStart(2, "0");
     const todayDD = String(now.getDate()).padStart(2, "0");
     const currentYear = now.getFullYear();
- 
+
     // The same date-expression used throughout the app
     const datePart = (fmt) => `
       CASE
@@ -2216,46 +2543,70 @@ ipcMain.handle("fetch-on-this-day", async () => {
           strftime('${fmt}', datetime(MIN(created, modified), 'unixepoch', 'localtime'))
       END
     `;
- 
+
     // Fetch all files whose month AND day match today, grouped by year,
     // excluding the current year (those aren't "memories" yet).
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT
-        ${datePart('%Y')} AS year,
+        ${datePart("%Y")} AS year,
         COUNT(*)          AS total,
         GROUP_CONCAT(id)  AS ids
       FROM files
       WHERE
-        ${datePart('%m')} = ?
-        AND ${datePart('%d')} = ?
-        AND CAST(${datePart('%Y')} AS INTEGER) < ?
+        ${datePart("%m")} = ?
+        AND ${datePart("%d")} = ?
+        AND CAST(${datePart("%Y")} AS INTEGER) < ?
       GROUP BY year
       ORDER BY year DESC
-    `).all(todayMM, todayDD, currentYear);
- 
+    `,
+      )
+      .all(todayMM, todayDD, currentYear);
+
     if (!rows.length) return [];
- 
+
     // Grab up to 20 random image thumbnails per year in one pass
-    const thumbRows = db.prepare(`
+    const thumbRows = db
+      .prepare(
+        `
       SELECT id, thumbnail_path,
-        ${datePart('%Y')} AS year
+        ${datePart("%Y")} AS year
       FROM files
       WHERE
         file_type = 'image'
         AND thumbnail_path IS NOT NULL
-        AND ${datePart('%m')} = ?
-        AND ${datePart('%d')} = ?
-        AND CAST(${datePart('%Y')} AS INTEGER) < ?
-      ORDER BY RANDOM()
-    `).all(todayMM, todayDD, currentYear);
- 
+        AND ${datePart("%m")} = ?
+        AND ${datePart("%d")} = ?
+        AND CAST(${datePart("%Y")} AS INTEGER) < ?
+      ORDER BY
+        (
+          CASE WHEN camera_make IS NOT NULL THEN 4 ELSE 0 END +
+          CASE WHEN camera_model IS NOT NULL THEN 3 ELSE 0 END +
+          CASE WHEN lens_model IS NOT NULL THEN 2 ELSE 0 END +
+          CASE WHEN focal_length IS NOT NULL THEN 2 ELSE 0 END +
+          CASE WHEN iso IS NOT NULL THEN 1 ELSE 0 END +
+          CASE WHEN aperture IS NOT NULL THEN 1 ELSE 0 END +
+          CASE WHEN latitude IS NOT NULL THEN 2 ELSE 0 END +
+          CASE WHEN longitude IS NOT NULL THEN 2 ELSE 0 END
+        ) DESC,
+
+        ABS((CAST(width AS REAL) / height) - 1.3) ASC,
+
+        megapixels DESC,
+
+        RANDOM()
+    `,
+      )
+      .all(todayMM, todayDD, currentYear);
+
     // Group thumbnails by year (cap at 20 each)
     const thumbsByYear = {};
     for (const t of thumbRows) {
       if (!thumbsByYear[t.year]) thumbsByYear[t.year] = [];
       if (thumbsByYear[t.year].length < 20) thumbsByYear[t.year].push(t);
     }
- 
+
     return rows.map((r) => ({
       year: parseInt(r.year, 10),
       total: r.total,
@@ -2272,7 +2623,16 @@ ipcMain.handle(
   "add-memory",
   async (
     event,
-    { title, description, color, startDate, endDate, idFrom, idTo, pathStartsWith }
+    {
+      title,
+      description,
+      color,
+      startDate,
+      endDate,
+      idFrom,
+      idTo,
+      pathStartsWith,
+    },
   ) => {
     try {
       initDatabase();
@@ -2316,73 +2676,88 @@ ipcMain.handle(
           .prepare(`SELECT id FROM files WHERE ${where.join(" AND ")}`)
           .all(...params);
 
-        mediaIds = rows.map(r => r.id);
-      }
-
-      /**
-       * ID RANGE (fallback if no dates)
-       */
-      else if (idFrom != null && idTo != null) {
-        const rows = db.prepare(`
+        mediaIds = rows.map((r) => r.id);
+      } else if (idFrom != null && idTo != null) {
+        /**
+         * ID RANGE (fallback if no dates)
+         */
+        const rows = db
+          .prepare(
+            `
           SELECT id
           FROM files
           WHERE id BETWEEN ? AND ?
           ORDER BY id
-        `).all(Number(idFrom), Number(idTo));
+        `,
+          )
+          .all(Number(idFrom), Number(idTo));
 
-        mediaIds = rows.map(r => r.id);
-      }
-
-      /**
-       * PATH PREFIX
-       */
-      else if (pathStartsWith) {
-        const rows = db.prepare(`
+        mediaIds = rows.map((r) => r.id);
+      } else if (pathStartsWith) {
+        /**
+         * PATH PREFIX
+         */
+        const rows = db
+          .prepare(
+            `
           SELECT id
           FROM files
           WHERE path LIKE ?
           ORDER BY id
-        `).all(pathStartsWith.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%');
-        mediaIds = rows.map(r => r.id);
+        `,
+          )
+          .all(pathStartsWith.replace(/%/g, "\\%").replace(/_/g, "\\_") + "%");
+        mediaIds = rows.map((r) => r.id);
       }
 
       const now = Math.floor(Date.now() / 1000);
 
-      const maxOrder = db.prepare(`SELECT COALESCE(MAX(sort_order), 0) AS m FROM memories`).get()?.m ?? 0;
+      const maxOrder =
+        db
+          .prepare(`SELECT COALESCE(MAX(sort_order), 0) AS m FROM memories`)
+          .get()?.m ?? 0;
 
-      const info = db.prepare(`
+      const info = db
+        .prepare(
+          `
         INSERT INTO memories (title, description, color, media_ids, created, sort_order)
         VALUES (?, ?, ?, ?, ?, ?)
-      `).run(
-        title,
-        description,
-        color,
-        JSON.stringify(mediaIds),
-        now,
-        maxOrder + 1
-      );
+      `,
+        )
+        .run(
+          title,
+          description,
+          color,
+          JSON.stringify(mediaIds),
+          now,
+          maxOrder + 1,
+        );
 
       return {
         success: true,
         id: info.lastInsertRowid,
-        mediaIds
+        mediaIds,
       };
     } catch (err) {
       console.error("add-memory error:", err);
       return { success: false, error: err.message };
     }
-  }
+  },
 );
 
 ipcMain.handle("fetch-memories", async () => {
   try {
     initDatabase();
 
-    const memories = db.prepare(`
+    const memories = db
+      .prepare(
+        `
       SELECT *
       FROM memories
       ORDER BY sort_order DESC, created DESC
-    `).all();
+    `,
+      )
+      .all();
 
     const results = memories.map((m) => {
       let mediaIds = [];
@@ -2404,18 +2779,38 @@ ipcMain.handle("fetch-memories", async () => {
       const thumbnails = [];
       for (const chunk of chunks) {
         if (thumbnails.length >= 20) break;
-      
+
         const remaining = 20 - thumbnails.length;
-        const rows = db.prepare(`
+        const rows = db
+          .prepare(
+            `
           SELECT id, thumbnail_path
           FROM files
           WHERE id IN (${chunk.map(() => "?").join(",")})
             AND file_type = 'image'
             AND thumbnail_path IS NOT NULL
-          ORDER BY RANDOM()
+          ORDER BY
+            (
+              CASE WHEN camera_make IS NOT NULL THEN 4 ELSE 0 END +
+              CASE WHEN camera_model IS NOT NULL THEN 3 ELSE 0 END +
+              CASE WHEN lens_model IS NOT NULL THEN 2 ELSE 0 END +
+              CASE WHEN focal_length IS NOT NULL THEN 2 ELSE 0 END +
+              CASE WHEN iso IS NOT NULL THEN 1 ELSE 0 END +
+              CASE WHEN aperture IS NOT NULL THEN 1 ELSE 0 END +
+              CASE WHEN latitude IS NOT NULL THEN 2 ELSE 0 END +
+              CASE WHEN longitude IS NOT NULL THEN 2 ELSE 0 END
+            ) DESC,
+
+            ABS((CAST(width AS REAL) / height) - 1.3) ASC,
+
+            megapixels DESC,
+
+            RANDOM()
           LIMIT ?
-        `).all(...chunk, remaining);
-        
+        `,
+          )
+          .all(...chunk, remaining);
+
         thumbnails.push(...rows);
       }
 
@@ -2450,15 +2845,17 @@ ipcMain.handle("memory:reorder", async (event, { order }) => {
   }
 });
 
-ipcMain.handle("update-memory", async (event, { id, title, description, color }) => {
-  try {
-    initDatabase();
+ipcMain.handle(
+  "update-memory",
+  async (event, { id, title, description, color }) => {
+    try {
+      initDatabase();
 
-    if (!id) {
-      throw new Error("Missing memory id");
-    }
+      if (!id) {
+        throw new Error("Missing memory id");
+      }
 
-    const stmt = db.prepare(`
+      const stmt = db.prepare(`
       UPDATE memories
       SET
         title = ?,
@@ -2467,23 +2864,19 @@ ipcMain.handle("update-memory", async (event, { id, title, description, color })
       WHERE id = ?
     `);
 
-    const info = stmt.run(
-      title,
-      description,
-      color,
-      id
-    );
+      const info = stmt.run(title, description, color, id);
 
-    if (info.changes === 0) {
-      throw new Error(`Memory ${id} not found`);
+      if (info.changes === 0) {
+        throw new Error(`Memory ${id} not found`);
+      }
+
+      return { success: true, id };
+    } catch (err) {
+      console.error("update-memory error:", err);
+      return { success: false, error: err.message };
     }
-
-    return { success: true, id };
-  } catch (err) {
-    console.error("update-memory error:", err);
-    return { success: false, error: err.message };
-  }
-});
+  },
+);
 
 ipcMain.handle("delete-memory", async (event, { id }) => {
   try {
@@ -2528,103 +2921,147 @@ ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
       END
     `;
 
-    const perYear = db.prepare(`
-      SELECT CAST(${datePart('%Y')} AS INTEGER) AS year, COUNT(*) AS count
+    const perYear = db
+      .prepare(
+        `
+      SELECT CAST(${datePart("%Y")} AS INTEGER) AS year, COUNT(*) AS count
       FROM files
       WHERE ${hasDate}
       GROUP BY year
       ORDER BY year DESC
-    `).all();
+    `,
+      )
+      .all();
 
-    const perMonth = db.prepare(`
-      SELECT ${datePart('%Y-%m')} AS month, COUNT(*) AS count
+    const perMonth = db
+      .prepare(
+        `
+      SELECT ${datePart("%Y-%m")} AS month, COUNT(*) AS count
       FROM files
       WHERE ${hasDate}
       GROUP BY month
       ORDER BY month DESC
-    `).all();
+    `,
+      )
+      .all();
 
-    const topDays = db.prepare(`
-      SELECT ${datePart('%Y-%m-%d')} AS day, COUNT(*) AS count
+    const topDays = db
+      .prepare(
+        `
+      SELECT ${datePart("%Y-%m-%d")} AS day, COUNT(*) AS count
       FROM files
       WHERE ${hasDate}
       GROUP BY day
       ORDER BY count DESC
       LIMIT 10
-    `).all();
+    `,
+      )
+      .all();
 
-    const allDays = db.prepare(`
-      SELECT ${datePart('%Y-%m-%d')} AS day, COUNT(*) AS count
+    const allDays = db
+      .prepare(
+        `
+      SELECT ${datePart("%Y-%m-%d")} AS day, COUNT(*) AS count
       FROM files
       WHERE ${hasDate}
       GROUP BY day
       ORDER BY day ASC
-    `).all();
+    `,
+      )
+      .all();
 
-    const byType = db.prepare(`
+    const byType = db
+      .prepare(
+        `
       SELECT COALESCE(file_type, 'Unknown') AS type, COUNT(*) AS count
       FROM files
       GROUP BY type
       ORDER BY count DESC
-    `).all();
+    `,
+      )
+      .all();
 
-    const byDevice = db.prepare(`
+    const byDevice = db
+      .prepare(
+        `
       SELECT COALESCE(device_model, 'Unknown') AS device, COUNT(*) AS count
       FROM files
       GROUP BY device
       ORDER BY count DESC
-    `).all();
+    `,
+      )
+      .all();
 
-    const byCountry = db.prepare(`
+    const byCountry = db
+      .prepare(
+        `
       SELECT
         COALESCE(NULLIF(TRIM(country), ''), 'Unknown') AS country,
         COUNT(*) AS count
       FROM files
       GROUP BY COALESCE(NULLIF(TRIM(country), ''), 'Unknown')
       ORDER BY count DESC
-    `).all();
+    `,
+      )
+      .all();
 
-    const totals = db.prepare(`
+    const totals = db
+      .prepare(
+        `
       SELECT COUNT(*) AS totalFiles, SUM(size) AS totalStorage FROM files
-    `).get();
+    `,
+      )
+      .get();
 
-    const sources = db.prepare(`
+    const sources = db
+      .prepare(
+        `
       SELECT
         folder_path AS folder,
-        MIN(${datePart('%Y-%m-%d')}) AS first,
-        MAX(${datePart('%Y-%m-%d')}) AS last,
+        MIN(${datePart("%Y-%m-%d")}) AS first,
+        MAX(${datePart("%Y-%m-%d")}) AS last,
         COUNT(*) AS count
       FROM files
       WHERE folder_path IS NOT NULL
       GROUP BY folder_path
       ORDER BY first DESC
-    `).all();
+    `,
+      )
+      .all();
 
-    const devices = db.prepare(`
+    const devices = db
+      .prepare(
+        `
       SELECT
         device_model AS device,
-        MIN(${datePart('%Y-%m-%d')}) AS first,
-        MAX(${datePart('%Y-%m-%d')}) AS last,
+        MIN(${datePart("%Y-%m-%d")}) AS first,
+        MAX(${datePart("%Y-%m-%d")}) AS last,
         COUNT(*) AS count
       FROM files
       WHERE device_model IS NOT NULL
       GROUP BY device_model
       ORDER BY first DESC
-    `).all();
+    `,
+      )
+      .all();
 
     let perAge = [];
     if (birthDate) {
       const birth = new Date(birthDate);
-      const byYearMonthDay = db.prepare(`
+      const byYearMonthDay = db
+        .prepare(
+          `
         SELECT
-          CAST(${datePart('%Y')} AS INTEGER) AS year,
-          CAST(${datePart('%m')} AS INTEGER) AS month,
-          CAST(${datePart('%d')} AS INTEGER) AS day,
+          CAST(${datePart("%Y")} AS INTEGER) AS year,
+          CAST(${datePart("%m")} AS INTEGER) AS month,
+          CAST(${datePart("%d")} AS INTEGER) AS day,
           COUNT(*) AS count
         FROM files
         WHERE ${hasDate}
         GROUP BY year, month, day
-      `).all();
+      `,
+        )
+        .all();
 
       const ageCounts = {};
       for (const row of byYearMonthDay) {
@@ -2632,25 +3069,35 @@ ipcMain.handle("fetch-stats", async (event, { birthDate } = {}) => {
         if (
           row.month < birth.getMonth() + 1 ||
           (row.month === birth.getMonth() + 1 && row.day < birth.getDate())
-        ) age--;
+        )
+          age--;
         ageCounts[age] = (ageCounts[age] || 0) + row.count;
       }
       perAge = Object.keys(ageCounts)
-        .map(a => ({ age: Number(a), count: ageCounts[a] }))
+        .map((a) => ({ age: Number(a), count: ageCounts[a] }))
         .sort((a, b) => b.age - a.age);
     }
 
     const map = getDriveLetterMap();
-    const mappedSources = sources.map(s => ({ ...s, folder: applyDriveLetterMap(s.folder, map) }));
-
+    const mappedSources = sources.map((s) => ({
+      ...s,
+      folder: applyDriveLetterMap(s.folder, map),
+    }));
 
     return {
       success: true,
-      perYear, perMonth, topDays, allDays,
-      byType, byDevice, byCountry,
+      perYear,
+      perMonth,
+      topDays,
+      allDays,
+      byType,
+      byDevice,
+      byCountry,
       totalFiles: totals.totalFiles,
       totalStorage: totals.totalStorage || 0,
-      sources: mappedSources, perAge, devices
+      sources: mappedSources,
+      perAge,
+      devices,
     };
   } catch (err) {
     console.error("fetch-stats error:", err);
@@ -2662,18 +3109,24 @@ ipcMain.handle("migrate-create-date-local", async () => {
   try {
     initDatabase();
 
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT id, path
       FROM files
       WHERE create_date_local IS NULL
         AND create_date IS NOT NULL
-    `).all();
+    `,
+      )
+      .all();
 
     console.log(`Found ${rows.length} rows to migrate`);
     if (rows.length === 0) return { success: true, updated: 0 };
 
-    const updateStmt = db.prepare(`UPDATE files SET create_date_local = ? WHERE id = ?`);
-    
+    const updateStmt = db.prepare(
+      `UPDATE files SET create_date_local = ? WHERE id = ?`,
+    );
+
     // Much higher concurrency — exiftool reads are I/O bound
     const limit = pLimit(32);
     let updated = 0;
@@ -2684,35 +3137,42 @@ ipcMain.handle("migrate-create-date-local", async () => {
       const chunk = rows.slice(i, i + BATCH_SIZE);
 
       const results = await Promise.all(
-        chunk.map(row => limit(async () => {
-          try {
-            const exifData = await exiftool.read(row.path);
-            // Mirror the same priority as extractMetadata
-            const rawDate = exifData?.DateTimeOriginal ?? exifData?.CreationDate ?? null;
-                      
-            if (rawDate) {
-              if (typeof rawDate === "object" && rawDate.year) {
-                const pad = n => String(n).padStart(2, "0");
-                const local =
-                  `${rawDate.year}-${pad(rawDate.month)}-${pad(rawDate.day)} ` +
-                  `${pad(rawDate.hour)}:${pad(rawDate.minute)}:${pad(rawDate.second)}`;
-                return { id: row.id, local };
-              }
-              // String form (e.g. CreationDate with offset stripped to 19 chars)
-              const dateStr = typeof rawDate === "object" ? rawDate.toString() : rawDate;
-              const normalised = dateStr.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-              return { id: row.id, local: normalised.substring(0, 19) };
-            }
-            
-            // Fallback: filename-encoded local time
-            const fromFilename = parseFilenameDateTime(row.path);
-            if (fromFilename) return { id: row.id, local: fromFilename };
+        chunk.map((row) =>
+          limit(async () => {
+            try {
+              const exifData = await exiftool.read(row.path);
+              // Mirror the same priority as extractMetadata
+              const rawDate =
+                exifData?.DateTimeOriginal ?? exifData?.CreationDate ?? null;
 
-            return null;
-          } catch {
-            return null;
-          }
-        }))
+              if (rawDate) {
+                if (typeof rawDate === "object" && rawDate.year) {
+                  const pad = (n) => String(n).padStart(2, "0");
+                  const local =
+                    `${rawDate.year}-${pad(rawDate.month)}-${pad(rawDate.day)} ` +
+                    `${pad(rawDate.hour)}:${pad(rawDate.minute)}:${pad(rawDate.second)}`;
+                  return { id: row.id, local };
+                }
+                // String form (e.g. CreationDate with offset stripped to 19 chars)
+                const dateStr =
+                  typeof rawDate === "object" ? rawDate.toString() : rawDate;
+                const normalised = dateStr.replace(
+                  /^(\d{4}):(\d{2}):(\d{2})/,
+                  "$1-$2-$3",
+                );
+                return { id: row.id, local: normalised.substring(0, 19) };
+              }
+
+              // Fallback: filename-encoded local time
+              const fromFilename = parseFilenameDateTime(row.path);
+              if (fromFilename) return { id: row.id, local: fromFilename };
+
+              return null;
+            } catch {
+              return null;
+            }
+          }),
+        ),
       );
 
       const valid = results.filter(Boolean);
@@ -2732,11 +3192,13 @@ ipcMain.handle("migrate-create-date-local", async () => {
         mainWindow.webContents.send("migration-progress", {
           processed,
           total: rows.length,
-          percentage: Math.round((processed / rows.length) * 100)
+          percentage: Math.round((processed / rows.length) * 100),
         });
       }
 
-      console.log(`Progress: ${processed}/${rows.length} processed, ${updated} updated`);
+      console.log(
+        `Progress: ${processed}/${rows.length} processed, ${updated} updated`,
+      );
     }
 
     return { success: true, updated };
@@ -2759,7 +3221,8 @@ function parseFilenameDateTime(filePath) {
   const [, yr, mo, dy, hh, mm, ss] = match;
 
   // Basic sanity check
-  if (mo < 1 || mo > 12 || dy < 1 || dy > 31 || hh > 23 || mm > 59 || ss > 59) return null;
+  if (mo < 1 || mo > 12 || dy < 1 || dy > 31 || hh > 23 || mm > 59 || ss > 59)
+    return null;
 
   return `${yr}-${mo}-${dy} ${hh}:${mm}:${ss}`;
 }
@@ -2770,12 +3233,16 @@ ipcMain.handle("cleanup-thumbnails", async () => {
 
     const thumbnailsDir = path.join(dataDir, "thumbnails");
     if (!fs.existsSync(thumbnailsDir)) {
-      return { success: true, message: "No thumbnails folder found.", removed: 0 };
+      return {
+        success: true,
+        message: "No thumbnails folder found.",
+        removed: 0,
+      };
     }
 
     // Build a Set of all valid thumbnail filenames from the DB
     const rows = db.prepare("SELECT id FROM files").all();
-    const validFilenames = new Set(rows.map(r => `${r.id}_thumb.jpg`));
+    const validFilenames = new Set(rows.map((r) => `${r.id}_thumb.jpg`));
 
     // Read all files in the thumbnails directory
     const files = fs.readdirSync(thumbnailsDir);
@@ -2787,12 +3254,19 @@ ipcMain.handle("cleanup-thumbnails", async () => {
           fs.unlinkSync(path.join(thumbnailsDir, file));
           removed++;
         } catch (err) {
-          console.warn(`Failed to delete orphan thumbnail: ${file}`, err.message);
+          console.warn(
+            `Failed to delete orphan thumbnail: ${file}`,
+            err.message,
+          );
         }
       }
     }
 
-    return { success: true, message: `Removed ${removed} thumbnail(s).`, removed };
+    return {
+      success: true,
+      message: `Removed ${removed} thumbnail(s).`,
+      removed,
+    };
   } catch (err) {
     console.error("cleanup-thumbnails error:", err);
     return { success: false, error: err.message };
@@ -2807,8 +3281,11 @@ ipcMain.handle("tag:set-items", async (event, { tagId, mediaIds }) => {
       throw new Error("Invalid parameters: tagId and mediaIds are required.");
     }
     const now = Date.now();
-    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?")
-      .run(JSON.stringify(mediaIds), now, tagId);
+    db.prepare("UPDATE tags SET media_ids = ?, last_used = ? WHERE id = ?").run(
+      JSON.stringify(mediaIds),
+      now,
+      tagId,
+    );
     return { success: true, mediaIds };
   } catch (err) {
     console.error("tag:set-items error:", err);
@@ -2821,10 +3298,14 @@ ipcMain.handle("memory:set-items", async (event, { memoryId, mediaIds }) => {
   try {
     initDatabase();
     if (!memoryId || !Array.isArray(mediaIds)) {
-      throw new Error("Invalid parameters: memoryId and mediaIds are required.");
+      throw new Error(
+        "Invalid parameters: memoryId and mediaIds are required.",
+      );
     }
-    db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?")
-      .run(JSON.stringify(mediaIds), memoryId);
+    db.prepare("UPDATE memories SET media_ids = ? WHERE id = ?").run(
+      JSON.stringify(mediaIds),
+      memoryId,
+    );
     return { success: true, mediaIds };
   } catch (err) {
     console.error("memory:set-items error:", err);
@@ -2859,14 +3340,21 @@ ipcMain.handle("save-drive-letter-map", (event, map) => {
 
 /** Return current embedding progress */
 ipcMain.handle("embedding:get-status", () => {
-  if (!embeddingService) return { modelReady: false, total: 0, done: 0, percentage: 0 };
+  if (!embeddingService)
+    return { modelReady: false, total: 0, done: 0, percentage: 0 };
   return embeddingService.getStatus();
 });
- 
+
 /** Pause/resume from the renderer (optional — e.g. during active media browsing) */
-ipcMain.handle("embedding:pause",  () => { embeddingService?.pause();  return { ok: true }; });
-ipcMain.handle("embedding:resume", () => { embeddingService?.resume(); return { ok: true }; });
- 
+ipcMain.handle("embedding:pause", () => {
+  embeddingService?.pause();
+  return { ok: true };
+});
+ipcMain.handle("embedding:resume", () => {
+  embeddingService?.resume();
+  return { ok: true };
+});
+
 /**
  * Smart search: find the top-N most similar images to a text query.
  * Returns an array of file IDs sorted by descending similarity.
@@ -2877,7 +3365,7 @@ ipcMain.handle("embedding:resume", () => { embeddingService?.resume(); return { 
 //   if (!embeddingService?._pipelineReady) {
 //     return { success: false, error: "Model not ready yet", results: [] };
 //   }
- 
+
 //   try {
 //     // Get text embedding from child process
 //     const textVecArray = await embeddingService.embedText(query);
@@ -2904,16 +3392,16 @@ ipcMain.handle("embedding:resume", () => { embeddingService?.resume(); return { 
 //     // // Re-normalise
 //     // const norm = Math.sqrt(avgVec.reduce((s, v) => s + v * v, 0)) || 1;
 //     // const textVec = avgVec.map(v => v / norm);
- 
+
 //     initDatabase();
 //     const rows = db.prepare(`
 //       SELECT e.file_id, e.embedding
 //       FROM   embeddings e
 //       INNER  JOIN files f ON f.id = e.file_id
 //     `).all();
- 
+
 //     if (!rows.length) return { success: true, results: [] };
- 
+
 //     const scored = rows.map(row => {
 //       const imgVec = new Float32Array(
 //         row.embedding.buffer,
@@ -2924,16 +3412,16 @@ ipcMain.handle("embedding:resume", () => { embeddingService?.resume(); return { 
 //       for (let i = 0; i < textVec.length; i++) dot += textVec[i] * imgVec[i];
 //       return { fileId: row.file_id, score: dot };
 //     });
- 
+
 //     scored.sort((a, b) => b.score - a.score);
 
 //     // Filter out results below a similarity threshold.
 //     // CLIP dot products on normalised vectors range roughly 0.15–0.35 for this model.
 //     // 0.20 is a reasonable starting point — raise it to get stricter results.
- 
+
 //     const SIMILARITY_THRESHOLD = 0.20;
 //     const filtered = scored.filter(r => r.score >= SIMILARITY_THRESHOLD).slice(0, topK);
- 
+
 //     return {
 //       success: true,
 //       results: filtered.map(r => r.fileId),
@@ -2946,61 +3434,165 @@ ipcMain.handle("embedding:resume", () => { embeddingService?.resume(); return { 
 //   }
 // });
 
-ipcMain.handle("embedding:search", async (event, { query, topK = 200, threshold = 0.20 }) => {
-  if (!embeddingService?._pipelineReady) {
-    return { success: false, error: "Model not ready yet", results: [] };
-  }
- 
-  try {
-    const textVecArray = await embeddingService.embedText(query);
- 
-    // Always re-normalise the text vector here, regardless of what the child did.
-    // CLIPTextModelWithProjection returns a projection that may not be unit length.
-    const textRaw  = new Float32Array(textVecArray);
-    const textNorm = Math.sqrt(textRaw.reduce((s, v) => s + v * v, 0)) || 1;
-    const textVec  = textRaw.map(v => v / textNorm);
- 
-    initDatabase();
-    const rows = db.prepare(`
+ipcMain.handle(
+  "embedding:search",
+  async (event, { query, topK = 200, threshold = 0.2 }) => {
+    if (!embeddingService?._pipelineReady) {
+      return { success: false, error: "Model not ready yet", results: [] };
+    }
+
+    try {
+      const textVecArray = await embeddingService.embedText(query);
+
+      // Always re-normalise the text vector here, regardless of what the child did.
+      // CLIPTextModelWithProjection returns a projection that may not be unit length.
+      const textRaw = new Float32Array(textVecArray);
+      const textNorm = Math.sqrt(textRaw.reduce((s, v) => s + v * v, 0)) || 1;
+      const textVec = textRaw.map((v) => v / textNorm);
+
+      initDatabase();
+      const rows = db
+        .prepare(
+          `
       SELECT e.file_id, e.embedding
       FROM   embeddings e
       INNER  JOIN files f ON f.id = e.file_id
-    `).all();
- 
-    if (!rows.length) return { success: true, results: [], scores: {} };
- 
-    const scored = rows.map(row => {
-      const imgRaw = new Float32Array(
-        row.embedding.buffer,
-        row.embedding.byteOffset,
-        row.embedding.byteLength / 4
+    `,
+        )
+        .all();
+
+      if (!rows.length) return { success: true, results: [], scores: {} };
+
+      const scored = rows.map((row) => {
+        const imgRaw = new Float32Array(
+          row.embedding.buffer,
+          row.embedding.byteOffset,
+          row.embedding.byteLength / 4,
+        );
+
+        // Re-normalise image vector too — belt-and-suspenders in case the
+        // pipeline's normalize:true produced vectors that drifted from unit length.
+        const imgNorm = Math.sqrt(imgRaw.reduce((s, v) => s + v * v, 0)) || 1;
+
+        let dot = 0;
+        for (let i = 0; i < textVec.length; i++)
+          dot += textVec[i] * (imgRaw[i] / imgNorm);
+
+        return { fileId: row.file_id, score: dot };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+
+      const SIMILARITY_THRESHOLD = threshold;
+      const filtered = scored
+        .filter((r) => r.score >= SIMILARITY_THRESHOLD)
+        .slice(0, topK);
+
+      return {
+        success: true,
+        results: filtered.map((r) => r.fileId),
+        scores: Object.fromEntries(filtered.map((r) => [r.fileId, r.score])),
+      };
+    } catch (err) {
+      console.error("embedding:search error:", err);
+      return { success: false, error: err.message, results: [] };
+    }
+  },
+);
+
+ipcMain.handle(
+  "embedding:search-by-id",
+  async (event, { fileId, topK = 200, threshold = 0.2 }) => {
+    if (!embeddingService?._pipelineReady) {
+      return { success: false, error: "Model not ready yet", results: [] };
+    }
+
+    try {
+      initDatabase();
+
+      // Fetch the query image's stored embedding
+      const queryRow = db
+        .prepare(
+          `
+      SELECT embedding FROM embeddings WHERE file_id = ?
+    `,
+        )
+        .get(fileId);
+
+      if (!queryRow) {
+        return {
+          success: false,
+          error: "No embedding found for this file",
+          results: [],
+        };
+      }
+
+      const queryRaw = new Float32Array(
+        queryRow.embedding.buffer,
+        queryRow.embedding.byteOffset,
+        queryRow.embedding.byteLength / 4,
       );
- 
-      // Re-normalise image vector too — belt-and-suspenders in case the
-      // pipeline's normalize:true produced vectors that drifted from unit length.
-      const imgNorm = Math.sqrt(imgRaw.reduce((s, v) => s + v * v, 0)) || 1;
- 
-      let dot = 0;
-      for (let i = 0; i < textVec.length; i++) dot += textVec[i] * (imgRaw[i] / imgNorm);
- 
-      return { fileId: row.file_id, score: dot };
-    });
- 
-    scored.sort((a, b) => b.score - a.score);
- 
-    const SIMILARITY_THRESHOLD = threshold;
-    const filtered = scored
-      .filter(r => r.score >= SIMILARITY_THRESHOLD)
-      .slice(0, topK);
- 
-    return {
-      success: true,
-      results: filtered.map(r => r.fileId),
-      scores:  Object.fromEntries(filtered.map(r => [r.fileId, r.score])),
-    };
-  } catch (err) {
-    console.error("embedding:search error:", err);
-    return { success: false, error: err.message, results: [] };
+
+      // Normalise query vector
+      const queryNorm = Math.sqrt(queryRaw.reduce((s, v) => s + v * v, 0)) || 1;
+      const queryVec = queryRaw.map((v) => v / queryNorm);
+
+      // Fetch all other embeddings
+      const rows = db
+        .prepare(
+          `
+      SELECT e.file_id, e.embedding
+      FROM embeddings e
+      INNER JOIN files f ON f.id = e.file_id
+      WHERE e.file_id != ?
+    `,
+        )
+        .all(fileId);
+
+      if (!rows.length) return { success: true, results: [], scores: {} };
+
+      const scored = rows.map((row) => {
+        const imgRaw = new Float32Array(
+          row.embedding.buffer,
+          row.embedding.byteOffset,
+          row.embedding.byteLength / 4,
+        );
+        const imgNorm = Math.sqrt(imgRaw.reduce((s, v) => s + v * v, 0)) || 1;
+
+        let dot = 0;
+        for (let i = 0; i < queryVec.length; i++)
+          dot += queryVec[i] * (imgRaw[i] / imgNorm);
+
+        return { fileId: row.file_id, score: dot };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+
+      const filtered = scored
+        .filter((r) => r.score >= threshold)
+        .slice(0, topK);
+
+      return {
+        success: true,
+        results: filtered.map((r) => r.fileId),
+        scores: Object.fromEntries(filtered.map((r) => [r.fileId, r.score])),
+      };
+    } catch (err) {
+      console.error("embedding:search-by-id error:", err);
+      return { success: false, error: err.message, results: [] };
+    }
+  },
+);
+
+ipcMain.handle("embedding:has-embedding", async (event, fileId) => {
+  try {
+    initDatabase();
+    const row = db
+      .prepare("SELECT 1 FROM embeddings WHERE file_id = ? LIMIT 1")
+      .get(fileId);
+    return !!row;
+  } catch {
+    return false;
   }
 });
 
@@ -3033,7 +3625,9 @@ function applyDriveLetterMap(filePath, map) {
     const trimmedOriginal = originalFolder.replace(/[\\/]+$/, "");
 
     // Compare case-insensitively
-    if (normalizedPath.toUpperCase().startsWith(trimmedOriginal.toUpperCase())) {
+    if (
+      normalizedPath.toUpperCase().startsWith(trimmedOriginal.toUpperCase())
+    ) {
       // Ensure custom drive ends with colon only (no double backslash)
       const normalizedCustom = customLetter.replace(/:?$/, ":");
 
@@ -3041,7 +3635,9 @@ function applyDriveLetterMap(filePath, map) {
       const remainder = filePath.slice(2); // remove original drive letter only
 
       // Avoid double backslash if remainder starts with \
-      const cleanRemainder = remainder.startsWith("\\") ? remainder : "\\" + remainder;
+      const cleanRemainder = remainder.startsWith("\\")
+        ? remainder
+        : "\\" + remainder;
 
       return normalizedCustom + cleanRemainder;
     }
@@ -3050,12 +3646,77 @@ function applyDriveLetterMap(filePath, map) {
   return filePath;
 }
 
+ipcMain.handle(
+  "fetch-timeline-months",
+  async (event, { filters = {}, sortOrder = "desc" } = {}) => {
+    try {
+      initDatabase();
+      const dir = sortOrder === "asc" ? "ASC" : "DESC";
+      const datePart = (fmt) => `
+      CASE
+        WHEN create_date_local IS NOT NULL
+          THEN strftime('${fmt}', create_date_local)
+        WHEN create_date IS NOT NULL
+          THEN strftime('${fmt}', datetime(create_date, 'unixepoch', 'localtime'))
+        ELSE
+          strftime('${fmt}', datetime(MIN(created, modified), 'unixepoch', 'localtime'))
+      END
+    `;
+      const { sql, params } = buildWhereClause(filters);
+      return db
+        .prepare(
+          `
+      SELECT
+        ${datePart("%Y")} AS year,
+        ${datePart("%m")} AS month,
+        COUNT(*)          AS total
+      FROM files
+      ${sql}
+      GROUP BY year, month
+      ORDER BY year ${dir}, month ${dir}
+    `,
+        )
+        .all(...params);
+    } catch (err) {
+      console.error("fetch-timeline-months error:", err);
+      return [];
+    }
+  },
+);
+
+ipcMain.handle("get-item-by-id", async (event, id) => {
+  try {
+    initDatabase();
+
+    const row = db
+      .prepare("SELECT * FROM FILES WHERE id = ?")
+      .get(id);
+
+    if (!row) {
+      throw new Error(`Item ${id} not found`);
+    }
+
+    return { success: true, item: row };
+  } catch (err) {
+    console.error("get-item-by-id error:", err);
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle("toggle-fullscreen", () => {
   if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
 });
 
 ipcMain.on("quick-minimize", () => {
-    mainWindow.minimize();
+  mainWindow.minimize();
+});
+
+ipcMain.handle("maximize-app", (event) => {
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow.maximize();
+  }
 });
 
 // Properly shut down exiftool on exit

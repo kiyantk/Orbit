@@ -1,15 +1,23 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faPlay, faPause, faVolumeMute, faVolumeUp, faXmark, faExpand } from "@fortawesome/free-solid-svg-icons";
+import {
+  faPlay,
+  faPause,
+  faVolumeMute,
+  faVolumeUp,
+  faXmark,
+  faExpand,
+} from "@fortawesome/free-solid-svg-icons";
 import { MapContainer, TileLayer, Marker } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import TagPill from "./TagPill";
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: require("leaflet/dist/images/marker-icon-2x.png"),
-  iconUrl:       require("leaflet/dist/images/marker-icon.png"),
-  shadowUrl:     require("leaflet/dist/images/marker-shadow.png"),
+  iconUrl: require("leaflet/dist/images/marker-icon.png"),
+  shadowUrl: require("leaflet/dist/images/marker-shadow.png"),
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -25,7 +33,7 @@ function formatBytes(a, b = 2) {
 function formatTimestamp(timestamp) {
   if (!timestamp) return "";
   const date = new Date(timestamp * 1000);
-  const pad  = (n) => n.toString().padStart(2, "0");
+  const pad = (n) => n.toString().padStart(2, "0");
   return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
@@ -39,29 +47,36 @@ function formatLocalDateString(str) {
 
 function formatDuration(seconds) {
   const total = Math.floor(seconds);
-  const pad   = (n) => n.toString().padStart(2, "0");
+  const pad = (n) => n.toString().padStart(2, "0");
   return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
 }
 
 function calculateAge(birthDate, epochSeconds) {
   const birth = new Date(birthDate);
-  const date  = new Date(epochSeconds * 1000);
-  let age     = date.getFullYear() - birth.getFullYear();
+  const date = new Date(epochSeconds * 1000);
+  let age = date.getFullYear() - birth.getFullYear();
   const monthDiff = date.getMonth() - birth.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && date.getDate() < birth.getDate())) age--;
+  if (monthDiff < 0 || (monthDiff === 0 && date.getDate() < birth.getDate()))
+    age--;
   return age;
 }
 
 function getContrastColor(hex) {
   if (!hex) return "#000";
-  const rgb       = parseInt(hex.substring(1), 16);
-  const luminance = 0.299 * ((rgb >> 16) & 0xff) + 0.587 * ((rgb >> 8) & 0xff) + 0.114 * (rgb & 0xff);
+  const rgb = parseInt(hex.substring(1), 16);
+  const luminance =
+    0.299 * ((rgb >> 16) & 0xff) +
+    0.587 * ((rgb >> 8) & 0xff) +
+    0.114 * (rgb & 0xff);
   return luminance > 150 ? "#000" : "#fff";
 }
 
 function getReferenceEpoch(item) {
   if (item.create_date) return item.create_date;
-  const fallback = Math.min(item.created ?? Infinity, item.modified ?? Infinity);
+  const fallback = Math.min(
+    item.created ?? Infinity,
+    item.modified ?? Infinity,
+  );
   return fallback === Infinity ? null : fallback;
 }
 
@@ -69,8 +84,9 @@ function safePlay(video) {
   if (!video) return;
   const p = video.play();
   if (p !== undefined) {
-    p.catch(err => {
-      if (!err.message.includes("media was removed from the document")) console.error(err);
+    p.catch((err) => {
+      if (!err.message.includes("media was removed from the document"))
+        console.error(err);
     });
   }
 }
@@ -80,89 +96,146 @@ function safePlay(video) {
 const MetaRow = ({ label, value, title, children }) => {
   if (value == null && !children) return null;
   return (
-    <div className="metadata-row">
+    <div className={`metadata-row ${"metadata-row-" + label}`}>
       <span className="metadata-label">{label}</span>
-      <span className="metadata-value" title={title ?? String(value)}>{children ?? value}</span>
+      <span className="metadata-value" title={title ?? String(value)}>
+        {children ?? value}
+      </span>
     </div>
   );
 };
 
 // ─── Video controls (shared between normal + fullscreen) ───────────────────────
 
-const VideoControls = React.forwardRef(function VideoControls({ progress, isPlaying, isMuted, isSeeking, onTogglePlay, onToggleMute, onSeekStart, showFullscreen, onFullscreen }, trackRef) {
+const VideoControls = React.forwardRef(function VideoControls(
+  {
+    progress,
+    isPlaying,
+    isMuted,
+    isSeeking,
+    onTogglePlay,
+    onToggleMute,
+    onSeekStart,
+    showFullscreen,
+    onFullscreen,
+  },
+  trackRef,
+) {
   return (
-  <div className="video-overlay">
-    {!isSeeking && (
-      <>
-        <div className="overlay-darken" onClick={onTogglePlay} />
-        <button onClick={onTogglePlay} className="video-control center-control">
-          <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} />
-        </button>
-      </>
-    )}
-    <div className="video-controls-bottom">
-      <div className="video-track-wrapper" ref={trackRef} onMouseDown={onSeekStart}>
-        <div className="video-track-filled" style={{ width: `${progress * 100}%` }} />
-        <div className="video-track-overlay" />
-      </div>
-      <button onClick={(e) => { e.stopPropagation(); onToggleMute(); }} className="video-control mute-control">
-        <FontAwesomeIcon icon={isMuted ? faVolumeMute : faVolumeUp} />
-      </button>
-      {showFullscreen && (
-        <button onClick={(e) => { e.stopPropagation(); onFullscreen(); }} className="video-control fullscreen-control">
-          <FontAwesomeIcon icon={faExpand} />
-        </button>
+    <div className="video-overlay">
+      {!isSeeking && (
+        <>
+          <div className="overlay-darken" onClick={onTogglePlay} />
+          <button
+            onClick={onTogglePlay}
+            className="video-control center-control"
+          >
+            <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} />
+          </button>
+        </>
       )}
+      <div className="video-controls-bottom">
+        <div
+          className="video-track-wrapper"
+          ref={trackRef}
+          onMouseDown={onSeekStart}
+        >
+          <div
+            className="video-track-filled"
+            style={{ width: `${progress * 100}%` }}
+          />
+          <div className="video-track-overlay" />
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleMute();
+          }}
+          className="video-control mute-control"
+        >
+          <FontAwesomeIcon icon={isMuted ? faVolumeMute : faVolumeUp} />
+        </button>
+        {showFullscreen && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onFullscreen();
+            }}
+            className="video-control fullscreen-control"
+          >
+            <FontAwesomeIcon icon={faExpand} />
+          </button>
+        )}
+      </div>
     </div>
-  </div>
   );
 });
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscreen, setForceFullscreen, birthDate, currentSettings, panelKey, selectedItemAvailable, smartScore }) {
-  const videoRefNormal     = useRef(null);
-  const trackRefNormal     = useRef(null);
+export default function PreviewPanel({
+  item,
+  isMuted,
+  setIsMuted,
+  forceFullscreen,
+  setForceFullscreen,
+  birthDate,
+  currentSettings,
+  panelKey,
+  selectedItemAvailable,
+  smartScore,
+}) {
+  const videoRefNormal = useRef(null);
+  const trackRefNormal = useRef(null);
   const videoRefFullscreen = useRef(null);
   const trackRefFullscreen = useRef(null);
   const wasNormalPlayingRef = useRef(false);
-  const imgRef             = useRef(null);
-  const lastMousePos       = useRef(null);
+  const imgRef = useRef(null);
+  const lastMousePos = useRef(null);
 
-  const [isPlaying,    setIsPlaying]    = useState(true);
-  const [isHovered,    setIsHovered]    = useState(false);
-  const [duration,     setDuration]     = useState(0);
-  const [currentTime,  setCurrentTime]  = useState(0);
-  const [isSeeking,    setIsSeeking]    = useState(false);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isHovered, setIsHovered] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isSeeking, setIsSeeking] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isLoading,    setIsLoading]    = useState(true);
-  const [itemCountry,  setItemCountry]  = useState(null);
-  const [zoom,         setZoom]         = useState(1);
-  const [offset,       setOffset]       = useState({ x: 0, y: 0 });
-  const [tags,         setTags]         = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [itemCountry, setItemCountry] = useState(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [tags, setTags] = useState([]);
 
   const currentVideoRef = isFullscreen ? videoRefFullscreen : videoRefNormal;
   const currentTrackRef = isFullscreen ? trackRefFullscreen : trackRefNormal;
 
   // Stable refs so seek mousemove handlers always read live values
-  const liveTrackRef    = useRef(null);
-  const liveVideoRef    = useRef(null);
+  const liveTrackRef = useRef(null);
+  const liveVideoRef = useRef(null);
   const liveDurationRef = useRef(0);
-  liveTrackRef.current    = currentTrackRef;   // ref object, not .current
-  liveVideoRef.current    = currentVideoRef;   // ref object, not .current
+  liveTrackRef.current = currentTrackRef; // ref object, not .current
+  liveVideoRef.current = currentVideoRef; // ref object, not .current
   liveDurationRef.current = duration;
-  const progress        = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
-  const isVideo         = item?.file_type?.startsWith("video");
-  const fileUrl         = item ? `http://localhost:54055/files/${encodeURIComponent(item.path)}` : null;
-  const heicClass       = currentSettings?.adjustHeicColors && item?.extension === ".heic" ? "heic-color-adjust" : "";
+  const progress = duration > 0 ? Math.min(currentTime / duration, 1) : 0;
+  const isVideo = item?.file_type?.startsWith("video");
+  const fileUrl = item
+    ? `http://localhost:54055/files/${encodeURIComponent(item.path)}`
+    : null;
+  const heicClass =
+    currentSettings?.adjustHeicColors && item?.extension === ".heic"
+      ? "heic-color-adjust"
+      : "";
 
   // ── Video sync ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const video = currentVideoRef.current;
     if (!video) return;
-    const onMetadata   = () => { if (isFinite(video.duration)) setDuration(video.duration); };
-    const onTimeUpdate = () => { if (!isSeeking) setCurrentTime(video.currentTime); };
+    const onMetadata = () => {
+      if (isFinite(video.duration)) setDuration(video.duration);
+    };
+    const onTimeUpdate = () => {
+      if (!isSeeking) setCurrentTime(video.currentTime);
+    };
     video.addEventListener("loadedmetadata", onMetadata);
     video.addEventListener("timeupdate", onTimeUpdate);
     return () => {
@@ -178,10 +251,14 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     setIsPlaying(true);
     setIsLoading(true);
 
-    if (!item?.country) { setItemCountry(null); return; }
-    window.electron.ipcRenderer.invoke("get-country-name", item.country)
+    if (!item?.country) {
+      setItemCountry(null);
+      return;
+    }
+    window.electron.ipcRenderer
+      .invoke("get-country-name", item.country)
       .then(setItemCountry)
-      .catch(err => console.error("Error converting country:", err));
+      .catch((err) => console.error("Error converting country:", err));
 
     if (isFullscreen && isVideo) {
       wasNormalPlayingRef.current = !videoRefNormal.current?.paused;
@@ -193,9 +270,14 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
 
   useEffect(() => {
     if (!item?.id) return;
-    window.electron.ipcRenderer.invoke("tags:get-all")
-      .then(allTags => setTags((allTags || []).filter(tag => tag.media_ids.includes(item.id))))
-      .catch(err => console.error("Failed to fetch tags:", err));
+    window.electron.ipcRenderer
+      .invoke("tags:get-all")
+      .then((allTags) =>
+        setTags(
+          (allTags || []).filter((tag) => tag.media_ids.includes(item.id)),
+        ),
+      )
+      .catch((err) => console.error("Failed to fetch tags:", err));
   }, [item, panelKey]);
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
@@ -204,8 +286,14 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     const handleKeyDown = (e) => {
       const tag = document.activeElement?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (e.key === "Escape" && isFullscreen) { closeFullscreen(); return; }
-      if (e.key === " " || e.code === "Space") { e.preventDefault(); togglePlay(); }
+      if (e.key === "Escape" && isFullscreen) {
+        closeFullscreen();
+        return;
+      }
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -214,7 +302,10 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   // ── Fullscreen trigger from parent ─────────────────────────────────────────
 
   useEffect(() => {
-    if (forceFullscreen) { openFullscreen(); setForceFullscreen(false); }
+    if (forceFullscreen) {
+      openFullscreen();
+      setForceFullscreen(false);
+    }
   }, [forceFullscreen]);
 
   // ── Playback ───────────────────────────────────────────────────────────────
@@ -223,7 +314,7 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     if (!currentVideoRef.current) return;
     if (isPlaying) currentVideoRef.current.pause();
     else safePlay(currentVideoRef.current);
-    setIsPlaying(p => !p);
+    setIsPlaying((p) => !p);
   };
 
   // ── Seek ───────────────────────────────────────────────────────────────────
@@ -233,25 +324,28 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     const track = liveTrackRef.current?.current;
     const video = liveVideoRef.current?.current;
     if (!track || !video) return;
-    const rect    = track.getBoundingClientRect();
-    const pos     = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const rect = track.getBoundingClientRect();
+    const pos = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
     const newTime = (pos / rect.width) * liveDurationRef.current;
     setCurrentTime(newTime);
     video.currentTime = newTime;
   }, []); // no deps — reads everything from refs
 
-  const handleSeekStart = useCallback((e) => {
-    setIsSeeking(true);
-    seekToEvent(e);
-    const onMove = (eMove) => seekToEvent(eMove);
-    const onUp   = () => {
-      setIsSeeking(false);
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }, [seekToEvent]);
+  const handleSeekStart = useCallback(
+    (e) => {
+      setIsSeeking(true);
+      seekToEvent(e);
+      const onMove = (eMove) => seekToEvent(eMove);
+      const onUp = () => {
+        setIsSeeking(false);
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [seekToEvent],
+  );
 
   // ── Fullscreen ─────────────────────────────────────────────────────────────
 
@@ -265,15 +359,19 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
     }
     setTimeout(() => {
       if (videoRefNormal.current && videoRefFullscreen.current) {
-        videoRefFullscreen.current.currentTime = videoRefNormal.current.currentTime;
-        isPlaying ? safePlay(videoRefFullscreen.current) : videoRefFullscreen.current.pause();
+        videoRefFullscreen.current.currentTime =
+          videoRefNormal.current.currentTime;
+        isPlaying
+          ? safePlay(videoRefFullscreen.current)
+          : videoRefFullscreen.current.pause();
       }
     }, 0);
   };
 
   const closeFullscreen = () => {
     if (videoRefNormal.current && videoRefFullscreen.current) {
-      videoRefNormal.current.currentTime = videoRefFullscreen.current.currentTime;
+      videoRefNormal.current.currentTime =
+        videoRefFullscreen.current.currentTime;
       if (isPlaying) safePlay(videoRefNormal.current);
     }
     setIsFullscreen(false);
@@ -283,7 +381,10 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
 
   const handleWheel = (e) => {
     e.preventDefault();
-    const newZoom = Math.min(Math.max(zoom + (e.deltaY < 0 ? 0.1 : -0.1), 1), 5);
+    const newZoom = Math.min(
+      Math.max(zoom + (e.deltaY < 0 ? 0.1 : -0.1), 1),
+      5,
+    );
     setZoom(newZoom);
     if (newZoom === 1) setOffset({ x: 0, y: 0 });
   };
@@ -295,10 +396,14 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
       if (!lastMousePos.current) return;
       const dx = eMove.clientX - lastMousePos.current.x;
       const dy = eMove.clientY - lastMousePos.current.y;
-      setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+      setOffset((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
       lastMousePos.current = { x: eMove.clientX, y: eMove.clientY };
     };
-    const onUp = () => { lastMousePos.current = null; document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+    const onUp = () => {
+      lastMousePos.current = null;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   };
@@ -308,22 +413,24 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
   if (!item) return null;
 
   const referenceDate = getReferenceEpoch(item);
-  const takenDisplay  = item.create_date_local
+  const takenDisplay = item.create_date_local
     ? formatLocalDateString(item.create_date_local)
     : formatTimestamp(item.create_date);
 
   const videoControlProps = {
-    progress, isPlaying, isMuted, isSeeking,
+    progress,
+    isPlaying,
+    isMuted,
+    isSeeking,
     onTogglePlay: togglePlay,
-    onToggleMute: () => setIsMuted(m => !m),
-    onSeekStart:  handleSeekStart,
+    onToggleMute: () => setIsMuted((m) => !m),
+    onSeekStart: handleSeekStart,
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="p-4 space-y- preview-panel-wrapper">
-
       {/* ── Media preview ── */}
       {selectedItemAvailable === false ? (
         <div className="flex justify-center items-center preview-panel-content text-gray-400 text-sm">
@@ -346,7 +453,9 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
               <video
                 ref={videoRefNormal}
                 src={fileUrl}
-                autoPlay muted={isMuted} loop
+                autoPlay
+                muted={isMuted}
+                loop
                 className={`video-element ${isLoading ? "hidden" : ""}`}
                 onLoadedData={() => setIsLoading(false)}
               />
@@ -373,16 +482,22 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
 
       {/* ── Metadata ── */}
       <div className="metadata-panel" key={panelKey}>
-        <MetaRow label="Filename"    value={item.filename} />
-        <MetaRow label="Size"        value={item.size != null ? formatBytes(item.size) : null} />
+        <MetaRow label="Filename" value={item.filename} />
+        <MetaRow
+          label="Size"
+          value={item.size != null ? formatBytes(item.size) : null}
+        />
 
         {(item.extension || item.file_type) && (
-          <MetaRow label="Type" value={`${item.extension}${item.file_type ? ` (${item.file_type})` : ""}`} />
+          <MetaRow
+            label="Type"
+            value={`${item.extension}${item.file_type ? ` (${item.file_type})` : ""}`}
+          />
         )}
 
         {takenDisplay && <MetaRow label="Taken" value={takenDisplay} />}
 
-        <MetaRow label="Device"      value={item.device_model} />
+        <MetaRow label="Device" value={item.device_model} />
 
         {item.width && item.height && (
           <MetaRow label="Resolution" value={`${item.width}x${item.height}`} />
@@ -393,44 +508,84 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
         )}
 
         {item.latitude != null && item.longitude != null && (
-          <MetaRow label="Location" title={`${item.latitude}, ${item.longitude}${item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : ""}`}>
+          <MetaRow
+            label="Location"
+            title={`${item.latitude}, ${item.longitude}${item.altitude != null ? `, ${item.altitude.toFixed(0)} m` : ""}`}
+          >
             <div style={{ width: "100%", height: 150 }}>
-              <MapContainer key={item.id} center={[item.latitude, item.longitude]} zoom={13} style={{ width: "100%", height: "100%", userSelect: "none", marginTop: 5 }}>
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+              <MapContainer
+                key={item.id}
+                center={[item.latitude, item.longitude]}
+                zoom={13}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  userSelect: "none",
+                  marginTop: 5,
+                }}
+              >
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution="&copy; OpenStreetMap contributors"
+                />
                 <Marker position={[item.latitude, item.longitude]} />
               </MapContainer>
             </div>
-            <div style={{ padding: "2px 0", backgroundColor: "#28262d", borderRadius: "0 0 10px 10px" }}>
+            <div
+              style={{
+                padding: "2px 0",
+                backgroundColor: "#28262d",
+                borderRadius: "0 0 10px 10px",
+              }}
+            >
               {item.latitude}, {item.longitude}
               {item.altitude != null && `, ${item.altitude.toFixed(0)} m`}
             </div>
           </MetaRow>
         )}
 
-        <MetaRow label="Country"      value={item.country ? itemCountry : null} />
-        <MetaRow label="Lens"         value={item.lens_model} />
-        <MetaRow label="ISO"          value={item.iso} />
-        <MetaRow label="Software"     value={item.software} />
-        <MetaRow label="Megapixels"   value={item.megapixels ? item.megapixels.toFixed(0) : null} />
-        <MetaRow label="Exposure"     value={item.exposure_time ? `${item.exposure_time} s` : null} />
-        <MetaRow label="Color Space"  value={item.color_space} />
-        <MetaRow label="Flash"        value={item.flash} />
-        <MetaRow label="Aperture"     value={item.aperture ? `f/${item.aperture}` : null} />
+        <MetaRow label="Country" value={item.country ? itemCountry : null} />
+        <MetaRow label="Lens" value={item.lens_model} />
+        <MetaRow label="ISO" value={item.iso} />
+        <MetaRow label="Software" value={item.software} />
+        <MetaRow
+          label="Megapixels"
+          value={item.megapixels ? item.megapixels.toFixed(0) : null}
+        />
+        <MetaRow
+          label="Exposure"
+          value={item.exposure_time ? `${item.exposure_time} s` : null}
+        />
+        <MetaRow label="Color Space" value={item.color_space} />
+        <MetaRow label="Flash" value={item.flash} />
+        <MetaRow
+          label="Aperture"
+          value={item.aperture ? `f/${item.aperture}` : null}
+        />
 
         {item.focal_length && (
-          <MetaRow label="Focal Length" value={`${item.focal_length} (${item.focal_length_35mm})`} />
+          <MetaRow
+            label="Focal Length"
+            value={`${item.focal_length} (${item.focal_length_35mm})`}
+          />
         )}
 
-        <MetaRow label="Time Offset"  value={item.offset_time_original} />
-        <MetaRow label="Make"         value={item.camera_make} />
+        <MetaRow label="Time Offset" value={item.offset_time_original} />
+        <MetaRow label="Make" value={item.camera_make} />
 
         {(item.create_date || item.created) && birthDate && referenceDate && (
           <MetaRow label="Age" value={calculateAge(birthDate, referenceDate)} />
         )}
 
-        <MetaRow label="Modified At"  value={item.modified ? formatTimestamp(item.modified) : null} />
-        <MetaRow label="Created At"   value={item.created  ? formatTimestamp(item.created)  : null} />
-        <MetaRow label="Path"         value={item.path} />
+        <MetaRow
+          label="Modified At"
+          value={item.modified ? formatTimestamp(item.modified) : null}
+        />
+        <MetaRow
+          label="Created At"
+          value={item.created ? formatTimestamp(item.created) : null}
+        />
+        <MetaRow label="Path" value={item.path} />
         {smartScore != null && (
           <MetaRow
             label="Similarity"
@@ -438,19 +593,12 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
             title={`Raw CLIP cosine similarity: ${smartScore.toFixed(4)}`}
           />
         )}
-        <MetaRow label="ID"           value={item.id ? item.media_id : null} />
+        <MetaRow label="ID" value={item.id ? item.media_id : null} />
 
         {tags.length > 0 && (
           <MetaRow label="Tags">
-            {tags.map(tag => (
-              <span
-                key={tag.id}
-                className="tag-pill"
-                title={tag.description || ""}
-                style={{ backgroundColor: tag.color || "#555", color: getContrastColor(tag.color), marginRight: 4, padding: "2px 6px", borderRadius: 4 }}
-              >
-                {tag.name}
-              </span>
+            {tags.map((tag) => (
+              <TagPill key={tag.id} tag={tag} style={{ marginRight: 4 }} />
             ))}
           </MetaRow>
         )}
@@ -459,7 +607,10 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
       {/* ── Fullscreen overlay ── */}
       {isFullscreen && (
         <div className="fullscreen-overlay" onClick={closeFullscreen}>
-          <div className="fullscreen-content" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="fullscreen-content"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button className="fullscreen-close" onClick={closeFullscreen}>
               <FontAwesomeIcon icon={faXmark} />
             </button>
@@ -470,9 +621,20 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
                 onMouseEnter={() => !isSeeking && setIsHovered(true)}
                 onMouseLeave={() => !isSeeking && setIsHovered(false)}
               >
-                <video ref={videoRefFullscreen} src={fileUrl} autoPlay muted={isMuted} loop className="video-element" />
+                <video
+                  ref={videoRefFullscreen}
+                  src={fileUrl}
+                  autoPlay
+                  muted={isMuted}
+                  loop
+                  className="video-element"
+                />
                 {(isHovered || isSeeking) && (
-                  <VideoControls ref={trackRefFullscreen} {...videoControlProps} showFullscreen={false} />
+                  <VideoControls
+                    ref={trackRefFullscreen}
+                    {...videoControlProps}
+                    showFullscreen={false}
+                  />
                 )}
               </div>
             ) : (
@@ -484,11 +646,16 @@ export default function PreviewPanel({ item, isMuted, setIsMuted, forceFullscree
                 style={{
                   transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`,
                   cursor: zoom > 1 ? "grab" : "auto",
-                  transition: lastMousePos.current ? "none" : "transform 0.1s ease-out",
+                  transition: lastMousePos.current
+                    ? "none"
+                    : "transform 0.1s ease-out",
                 }}
                 onWheel={handleWheel}
                 onMouseDown={zoom > 1 ? handleMouseDown : undefined}
-                onDoubleClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+                onDoubleClick={() => {
+                  setZoom(1);
+                  setOffset({ x: 0, y: 0 });
+                }}
               />
             )}
           </div>

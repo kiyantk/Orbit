@@ -187,7 +187,7 @@ const SmartSearchStatus = () => {
             ? "All images are indexed. Use Smart Search to find photos by description."
             : status.modelReady
               ? "Running quietly in the background. The app will not be affected."
-              : "The CLIP model is downloaded once (~80 MB) and cached locally."}
+              : "Loading the local CLIP model..."}
         </div>
       )}
     </div>
@@ -386,24 +386,42 @@ const SettingsView = ({
 
   // ─── Tool actions ────────────────────────────────────────────────────────────
 
-  const runTool = useCallback(
-    async (channel, label) => {
-      setIndexingStatus(`${label}...`);
-      setIsIndexing(true);
-      setShowToolsPopup(false);
-      try {
-        const result = await ipc(channel);
-        setIndexingStatus(result.success ? result.message : `Error: ${result.error}`);
-        if (result.success) setTimeout(() => setIndexingStatus(null), 5000);
-      } catch (err) {
-        setIndexingStatus(`Error: ${err.message}`);
-      }
-      setIsIndexing(false);
-    },
-    [ipc]
-  );
+const runTool = useCallback(
+  async (channel, label, after) => {
+    setIndexingStatus(`${label}...`);
+    setIsIndexing(true);
+    setShowToolsPopup(false);
 
-  const fixThumbnails = () => runTool("fix-thumbnails", "Fixing thumbnails");
+    try {
+      const result = await ipc(channel);
+
+      setIndexingStatus(
+        result.success ? result.message : `Error: ${result.error}`
+      );
+
+      if (result.success && after) {
+        await after(result);
+      }
+
+      if (result.success) {
+        setTimeout(() => setIndexingStatus(null), 5000);
+      }
+    } catch (err) {
+      setIndexingStatus(`Error: ${err.message}`);
+    }
+
+    setIsIndexing(false);
+  },
+  [ipc]
+);
+
+  const fixThumbnails = () =>
+  runTool("fix-thumbnails", "Fixing thumbnails", async () => {
+    await runTool(
+      "generate-derived-thumbnails",
+      "Generating 32px thumbnails"
+    );
+  });
   const fixIDs = () => runTool("fix-media-ids", "Fixing media IDs");
   const cleanupThumbnails = () => runTool("cleanup-thumbnails", "Scanning for orphaned thumbnails");
 
@@ -492,8 +510,28 @@ const SettingsView = ({
                 </select>
               </SettingsRow>
               <SettingsRow>
-                <span>Item text:</span>
-                <select value={settings.itemText} onChange={handleSelect("itemText")} className="settings-itemstyle-select">
+                <span>Explorer layout:</span>
+                <select
+                  value={settings.explorerLayout}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateSettings({ explorerLayout: val, ...(val !== "grid" ? { noGutters: false } : {}) });
+                  }}
+                  className="settings-itemstyle-select"
+                >
+                  <option value="grid">Grid (default)</option>
+                  <option value="justified">Justified (collage)</option>
+                </select>
+              </SettingsRow>
+              <SettingsRow>
+                <span style={settings.explorerLayout !== "grid" ? { opacity: 0.4 } : {}}>Item text:</span>
+                <select
+                  value={settings.itemText}
+                  onChange={handleSelect("itemText")}
+                  className="settings-itemstyle-select"
+                  disabled={settings.explorerLayout !== "grid"}
+                  style={settings.explorerLayout !== "grid" ? { opacity: 0.4, cursor: "not-allowed" } : {}}
+                >
                   <option value="filename">Filename (default)</option>
                   <option value="datetime">Date</option>
                   <option value="none">None</option>
@@ -502,11 +540,25 @@ const SettingsView = ({
               <SettingsRow>
                 <div className="slider-wrapper">
                   <label className="switch">
-                    <input type="checkbox" checked={!!settings.noGutters} onChange={handleCheckbox("noGutters")} />
+                    <input
+                      type="checkbox"
+                      checked={!!settings.noGutters}
+                      onChange={handleCheckbox("noGutters")}
+                      disabled={settings.explorerLayout !== "grid"}
+                    />
                     <div className="slider round"></div>
                   </label>
                 </div>
-                <span>No gutters</span>
+                <span style={settings.explorerLayout !== "grid" ? { opacity: 0.4 } : {}}>No gutters</span>
+              </SettingsRow>
+              <SettingsRow>
+                <div className="slider-wrapper">
+                  <label className="switch">
+                    <input type="checkbox" checked={!!settings.explorerDateScroll} onChange={handleCheckbox("explorerDateScroll")} />
+                    <div className="slider round"></div>
+                  </label>
+                </div>
+                <span>Show timeline overlay</span>
               </SettingsRow>
             </div>
           )}
@@ -519,6 +571,13 @@ const SettingsView = ({
                   <option value="explorer">Explorer (default)</option>
                   <option value="shuffle">Shuffle</option>
                   <option value="map">Map</option>
+                </select>
+              </SettingsRow>
+              <SettingsRow>
+                <span>Memories layout:</span>
+                <select value={settings.memoriesLayout} onChange={handleSelect("memoriesLayout")} className="settings-itemstyle-select">
+                  <option value="list">List (default)</option>
+                  <option value="grid">Grid</option>
                 </select>
               </SettingsRow>
             </div>
@@ -708,7 +767,7 @@ const SettingsView = ({
           {selectedTab === "App" && (
             <div>
               <SettingsRow>
-                <img width="44" style={{marginBottom: "5px"}} src={`${process.env.PUBLIC_URL}/logo-v2-orbit-bright-white-shadow-small.png`} alt="Orbit logo" />
+                <img width="44" src={`${process.env.PUBLIC_URL}/logo-v2-orbit-bright-white-shadow-small.png`} alt="Orbit logo" />
                 <span>Orbit 1.2.0</span>
               </SettingsRow>
               <SettingsRow>
@@ -737,12 +796,12 @@ const SettingsView = ({
             <p>Select which tool to run:</p>
             <div className="tools-popup-content">
               {[
-                { label: "Reindex All", action: () => startIndex(settings.indexedFolders) },
+                { label: "Index New Files", action: () => {setShowToolsPopup(false); startIndex(settings.indexedFolders) } },
                 { label: "Check Status", action: () => { setShowToolsPopup(false); checkStatusses(); } },
-                { label: "Verify IDs", action: fixIDs },
-                { label: "Verify Thumbnails", action: fixThumbnails },
-                { label: "Cleanup Thumbnails", action: cleanupThumbnails },
-                { label: "Generate HEIC Thumbnails", action: () => { setShowHeicPopup(true) } },
+                { label: "Verify IDs", action: () => { setShowToolsPopup(false); fixIDs(); } },
+                { label: "Verify Thumbnails", action: () => { setShowToolsPopup(false); fixThumbnails(); } },
+                { label: "Cleanup Thumbnails", action: () => { setShowToolsPopup(false); cleanupThumbnails(); } },
+                { label: "Generate HEIC Thumbnails", action: () => { setShowToolsPopup(false); setShowHeicPopup(true) } },
                 { label: "Remove Mode", action: () => { setShowToolsPopup(false); enterRemoveMode(); } },
               ].map(({ label, action }) => (
                 <button key={label} className="welcome-popup-select-folders-btn" onClick={action}>{label}</button>

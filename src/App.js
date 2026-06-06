@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback  } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import MenuBar from "./components/MenuBar";
 import BottomBar from "./components/BottomBar";
 import SideBar from "./components/SideBar";
@@ -21,27 +21,40 @@ const App = () => {
   const [folderStatuses, setFolderStatuses] = useState({}); // { "C:/path": true/false }
   const [selectedSettingsTab, setSelectedSettingsTab] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
-  const [selectedItemAvailable, setSelectedItemAvailable] = useState(true)
+  const [selectedItemAvailable, setSelectedItemAvailable] = useState(true);
   const [isMuted, setIsMuted] = useState(true); // session-wide mute state
   const [forceFullscreen, setForceFullscreen] = useState(false);
   const [explorerScale, setExplorerScale] = useState(1);
   const [actionPanelType, setActionPanelType] = useState(null);
   const [filters, setFilters] = useState(null);
-  const [filteredCount, setFilteredCount] = useState(null)
+  const [filteredCount, setFilteredCount] = useState(null);
   const [shuffleFilters, setShuffleFilters] = useState({});
   const [mapFilters, setMapFilters] = useState({});
-  const [shuffleSettings, setShuffleSettings] = useState({ shuffleInterval: 8, hideInfo: false, smoothTransition: false });
+  const [shuffleSettings, setShuffleSettings] = useState({
+    shuffleInterval: 8,
+    hideInfo: false,
+    smoothTransition: false,
+  });
   const [explorerScroll, setExplorerScroll] = useState(0);
   const [previewPanelKey, setPreviewPanelKey] = useState(0);
   const [actionPanelKey, setActionPanelKey] = useState(0);
   const [mapViewType, setMapViewType] = useState("cluster");
   const [memoryMode, setMemoryMode] = useState(null);
-  const [showTagPopup, setShowTagPopup] = useState({value: false, type: ""});
-  const [explorerMode, setExplorerMode] = useState({enabled: false, value: null, type: "", existing: null});
+  const [showTagPopup, setShowTagPopup] = useState({ value: false, type: "" });
+  const [explorerMode, setExplorerMode] = useState({
+    enabled: false,
+    value: null,
+    type: "",
+    existing: null,
+  });
 
   const handleActionPanelApply = (data) => {
-    if (actionPanelType === "filter" || actionPanelType === "sort" || actionPanelType === "search") {
-    
+    if (
+      actionPanelType === "filter" ||
+      actionPanelType === "sort" ||
+      actionPanelType === "search" ||
+      data._similarTo
+    ) {
       if (data.searchBy === "smart") {
         if (data.smartIds?.length > 0) {
           setFilters({
@@ -66,12 +79,11 @@ const App = () => {
         }
         return;
       }
-    
       setFilters(data);
     } else if (actionPanelType === "shuffle-filter") {
       setShuffleFilters(data);
     } else if (actionPanelType === "shuffle-settings") {
-      setShuffleSettings(prev => ({ ...prev, ...data }));
+      setShuffleSettings((prev) => ({ ...prev, ...data }));
     } else if (actionPanelType === "map-filter") {
       setMapFilters(data);
     }
@@ -88,52 +100,58 @@ const App = () => {
       });
   }, []);
 
-const checkFolderStatuses = useCallback(async () => {
-  if (!settings?.indexedFolders?.length) return;
+  const checkFolderStatuses = useCallback(async () => {
+    if (!settings?.indexedFolders?.length) return;
 
-  try {
-    const map = settings.driveLetterMap || {};
+    try {
+      const map = settings.driveLetterMap || {};
 
-    // Helper function to apply the drive-letter map
-    const applyDriveLetterMap = (filePath) => {
-      if (!filePath || !map || Object.keys(map).length === 0) return filePath;
+      // Helper function to apply the drive-letter map
+      const applyDriveLetterMap = (filePath) => {
+        if (!filePath || !map || Object.keys(map).length === 0) return filePath;
 
-      const normalizedPath = filePath.replace(/\//g, "\\"); // normalize slashes
+        const normalizedPath = filePath.replace(/\//g, "\\"); // normalize slashes
 
-      for (const [originalFolder, customLetter] of Object.entries(map)) {
-        if (!originalFolder || !customLetter) continue;
+        for (const [originalFolder, customLetter] of Object.entries(map)) {
+          if (!originalFolder || !customLetter) continue;
 
-        // Remove trailing slashes from the map path
-        const trimmedOriginal = originalFolder.replace(/[\\/]+$/, "");
+          // Remove trailing slashes from the map path
+          const trimmedOriginal = originalFolder.replace(/[\\/]+$/, "");
 
-        // Case-insensitive comparison
-        if (normalizedPath.toUpperCase().startsWith(trimmedOriginal.toUpperCase())) {
-          const normalizedCustom = customLetter.replace(/:?$/, ":");
-          const remainder = filePath.slice(2); // remove original drive letter
-          const cleanRemainder = remainder.startsWith("\\") ? remainder : "\\" + remainder;
-          return normalizedCustom + cleanRemainder;
+          // Case-insensitive comparison
+          if (
+            normalizedPath
+              .toUpperCase()
+              .startsWith(trimmedOriginal.toUpperCase())
+          ) {
+            const normalizedCustom = customLetter.replace(/:?$/, ":");
+            const remainder = filePath.slice(2); // remove original drive letter
+            const cleanRemainder = remainder.startsWith("\\")
+              ? remainder
+              : "\\" + remainder;
+            return normalizedCustom + cleanRemainder;
+          }
         }
-      }
 
-      return filePath;
-    };
+        return filePath;
+      };
 
-    // Map all indexed folders
-    const mappedFolders = settings.indexedFolders.map(folder =>
-      applyDriveLetterMap(folder)
-    );
+      // Map all indexed folders
+      const mappedFolders = settings.indexedFolders.map((folder) =>
+        applyDriveLetterMap(folder),
+      );
 
-    // Send mapped folders to Electron IPC
-    const statuses = await window.electron.ipcRenderer.invoke(
-      "check-folders",
-      mappedFolders
-    );
-    // Expecting { "X:/Phone/...": true, ... }
-    setFolderStatuses(statuses);
-  } catch (error) {
-    console.error("Error checking folder statuses:", error);
-  }
-}, [settings]);
+      // Send mapped folders to Electron IPC
+      const statuses = await window.electron.ipcRenderer.invoke(
+        "check-folders",
+        mappedFolders,
+      );
+      // Expecting { "X:/Phone/...": true, ... }
+      setFolderStatuses(statuses);
+    } catch (error) {
+      console.error("Error checking folder statuses:", error);
+    }
+  }, [settings]);
 
   // Run check every minute
   useEffect(() => {
@@ -169,102 +187,121 @@ const checkFolderStatuses = useCallback(async () => {
   }, []);
 
   useEffect(() => {
-    setActionPanelType(null)
+    setActionPanelType(null);
   }, [activeView]);
 
-    // Check if user has seen Welcome Popup on mount & check username
-    useEffect(() => {
-      if (settings && settings.welcomePopupSeen === false) {
-        setShowWelcomePopup(true);
-      } else if(activeView === null) {
-        setActiveView('explore')
+  // Check if user has seen Welcome Popup on mount & check username
+  useEffect(() => {
+    if (settings && settings.welcomePopupSeen === false) {
+      setShowWelcomePopup(true);
+    } else if (activeView === null) {
+      setActiveView("explore");
+    }
+  }, [settings]);
+
+  const applyWelcomeData = async (welcomeData) => {
+    const newConfig = { ...settings };
+    newConfig.welcomePopupSeen = true;
+    newConfig.username = null;
+    newConfig.indexedFolders = welcomeData.selectedFolders || [];
+    setSettings(newConfig);
+    try {
+      const response = await window.electron.ipcRenderer.invoke(
+        "save-settings",
+        newConfig,
+      );
+      if (!response.success) {
+        console.error("Failed to save settings:", response.error);
       }
-    }, [settings]);
-
-    const applyWelcomeData = async (welcomeData) => {
-        const newConfig = { ...settings };
-        newConfig.welcomePopupSeen = true;
-        newConfig.username = null;
-        newConfig.indexedFolders = welcomeData.selectedFolders || [];
-        setSettings(newConfig);
-        try {
-          const response = await window.electron.ipcRenderer.invoke(
-            "save-settings",
-            newConfig
-          );
-          if (!response.success) {
-            console.error("Failed to save settings:", response.error);
-          }
-        } catch (error) {
-          console.error("Error saving settings:", error);
-        }
-        setShowWelcomePopup(false);
-        setActiveView('explore');
-    };
-
-    const setNewActiveView = (view) => {
-      setActiveView(view)
-      setMapViewType("cluster")
+    } catch (error) {
+      console.error("Error saving settings:", error);
     }
+    setShowWelcomePopup(false);
+    setActiveView("explore");
+  };
 
-    // Apply new settings from Settings popup
-    const applySettings = (newSettings) => {
-      setSettings(newSettings); // Update state
-    };
+  const setNewActiveView = (view) => {
+    setActiveView(view);
+    setMapViewType("cluster");
+  };
 
-    // Apply new settings from Settings popup
-    const openMediaSettings = () => {
-      setActiveView('settings');
-      setSelectedSettingsTab('Media');
-    };
+  // Apply new settings from Settings popup
+  const applySettings = (newSettings) => {
+    setSettings(newSettings); // Update state
+  };
 
-    const handleExplorerSelect = (item, type) => {
-      setSelectedItem(item);
-      setSelectedItemAvailable(folderStatuses[item.folder_path] ?? true);
-      if (type === "double") {
-        setForceFullscreen(true); // tell PreviewPanel to open fullscreen
-      } else {
-        setForceFullscreen(false);
-      }
-    };
+  // Apply new settings from Settings popup
+  const openMediaSettings = () => {
+    setActiveView("settings");
+    setSelectedSettingsTab("Media");
+  };
 
-    const handleTagAssign = () => {
-      setPreviewPanelKey(previewPanelKey + 1)
+  const handleExplorerSelect = (item, type) => {
+    setSelectedItem(item);
+    setSelectedItemAvailable(folderStatuses[item.folder_path] ?? true);
+    if (type === "double") {
+      setForceFullscreen(true); // tell PreviewPanel to open fullscreen
+    } else {
+      setForceFullscreen(false);
     }
+  };
 
-    const handleExplorerScale = (newScale) => {
-      setExplorerScale(newScale)
-    }
+  const handleTagAssign = () => {
+    setPreviewPanelKey(previewPanelKey + 1);
+  };
 
-    const handleActionPanelClick = (type) => {
-      if(actionPanelType === null || actionPanelType !== type) {
-        setActionPanelType(type)
-      } else {
-        setActionPanelType(null)
-      }
-    }
+  const handleExplorerScale = (newScale) => {
+    setExplorerScale(newScale);
+  };
 
-    const disableAddMode = () => {
-      setFilters({});
+  const handleActionPanelClick = (type) => {
+    if (actionPanelType === null || actionPanelType !== type) {
+      setActionPanelType(type);
+    } else {
+      setActionPanelType(null);
     }
+  };
 
-    const resetFilters = () => {
-      setFilters({});
-      setActionPanelKey(actionPanelKey + 1)
-    }
+  const disableAddMode = () => {
+    setFilters({});
+  };
 
-    const handleItemDeleted = () => {
-      setActionPanelKey(actionPanelKey + 1)
+  const resetFilters = () => {
+    setFilters({});
+    setActionPanelKey(actionPanelKey + 1);
+  };
+
+  const handleItemDeleted = () => {
+    setActionPanelKey(actionPanelKey + 1);
+  };
+
+  const handleFindSimilar = async (item) => {
+    const result = await window.electron.ipcRenderer.invoke(
+      "embedding:search-by-id",
+      {
+        fileId: item.id,
+        topK: 200,
+      },
+    );
+
+    if (result.success && result.results.length > 0) {
+      handleActionPanelApply({
+        ids: result.results,
+        _smartSearch: true,
+        _smartScores: result.scores,
+        _similarTo: item.filename
+      });
     }
+  };
 
   return (
     <div className="App">
       <div className="App-main">
-        <MenuBar
-        />
-        <SideBar activeView={activeView} 
-          activeViewChanged={setNewActiveView} 
-          openActionPanel={handleActionPanelClick} 
+        <MenuBar />
+        <SideBar
+          activeView={activeView}
+          activeViewChanged={setNewActiveView}
+          openActionPanel={handleActionPanelClick}
           actionPanelType={actionPanelType}
           mapViewType={mapViewType}
           switchMapViewType={setMapViewType}
@@ -282,7 +319,7 @@ const checkFolderStatuses = useCallback(async () => {
               checkStatusses={checkFolderStatuses}
               newTab={selectedSettingsTab}
               enterRemoveMode={() => {
-                setExplorerMode({enabled: true, value: null, type: "remove"})
+                setExplorerMode({ enabled: true, value: null, type: "remove" });
                 setActiveView("explore");
               }}
             />
@@ -297,49 +334,72 @@ const checkFolderStatuses = useCallback(async () => {
             <TagsView
               onViewTag={(tag) => {
                 setFilters({ tagId: String(tag.id) });
+                setExplorerScroll(0);
                 setActiveView("explore");
               }}
               onAddMedia={(tag) => {
-                setExplorerMode({ enabled: true, value: tag.id, type: "tag", existing: tag.media_ids || [] })
+                setExplorerMode({
+                  enabled: true,
+                  value: tag.id,
+                  type: "tag",
+                  existing: tag.media_ids || [],
+                });
                 // setFilters({ tagId: tag.id, addMode: true });
                 setActiveView("explore");
-              }} 
+              }}
               showPopup={showTagPopup}
               setShowPopup={setShowTagPopup}
             />
           )}
           {activeView === "shuffle" && (
-            <ShuffleView filters={shuffleFilters} interval={shuffleSettings.shuffleInterval * 1000} hideMetadata={shuffleSettings.hideInfo}
-              smoothTransition={shuffleSettings.smoothTransition} chronological={shuffleSettings.chronological} currentSettings={settings} />
+            <ShuffleView
+              filters={shuffleFilters}
+              interval={shuffleSettings.shuffleInterval * 1000}
+              hideMetadata={shuffleSettings.hideInfo}
+              smoothTransition={shuffleSettings.smoothTransition}
+              chronological={shuffleSettings.chronological}
+              currentSettings={settings}
+            />
           )}
           {activeView === "memories" && (
-            <MemoriesView switchMemoryMode={setMemoryMode} memoryMode={memoryMode}
+            <MemoriesView
+              switchMemoryMode={setMemoryMode}
+              memoryMode={memoryMode}
+              memoryLayout={settings.memoriesLayout}
               onViewMemory={(ids) => {
-                if(!settings) {
+                if (!settings) {
                   setFilters({ ids });
+                  setExplorerScroll(0);
                   setActiveView("explore");
                 }
-                switch(settings.openMemoriesIn) {
-                  case 'explorer':
+                switch (settings.openMemoriesIn) {
+                  case "explorer":
                     setFilters({ ids });
+                    setExplorerScroll(0);
                     setActiveView("explore");
-                    break
-                  case 'shuffle':
+                    break;
+                  case "shuffle":
                     setShuffleFilters({ ids });
                     setActiveView("shuffle");
-                    break
-                  case 'map':
+                    break;
+                  case "map":
                     setMapFilters({ ids });
                     setActiveView("map");
-                    break
+                    break;
                   default:
                     setFilters({ ids });
+                    setExplorerScroll(0);
                     setActiveView("explore");
-                    break
+                    break;
                 }
               }}
               onAddMedia={(memory) => {
-                setExplorerMode({ enabled: true, value: memory.id, type: "memory", existing: memory.existing || [] })
+                setExplorerMode({
+                  enabled: true,
+                  value: memory.id,
+                  type: "memory",
+                  existing: memory.existing || [],
+                });
                 setActiveView("explore");
               }}
             />
@@ -364,6 +424,7 @@ const checkFolderStatuses = useCallback(async () => {
                 explorerMode={explorerMode}
                 setExplorerMode={setExplorerMode}
                 explorerScale={explorerScale}
+                onFindSimilar={handleFindSimilar}
               />
               <div className="border-l overflow-y-auto bg-gray-50">
                 {selectedItem ? (
@@ -379,19 +440,33 @@ const checkFolderStatuses = useCallback(async () => {
                     selectedItemAvailable={selectedItemAvailable}
                     smartScore={
                       selectedItem && filters?._smartScores
-                        ? filters._smartScores[selectedItem.id] ?? null
+                        ? (filters._smartScores[selectedItem.id] ?? null)
                         : null
                     }
                   />
                 ) : (
-                  <div className="preview-center-text p-4 text-gray-400">Select a file to preview</div>
+                  <div className="preview-center-text p-4 text-gray-400">
+                    Select a file to preview
+                  </div>
                 )}
               </div>
             </div>
           )}
         </div>
-        {(activeView === "explore" || activeView === "shuffle" || activeView === "map") && (
-          <ActionPanel settings={settings} type={actionPanelType} activeView={activeView} activeFilters={filters} activeShuffleFilters={shuffleFilters} activeMapFilters={mapFilters} activeShuffleSettings={shuffleSettings} onApply={handleActionPanelApply} actionPanelKey={actionPanelKey}/>
+        {(activeView === "explore" ||
+          activeView === "shuffle" ||
+          activeView === "map") && (
+          <ActionPanel
+            settings={settings}
+            type={actionPanelType}
+            activeView={activeView}
+            activeFilters={filters}
+            activeShuffleFilters={shuffleFilters}
+            activeMapFilters={mapFilters}
+            activeShuffleSettings={shuffleSettings}
+            onApply={handleActionPanelApply}
+            actionPanelKey={actionPanelKey}
+          />
         )}
         <div>
           {showWelcomePopup && (

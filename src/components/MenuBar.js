@@ -15,11 +15,16 @@ const MenuBar = () => {
     window.electron.ipcRenderer.invoke("minimize-app");
   }
 
+  const maximizeOrbit = () => {
+    window.electron.ipcRenderer.invoke("maximize-app");
+  };
+
   return (
     <div className="menu-bar">
       <img className="menubar-icon" src={process.env.PUBLIC_URL + "/favicon.ico"} alt="Logo" />
       <p className="menubar-app-name">Orbit</p>
       <button className="menubar-minimize-btn" onClick={minimizeOrbit}><FontAwesomeIcon icon={faWindowMinimize}/></button>
+      <button className="menubar-maximize-btn" onClick={maximizeOrbit}><img src={process.env.PUBLIC_URL + "/maximize-icon-white.svg"} /></button>
       <button className="menubar-close-btn" onClick={closeOrbit}><FontAwesomeIcon icon={faXmark}/></button>
     </div>
   );

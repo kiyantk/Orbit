@@ -16,12 +16,17 @@ const EMPTY_FILTERS = {
   year: "",
   tagId: "",
   age: "",
+  lens: "",
   ids: null,
 };
 
 const DEFAULT_SORT = { sortBy: "media_id", sortOrder: "desc" };
 const DEFAULT_SEARCH = { searchBy: "name", searchTerm: "" };
-const DEFAULT_SHUFFLE_SETTINGS = { shuffleInterval: 8, hideInfo: false, smoothTransition: false };
+const DEFAULT_SHUFFLE_SETTINGS = {
+  shuffleInterval: 8,
+  hideInfo: false,
+  smoothTransition: false,
+};
 
 // ─── Generic filter hook ───────────────────────────────────────────────────────
 
@@ -29,34 +34,44 @@ function useFilterState(initial = EMPTY_FILTERS) {
   const [filters, setFilters] = useState(initial);
 
   const handleDateChange = (field, value) => {
-    setFilters(prev => {
+    setFilters((prev) => {
       const next = { ...prev, [field]: value };
       if (field === "dateExact" && value) {
         next.dateFrom = "";
-        next.dateTo   = "";
-        next.year     = "";
-        next.age      = "";
+        next.dateTo = "";
+        next.year = "";
+        next.age = "";
       } else if ((field === "dateFrom" || field === "dateTo") && value) {
         next.dateExact = "";
-        next.year      = "";
-        next.age       = "";
+        next.year = "";
+        next.age = "";
       }
-      if (field === "dateFrom" && next.dateTo && value > next.dateTo) next.dateTo = value;
-      if (field === "dateTo" && next.dateFrom && value < next.dateFrom) next.dateFrom = value;
+      if (field === "dateFrom" && next.dateTo && value > next.dateTo)
+        next.dateTo = value;
+      if (field === "dateTo" && next.dateFrom && value < next.dateFrom)
+        next.dateFrom = value;
       return next;
     });
   };
 
   const handleYearChange = (year) => {
-    setFilters(prev => {
-      if (!year) return { ...prev, year: "", dateFrom: "", dateTo: "", age: "" };
-      return { ...prev, year, age: "", dateFrom: `${year}-01-01`, dateTo: `${year}-12-31` };
+    setFilters((prev) => {
+      if (!year)
+        return { ...prev, year: "", dateFrom: "", dateTo: "", age: "" };
+      return {
+        ...prev,
+        year,
+        age: "",
+        dateFrom: `${year}-01-01`,
+        dateTo: `${year}-12-31`,
+      };
     });
   };
 
   const handleAgeChange = (age, birthDate) => {
-    setFilters(prev => {
-      if (!age || !birthDate) return { ...prev, age: "", dateFrom: "", dateTo: "" };
+    setFilters((prev) => {
+      if (!age || !birthDate)
+        return { ...prev, age: "", dateFrom: "", dateTo: "" };
       const birth = new Date(birthDate);
       const dateFrom = new Date(birth);
       dateFrom.setFullYear(birth.getFullYear() + Number(age));
@@ -76,7 +91,14 @@ function useFilterState(initial = EMPTY_FILTERS) {
 
   const resetFilters = () => setFilters(EMPTY_FILTERS);
 
-  return { filters, setFilters, handleDateChange, handleYearChange, handleAgeChange, resetFilters };
+  return {
+    filters,
+    setFilters,
+    handleDateChange,
+    handleYearChange,
+    handleAgeChange,
+    resetFilters,
+  };
 }
 
 // ─── Smart Search Input ────────────────────────────────────────────────────────
@@ -86,12 +108,23 @@ function useFilterState(initial = EMPTY_FILTERS) {
  * Shows a progress bar while embeddings are being built,
  * disables input until the model is ready.
  */
-const SmartSearchInput = ({ status, value, isSearching, onChange, onSearch, onReset, threshold, setThreshold, topK, setTopK }) => {
+const SmartSearchInput = ({
+  status,
+  value,
+  isSearching,
+  onChange,
+  onSearch,
+  onReset,
+  threshold,
+  setThreshold,
+  topK,
+  setTopK,
+}) => {
   const inputRef = useRef(null);
- 
+
   const embeddingsComplete = status.total > 0 && status.done >= status.total;
-  const embeddingsReady    = status.modelReady && status.done > 0;
- 
+  const embeddingsReady = status.modelReady && status.done > 0;
+
   let placeholder;
   if (!status.modelReady && !status.initError) {
     placeholder = "Loading CLIP model…";
@@ -106,13 +139,13 @@ const SmartSearchInput = ({ status, value, isSearching, onChange, onSearch, onRe
       ? "Search your photos (e.g. 'beach sunset')"
       : `Search available (${status.done} / ${status.total} indexed)`;
   }
- 
+
   const handleKey = (e) => {
     if (e.key === "Enter" && embeddingsReady && !isSearching && value.trim()) {
       onSearch(value, threshold, topK);
     }
   };
- 
+
   return (
     <div className="smart-search-wrapper">
       {/* Row 1: text input + go + reset */}
@@ -145,11 +178,14 @@ const SmartSearchInput = ({ status, value, isSearching, onChange, onSearch, onRe
           </button>
         </div>
       </div>
- 
+
       {/* Row 2: threshold + topK — only shown when model is ready */}
       {embeddingsReady && (
         <div className="smart-search-options-row">
-          <label className="smart-search-option-label" title="Minimum similarity score (0–1). Higher = stricter matches only.">
+          <label
+            className="smart-search-option-label"
+            title="Minimum similarity score (0–1). Higher = stricter matches only."
+          >
             Min score
             <input
               type="number"
@@ -159,10 +195,17 @@ const SmartSearchInput = ({ status, value, isSearching, onChange, onSearch, onRe
               min={0.01}
               max={0.99}
               step={0.01}
-              onChange={e => setThreshold(Math.min(0.99, Math.max(0.01, Number(e.target.value))))}
+              onChange={(e) =>
+                setThreshold(
+                  Math.min(0.99, Math.max(0.01, Number(e.target.value))),
+                )
+              }
             />
           </label>
-          <label className="smart-search-option-label" title="Maximum number of results to return.">
+          <label
+            className="smart-search-option-label"
+            title="Maximum number of results to return."
+          >
             Max results
             <input
               type="number"
@@ -171,7 +214,7 @@ const SmartSearchInput = ({ status, value, isSearching, onChange, onSearch, onRe
               min={1}
               // max={10000}
               step={50}
-              onChange={e => setTopK(Math.max(1, Number(e.target.value)))}
+              onChange={(e) => setTopK(Math.max(1, Number(e.target.value)))}
             />
           </label>
         </div>
@@ -183,7 +226,8 @@ const SmartSearchInput = ({ status, value, isSearching, onChange, onSearch, onRe
 // ─── Shared FilterPanel component ─────────────────────────────────────────────
 
 const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
-  const { handleDateChange, handleYearChange, handleAgeChange, setFilters } = handlers;
+  const { handleDateChange, handleYearChange, handleAgeChange, setFilters } =
+    handlers;
 
   return (
     <div className="filter-panel">
@@ -196,9 +240,16 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
 
       <div>
         <label>Year</label>
-        <select value={filters.year} onChange={e => handleYearChange(e.target.value)}>
+        <select
+          value={filters.year}
+          onChange={(e) => handleYearChange(e.target.value)}
+        >
           <option value="">All</option>
-          {options.years.map(y => <option key={y} value={y}>{y}</option>)}
+          {options.years.map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -210,7 +261,7 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
           min={options.minDate}
           max={options.maxDate}
           disabled={!!filters.dateFrom || !!filters.dateTo}
-          onChange={e => handleDateChange("dateExact", e.target.value)}
+          onChange={(e) => handleDateChange("dateExact", e.target.value)}
         />
       </div>
 
@@ -222,7 +273,7 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
           min={options.minDate}
           max={options.maxDate}
           disabled={!!filters.dateExact}
-          onChange={e => handleDateChange("dateFrom", e.target.value)}
+          onChange={(e) => handleDateChange("dateFrom", e.target.value)}
         />
       </div>
 
@@ -234,30 +285,47 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
           min={options.minDate}
           max={options.maxDate}
           disabled={!!filters.dateExact}
-          onChange={e => handleDateChange("dateTo", e.target.value)}
+          onChange={(e) => handleDateChange("dateTo", e.target.value)}
         />
       </div>
 
       {[
-        ["Device",     "device",    options.devices],
-        ["Filetype",   "filetype",  options.filetypes],
+        ["Device", "device", options.devices],
+        ["Filetype", "filetype", options.filetypes],
         ["Media Type", "mediaType", options.mediaTypes],
+        ["Lens", "lens", options.lenses],
       ].map(([label, key, opts]) => (
         <div key={key}>
           <label>{label}</label>
-          <select value={filters[key]} onChange={e => setFilters(prev => ({ ...prev, [key]: e.target.value }))}>
+          <select
+            value={filters[key]}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, [key]: e.target.value }))
+            }
+          >
             <option value="">All</option>
-            {opts.map(o => <option key={o} value={o}>{o}</option>)}
+            {(opts ?? []).map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
           </select>
         </div>
       ))}
 
       <div>
         <label>Source</label>
-        <select value={filters.folder} onChange={e => setFilters(prev => ({ ...prev, folder: e.target.value }))}>
+        <select
+          value={filters.folder}
+          onChange={(e) =>
+            setFilters((prev) => ({ ...prev, folder: e.target.value }))
+          }
+        >
           <option value="">All</option>
-          {options.folders.map(f => (
-            <option key={f.value} value={f.value}>{f.label}</option>
+          {options.folders.map((f) => (
+            <option key={f.value} value={f.value}>
+              {f.label}
+            </option>
           ))}
         </select>
       </div>
@@ -266,35 +334,59 @@ const FilterPanel = ({ filters, options, settings, handlers, onReset }) => {
         <label>Tag</label>
         <select
           value={filters.tagId}
-          onChange={e => setFilters(prev => ({ ...prev, tagId: e.target.value }))}
+          onChange={(e) =>
+            setFilters((prev) => ({ ...prev, tagId: e.target.value }))
+          }
         >
           <option value="">All</option>
-          {(options.tags ?? []).map(t => (
-            <option key={t.id} value={t.id}>{t.name}</option>
+          {(options.tags ?? []).map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
           ))}
         </select>
       </div>
 
       <div>
         <label>Country</label>
-        <select value={filters.country} onChange={e => setFilters(prev => ({ ...prev, country: e.target.value }))}>
+        <select
+          value={filters.country}
+          onChange={(e) =>
+            setFilters((prev) => ({ ...prev, country: e.target.value }))
+          }
+        >
           <option value="">All</option>
-          {options.countries.filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
+          {options.countries.filter(Boolean).map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
         </select>
       </div>
 
       {settings?.birthDate && (
         <div>
           <label>Age</label>
-          <select value={filters.age} onChange={e => handleAgeChange(e.target.value, settings.birthDate)}>
+          <select
+            value={filters.age}
+            onChange={(e) =>
+              handleAgeChange(e.target.value, settings.birthDate)
+            }
+          >
             <option value="">All</option>
-            {[...options.ages].reverse().map(d => <option key={d} value={d}>{d}</option>)}
+            {[...options.ages].reverse().map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
           </select>
         </div>
       )}
 
       <div className="action-panel-reset">
-        <button onClick={onReset}><FontAwesomeIcon icon={faUndo} /></button>
+        <button onClick={onReset}>
+          <FontAwesomeIcon icon={faUndo} />
+        </button>
       </div>
     </div>
   );
@@ -313,13 +405,16 @@ const ActionPanel = ({
   activeShuffleFilters,
   activeShuffleSettings,
 }) => {
-  const [sortBy,    setSortBy]    = useState(DEFAULT_SORT.sortBy);
+  const [sortBy, setSortBy] = useState(DEFAULT_SORT.sortBy);
   const [sortOrder, setSortOrder] = useState(DEFAULT_SORT.sortOrder);
-  const [searchBy,  setSearchBy]  = useState(DEFAULT_SEARCH.searchBy);
+  const [searchBy, setSearchBy] = useState(DEFAULT_SEARCH.searchBy);
   const [searchTerm, setSearchTerm] = useState(DEFAULT_SEARCH.searchTerm);
   const [prevActionPanelKey, setPrevActionPanelKey] = useState(0);
+  const skipNextApplyRef = useRef(false);
 
-  const [shuffleSettings, setShuffleSettings] = useState(DEFAULT_SHUFFLE_SETTINGS);
+  const [shuffleSettings, setShuffleSettings] = useState(
+    DEFAULT_SHUFFLE_SETTINGS,
+  );
 
   // ── Smart Search state ───────────────────────────────────────────────────
   const [smartSearchTerm, setSmartSearchTerm] = useState("");
@@ -330,18 +425,26 @@ const ActionPanel = ({
     percentage: 0,
     initError: null,
   });
-  const [smartThreshold, setSmartThreshold] = useState(0.20);
-  const [smartTopK,      setSmartTopK]      = useState(200);
+  const [smartThreshold, setSmartThreshold] = useState(0.2);
+  const [smartTopK, setSmartTopK] = useState(200);
   const [isSearching, setIsSearching] = useState(false);
 
   const [options, setOptions] = useState({
-    devices: [], folders: [], filetypes: [], mediaTypes: [],
-    minDate: "", maxDate: "", countries: [], years: [], tags: [], ages: [],
+    devices: [],
+    folders: [],
+    filetypes: [],
+    mediaTypes: [],
+    minDate: "",
+    maxDate: "",
+    countries: [],
+    years: [],
+    tags: [],
+    ages: [],
   });
 
   const explore = useFilterState(activeFilters || EMPTY_FILTERS);
   const shuffle = useFilterState(activeShuffleFilters || EMPTY_FILTERS);
-  const map     = useFilterState(activeMapFilters || EMPTY_FILTERS);
+  const map = useFilterState(activeMapFilters || EMPTY_FILTERS);
 
   // ── Fetch options ──────────────────────────────────────────────────────────
 
@@ -374,15 +477,33 @@ const ActionPanel = ({
         setSearchBy(activeFilters.searchBy);
         setSearchTerm(activeFilters.searchTerm);
       } else if (activeFilters) {
-        explore.setFilters(prev => ({ ...prev, ...activeFilters }));
+        explore.setFilters((prev) => ({ ...prev, ...activeFilters }));
       }
     } else if (activeView === "shuffle") {
-      if (activeShuffleFilters)  shuffle.setFilters(prev => ({ ...prev, ...activeShuffleFilters }));
-      if (activeShuffleSettings) setShuffleSettings(prev => ({ ...prev, ...activeShuffleSettings }));
+      if (activeShuffleFilters)
+        shuffle.setFilters((prev) => ({ ...prev, ...activeShuffleFilters }));
+      if (activeShuffleSettings)
+        setShuffleSettings((prev) => ({ ...prev, ...activeShuffleSettings }));
     } else if (activeView === "map") {
-      if (activeMapFilters) map.setFilters(prev => ({ ...prev, ...activeMapFilters }));
+      if (activeMapFilters)
+        map.setFilters((prev) => ({ ...prev, ...activeMapFilters }));
     }
   }, [activeView]);
+
+  useEffect(() => {
+    if (activeFilters?.ids === undefined) return;
+
+    skipNextApplyRef.current = true;
+
+    explore.setFilters((prev) => ({
+      ...(activeFilters?._similarTo ? EMPTY_FILTERS : prev),
+      ids: activeFilters.ids,
+    }));
+
+    queueMicrotask(() => {
+    skipNextApplyRef.current = false;
+  });
+  }, [activeFilters?.ids, activeFilters?._similarTo]);
 
   // ── Poll embedding status when search panel is open ───────────────────────
 
@@ -391,7 +512,9 @@ const ActionPanel = ({
 
     const fetchStatus = async () => {
       try {
-        const status = await window.electron.ipcRenderer.invoke("embedding:get-status");
+        const status = await window.electron.ipcRenderer.invoke(
+          "embedding:get-status",
+        );
         if (status) setSmartSearchStatus(status);
       } catch {}
     };
@@ -408,62 +531,129 @@ const ActionPanel = ({
       if (data) setSmartSearchStatus(data);
     };
     window.electron.ipcRenderer.on("embedding-progress", handler);
-    return () => window.electron.ipcRenderer.removeListener("embedding-progress", handler);
+    return () =>
+      window.electron.ipcRenderer.removeListener("embedding-progress", handler);
   }, []);
 
   // ── Auto-apply on state change ─────────────────────────────────────────────
 
-  useEffect(() => { if (type === "sort")   onApply({ sortBy, sortOrder }); }, [sortBy, sortOrder]);
-  useEffect(() => { if (type === "filter") onApply(explore.filters); },     [explore.filters]);
-  useEffect(() => { if (type === "shuffle-filter")   onApply(shuffle.filters); },  [shuffle.filters]);
-  useEffect(() => { if (type === "shuffle-settings") onApply(shuffleSettings); },  [shuffleSettings]);
-  useEffect(() => { if (type === "search") onApply({ searchBy, searchTerm }); },   [searchBy, searchTerm]);
-  useEffect(() => { if (type === "map-filter") onApply(map.filters); },            [map.filters]);
+  const typeRef = useRef(type);
+
+  useEffect(() => {
+    typeRef.current = type;
+  }, [type]);
+
+  useEffect(() => {
+    if (typeRef.current === "sort") onApply({ sortBy, sortOrder });
+  }, [sortBy, sortOrder]);
+  useEffect(() => {
+    if (typeRef.current !== "filter") return;
+    if (skipNextApplyRef.current) {
+      skipNextApplyRef.current = false;
+      return;
+    }
+    onApply(explore.filters);
+  }, [explore.filters]);
+  useEffect(() => {
+    if (typeRef.current === "shuffle-filter") onApply(shuffle.filters);
+  }, [shuffle.filters]);
+  useEffect(() => {
+    if (typeRef.current === "shuffle-settings") onApply(shuffleSettings);
+  }, [shuffleSettings]);
+  useEffect(() => {
+    if (typeRef.current === "search") onApply({ searchBy, searchTerm });
+  }, [searchBy, searchTerm]);
+  useEffect(() => {
+    if (typeRef.current === "map-filter") onApply(map.filters);
+  }, [map.filters]);
 
   // ── Reset helpers ──────────────────────────────────────────────────────────
 
-  const resetSort   = () => { setSortBy(settings?.defaultSort ?? "media_id"); setSortOrder("desc"); };
-  const resetSearch = () => { setSearchBy("name"); setSearchTerm(""); setSmartSearchTerm(""); };
+  const resetSort = () => {
+    setSortBy(settings?.defaultSort ?? "media_id");
+    setSortOrder("desc");
+  };
+  const resetSearch = () => {
+    setSearchBy("name");
+    setSearchTerm("");
+    setSmartSearchTerm("");
+  };
 
   // Explore filters also clear sort/search
-  const handleExploreDate = (field, value) => { explore.handleDateChange(field, value); resetSort(); resetSearch(); };
-  const handleExploreYear = (year)          => { explore.handleYearChange(year);         resetSort(); resetSearch(); };
-  const handleExploreAge  = (age)           => { explore.handleAgeChange(age, settings?.birthDate); resetSort(); resetSearch(); };
-  const handleExploreFilter = (key, value)  => { explore.setFilters(prev => ({ ...prev, [key]: value })); resetSort(); resetSearch(); };
+  const handleExploreDate = (field, value) => {
+    explore.handleDateChange(field, value);
+    resetSort();
+    resetSearch();
+  };
+  const handleExploreYear = (year) => {
+    explore.handleYearChange(year);
+    resetSort();
+    resetSearch();
+  };
+  const handleExploreAge = (age) => {
+    explore.handleAgeChange(age, settings?.birthDate);
+    resetSort();
+    resetSearch();
+  };
+  const handleExploreFilter = (key, value) => {
+    explore.setFilters((prev) => ({ ...prev, [key]: value }));
+    resetSort();
+    resetSearch();
+  };
 
-  const resetExploreAll = () => { explore.resetFilters(); resetSort(); resetSearch(); };
+  const resetExploreAll = () => {
+    explore.resetFilters();
+    resetSort();
+    resetSearch();
+  };
 
   // ── Smart Search ──────────────────────────────────────────────────────────
 
-  const handleSmartSearch = useCallback(async (term, threshold = 0.20, topK = 200) => {
-    if (!term.trim()) {
-      onApply({ searchBy: "smart", searchTerm: "", smartIds: null, smartScores: null });
-      return;
-    }
-    setIsSearching(true);
-    try {
-      const result = await window.electron.ipcRenderer.invoke("embedding:search", {
-        query: term,
-        topK,
-        threshold,
-      });
-      onApply({
-        searchBy:    "smart",
-        searchTerm:  term,
-        smartIds:    result.success ? result.results : [],
-        smartScores: result.success ? result.scores  : {},
-      });
-    } catch (err) {
-      console.error("Smart search error:", err);
-    }
-    setIsSearching(false);
-  }, [onApply]);
+  const handleSmartSearch = useCallback(
+    async (term, threshold = 0.2, topK = 200) => {
+      if (!term.trim()) {
+        onApply({
+          searchBy: "smart",
+          searchTerm: "",
+          smartIds: null,
+          smartScores: null,
+        });
+        return;
+      }
+      setIsSearching(true);
+      try {
+        const result = await window.electron.ipcRenderer.invoke(
+          "embedding:search",
+          {
+            query: term,
+            topK,
+            threshold,
+          },
+        );
+        onApply({
+          searchBy: "smart",
+          searchTerm: term,
+          smartIds: result.success ? result.results : [],
+          smartScores: result.success ? result.scores : {},
+        });
+      } catch (err) {
+        console.error("Smart search error:", err);
+      }
+      setIsSearching(false);
+    },
+    [onApply],
+  );
 
   const handleSmartReset = useCallback(() => {
     setSmartSearchTerm("");
-    setSmartThreshold(0.20);
+    setSmartThreshold(0.2);
     setSmartTopK(200);
-    onApply({ searchBy: "smart", searchTerm: "", smartIds: null, smartScores: null });
+    onApply({
+      searchBy: "smart",
+      searchTerm: "",
+      smartIds: null,
+      smartScores: null,
+    });
   }, [onApply]);
 
   // ── Reset on panel key change ──────────────────────────────────────────────
@@ -484,11 +674,17 @@ const ActionPanel = ({
 
   return (
     <div className="action-panel">
-
       {type === "sort" && (
         <div className="sort-panel">
           <label>Sort by:</label>
-          <select value={sortBy} onChange={e => { resetSearch(); explore.resetFilters(); setSortBy(e.target.value); }}>
+          <select
+            value={sortBy}
+            onChange={(e) => {
+              resetSearch();
+              explore.resetFilters();
+              setSortBy(e.target.value);
+            }}
+          >
             <option value="media_id">ID</option>
             <option value="name">Name</option>
             <option value="create_date_local">Date Taken</option>
@@ -496,10 +692,30 @@ const ActionPanel = ({
             <option value="size">File Size</option>
             <option value="random">Random</option>
           </select>
-          <button onClick={() => {resetSearch(); explore.resetFilters(); setSortOrder("asc")}}  className={sortOrder === "asc"  ? "active" : ""}>Asc</button>
-          <button onClick={() => {resetSearch(); explore.resetFilters(); setSortOrder("desc")}} className={sortOrder === "desc" ? "active" : ""}>Desc</button>
+          <button
+            onClick={() => {
+              resetSearch();
+              explore.resetFilters();
+              setSortOrder("asc");
+            }}
+            className={sortOrder === "asc" ? "active" : ""}
+          >
+            Asc
+          </button>
+          <button
+            onClick={() => {
+              resetSearch();
+              explore.resetFilters();
+              setSortOrder("desc");
+            }}
+            className={sortOrder === "desc" ? "active" : ""}
+          >
+            Desc
+          </button>
           <div className="action-panel-reset">
-            <button onClick={resetSort}><FontAwesomeIcon icon={faUndo} /></button>
+            <button onClick={resetSort}>
+              <FontAwesomeIcon icon={faUndo} />
+            </button>
           </div>
         </div>
       )}
@@ -512,7 +728,7 @@ const ActionPanel = ({
           handlers={{
             handleDateChange: handleExploreDate,
             handleYearChange: handleExploreYear,
-            handleAgeChange:  handleExploreAge,
+            handleAgeChange: handleExploreAge,
             setFilters: (updater) => {
               explore.setFilters(updater);
               resetSort();
@@ -528,7 +744,7 @@ const ActionPanel = ({
           <select
             className="search-panel-type-select"
             value={searchBy}
-            onChange={e => {
+            onChange={(e) => {
               explore.resetFilters();
               resetSort();
               setSearchBy(e.target.value);
@@ -549,7 +765,7 @@ const ActionPanel = ({
               <input
                 type="text"
                 value={searchTerm}
-                onChange={e => {
+                onChange={(e) => {
                   explore.resetFilters();
                   resetSort();
                   setSearchTerm(e.target.value);
@@ -557,7 +773,9 @@ const ActionPanel = ({
                 placeholder="Search..."
               />
               <div className="action-panel-reset">
-                <button onClick={resetSearch}><FontAwesomeIcon icon={faUndo} /></button>
+                <button onClick={resetSearch}>
+                  <FontAwesomeIcon icon={faUndo} />
+                </button>
               </div>
             </>
           ) : (
@@ -595,9 +813,12 @@ const ActionPanel = ({
               type="number"
               min="1"
               value={shuffleSettings.shuffleInterval}
-              onChange={e => {
+              onChange={(e) => {
                 const value = Number(e.target.value);
-                setShuffleSettings(prev => ({ ...prev, shuffleInterval: isNaN(value) || value < 1 ? 1 : value }));
+                setShuffleSettings((prev) => ({
+                  ...prev,
+                  shuffleInterval: isNaN(value) || value < 1 ? 1 : value,
+                }));
               }}
               style={{ width: "80px" }}
             />
@@ -607,7 +828,16 @@ const ActionPanel = ({
             <label>Hide Metadata: </label>
             <div className="slider-wrapper">
               <label className="switch">
-                <input type="checkbox" checked={shuffleSettings.hideInfo} onChange={e => setShuffleSettings(prev => ({ ...prev, hideInfo: e.target.checked }))} />
+                <input
+                  type="checkbox"
+                  checked={shuffleSettings.hideInfo}
+                  onChange={(e) =>
+                    setShuffleSettings((prev) => ({
+                      ...prev,
+                      hideInfo: e.target.checked,
+                    }))
+                  }
+                />
                 <div className="slider round"></div>
               </label>
             </div>
@@ -616,7 +846,16 @@ const ActionPanel = ({
             <label>Smooth Transition: </label>
             <div className="slider-wrapper">
               <label className="switch">
-                <input type="checkbox" checked={shuffleSettings.smoothTransition} onChange={e => setShuffleSettings(prev => ({ ...prev, smoothTransition: e.target.checked }))} />
+                <input
+                  type="checkbox"
+                  checked={shuffleSettings.smoothTransition}
+                  onChange={(e) =>
+                    setShuffleSettings((prev) => ({
+                      ...prev,
+                      smoothTransition: e.target.checked,
+                    }))
+                  }
+                />
                 <div className="slider round"></div>
               </label>
             </div>
@@ -625,7 +864,16 @@ const ActionPanel = ({
             <label>Chronological: </label>
             <div className="slider-wrapper">
               <label className="switch">
-                <input type="checkbox" checked={shuffleSettings.chronological} onChange={e => setShuffleSettings(prev => ({ ...prev, chronological: e.target.checked }))} />
+                <input
+                  type="checkbox"
+                  checked={shuffleSettings.chronological}
+                  onChange={(e) =>
+                    setShuffleSettings((prev) => ({
+                      ...prev,
+                      chronological: e.target.checked,
+                    }))
+                  }
+                />
                 <div className="slider round"></div>
               </label>
             </div>
@@ -642,7 +890,6 @@ const ActionPanel = ({
           onReset={map.resetFilters}
         />
       )}
-
     </div>
   );
 };
