@@ -39,6 +39,158 @@ function formatTimestamp(timestamp) {
   ].join(" ");
 }
 
+const Cell = React.memo(
+  ({
+    columnIndex,
+    rowIndex,
+    style,
+    item,
+    totalCount,
+    noGutters,
+    scale,
+    rowHeight,
+    explorerMode,
+    addModeSelected,
+    removeModeSelected,
+    selectedItem,
+    currentSettings,
+    folderStatuses,
+    dragJustFinishedRef,
+    handleAddModeClick,
+    handleRemoveModeClick,
+    handleClick,
+    handleMouseEnter,
+    handleMouseLeave,
+    handleSelect,
+    setContextMenu,
+    getItemName,
+    columnCount,
+    key,
+  }) => {
+    const index = rowIndex * columnCount + columnIndex;
+    if (!totalCount || index >= totalCount) return null;
+
+    const cellStyle = { ...style, padding: noGutters ? 0 : 8 };
+
+    if (!item) {
+      return (
+        <div key={key} style={style}>
+          <div
+            className="thumb-skeleton"
+            style={{ height: rowHeight - 16, borderRadius: noGutters ? 0 : 6 }}
+          />
+        </div>
+      );
+    }
+
+    const folderAvailable = folderStatuses[item.folder_path] ?? true;
+    const thumbSrc = item.thumbnail_path
+      ? `orbit://thumbs/${item.id}_thumb.jpg`
+      : null;
+    const isNoGutterNoText = noGutters && currentSettings?.itemText === "none";
+    const hideText = scale <= 0.5 || currentSettings?.itemText === "none";
+
+    const isInAddMode =
+      explorerMode?.enabled &&
+      (explorerMode.type === "tag" || explorerMode.type === "memory");
+    const isInRemoveMode =
+      explorerMode?.enabled && explorerMode.type === "remove";
+
+    const cellClass = [
+      "thumb-cell",
+      isNoGutterNoText ? "thumb-no-gutter" : "",
+      isInAddMode && addModeSelected.has(item.id)
+        ? "thumb-selected-addmode"
+        : isInRemoveMode && removeModeSelected.has(item.id)
+          ? "thumb-selected-removemode"
+          : selectedItem?.id === item.id
+            ? "thumb-selected"
+            : "thumb-item",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const handleCellClick = (e) => {
+      // Suppress click if it was a drag operation
+      if (dragJustFinishedRef.current) {
+        dragJustFinishedRef.current = false;
+        return;
+      }
+      if (isInAddMode) handleAddModeClick(item);
+      else if (isInRemoveMode) handleRemoveModeClick(item);
+      else handleClick(e, item);
+    };
+
+    return (
+      <div
+        style={cellStyle}
+        className={cellClass}
+        onMouseEnter={() => handleMouseEnter(item)}
+        onMouseLeave={() => handleMouseLeave(item)}
+        onClick={handleCellClick}
+        onDoubleClick={() => folderAvailable && handleSelect(item, "double")}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setContextMenu({ x: e.clientX, y: e.clientY, item });
+        }}
+      >
+        <div
+          className="thumb-card"
+          title={`${item.filename}\n${formatLocalDateString(item.create_date_local) || formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
+          style={{
+            width: "100%",
+            height: scale <= 0.5 || isNoGutterNoText ? "100%" : rowHeight - 36,
+            borderRadius: noGutters ? 0 : 6,
+          }}
+        >
+          {thumbSrc ? (
+            <img
+              alt={item.filename}
+              src={thumbSrc}
+              className="thumb-img"
+              style={{
+                objectFit: noGutters ? "cover" : "contain",
+                borderRadius: noGutters ? 0 : 6,
+              }}
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = "";
+              }}
+              draggable={false}
+            />
+          ) : (
+            <div className="thumb-no-image">No preview</div>
+          )}
+
+          {item.file_type === "video" && scale > 0.6 && (
+            <div className="thumb-video-indicator">
+              <FontAwesomeIcon icon={faVideo} />
+            </div>
+          )}
+
+          {!folderAvailable && (
+            <div className="thumb-video-unavailable">Unavailable</div>
+          )}
+        </div>
+
+        <div
+          className={`thumb-filename${!folderAvailable ? " thumb-filename-unavailable" : ""}${hideText ? " thumb-hidden" : ""}`}
+          title={getItemName(item)}
+          style={{
+            marginTop: 4,
+            fontSize: 12,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {getItemName(item)}
+        </div>
+      </div>
+    );
+  },
+);
+
 // ─── Component ───────────────────────────────────────────────────────────────
 const ExplorerView = ({
   currentSettings,
@@ -74,6 +226,10 @@ const ExplorerView = ({
   const [actualScrollHeight, setActualScrollHeight] = useState(0);
   const overviewIndexRef = useRef([]);
   const overviewRequestId = useRef(0);
+  const scrollAnchorRef = useRef({ itemIndex: 0, offsetWithinRow: 0 });
+  const visualScaleRef = useRef(scale);
+  const scaleDebounceTimer = useRef(null);
+  const gridOuterRef = useRef(null);
 
   // ─── Drag-select state ────────────────────────────────────────────────────
   const [dragContentRect, setDragContentRect] = useState(null); // { left, top, width, height } in content coords (drives visual)
@@ -335,10 +491,12 @@ const ExplorerView = ({
       setCurrentScrollTop(scrollTop);
 
       if (scrollUpdateWasRequested || isRestoringScrollRef.current) return;
-      anchorIndexRef.current = Math.max(
-        0,
-        Math.floor(scrollTop / rowHeight) * columnCount,
-      );
+      const topRow = Math.floor(scrollTop / rowHeight);
+      const offsetWithinRow = scrollTop - topRow * rowHeight;
+      scrollAnchorRef.current = {
+        itemIndex: topRow * columnCount,
+        offsetWithinRow,
+      };
       if (scrollTop !== 0) setScrollPosition(scrollTop);
     },
     [rowHeight, columnCount, setScrollPosition],
@@ -637,18 +795,33 @@ const ExplorerView = ({
     const handleWheel = (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      setScale((prev) => {
-        const next = Math.min(
-          3,
-          Math.max(0.1, prev + (e.deltaY < 0 ? 0.1 : -0.1)),
-        );
-        onScale(next.toFixed(2));
-        return next;
-      });
+
+      const next = Math.min(
+        3,
+        Math.max(0.1, visualScaleRef.current + (e.deltaY < 0 ? 0.1 : -0.1)),
+      );
+      visualScaleRef.current = next;
+
+      // Instant visual feedback via CSS transform — zero re-renders
+      const gridOuter = nodeRef.current?.querySelector("#explorer-grid-outer");
+      if (gridOuter) {
+        gridOuter.style.setProperty("--thumb-scale", next / scale);
+      }
+
+      // Debounce: commit real scale only after the user pauses
+      clearTimeout(scaleDebounceTimer.current);
+      scaleDebounceTimer.current = setTimeout(() => {
+        const committed = Number(visualScaleRef.current.toFixed(2));
+        onScale(committed);
+        setScale(committed);
+        // Remove the override — real layout is now correct
+        if (gridOuter) gridOuter.style.removeProperty("--thumb-scale");
+      }, 200);
     };
+
     window.addEventListener("wheel", handleWheel, { passive: false });
     return () => window.removeEventListener("wheel", handleWheel);
-  }, [onScale]);
+  }, [onScale, scale]);
 
   // Filter change: reset + fetch
   useEffect(() => {
@@ -669,7 +842,7 @@ const ExplorerView = ({
   }, [filters, setScrollPosition]);
 
   useEffect(() => {
-    if(scrollPosition === 0 && gridRef.current) {
+    if (scrollPosition === 0 && gridRef.current) {
       gridRef.current.scrollToPosition({ scrollTop: 0 });
     }
   }, [scrollPosition]);
@@ -723,13 +896,22 @@ const ExplorerView = ({
   // Re-anchor scroll when scale/column count changes
   useEffect(() => {
     if (!gridRef.current || totalCount == null) return;
-    const index = Math.min(anchorIndexRef.current, totalCount - 1);
     isRestoringScrollRef.current = true;
+
     requestAnimationFrame(() => {
-      gridRef.current?.scrollToCell({
-        rowIndex: Math.floor(index / columnCount),
-        columnIndex: index % columnCount,
-      });
+      gridRef.current?.recomputeGridSize();
+
+      const { itemIndex, offsetWithinRow } = scrollAnchorRef.current;
+
+      // Recompute where this item lives with the NEW columnCount + rowHeight.
+      // offsetWithinRow is scaled proportionally since rowHeight changed.
+      const newRow = Math.floor(itemIndex / columnCount);
+      const rowHeightRatio = rowHeight / rowHeight; // always 1 — offsetWithinRow scales with rowHeight
+      const targetScrollTop =
+        newRow * rowHeight + (offsetWithinRow * rowHeight) / rowHeight;
+
+      gridRef.current?.scrollToPosition({ scrollTop: targetScrollTop });
+
       requestAnimationFrame(() => {
         isRestoringScrollRef.current = false;
       });
@@ -737,20 +919,20 @@ const ExplorerView = ({
   }, [scale, rowHeight, columnCount, totalCount]);
 
   useEffect(() => {
-  const requestId = ++overviewRequestId.current;
+    const requestId = ++overviewRequestId.current;
 
-  (async () => {
-    const res = await window.electron.ipcRenderer.invoke(
-      "fetch-file-overview",
-      { filters: filters || {}, settings: currentSettings }
-    );
+    (async () => {
+      const res = await window.electron.ipcRenderer.invoke(
+        "fetch-file-overview",
+        { filters: filters || {}, settings: currentSettings },
+      );
 
-    if (requestId !== overviewRequestId.current) return;
+      if (requestId !== overviewRequestId.current) return;
 
-    overviewIndexRef.current = res?.rows || [];
-    forceUpdate(x => x + 1); // IMPORTANT: ref change won't re-render
-  })();
-}, [scale, totalCount, filters, currentSettings]);
+      overviewIndexRef.current = res?.rows || [];
+      forceUpdate((x) => x + 1); // IMPORTANT: ref change won't re-render
+    })();
+  }, [scale, totalCount, filters, currentSettings]);
 
   // IPC: item removed
   useEffect(() => {
@@ -930,132 +1112,6 @@ const ExplorerView = ({
     handleSelect,
   ]);
 
-  // ─── Cell renderer ────────────────────────────────────────────────────────
-  const Cell = React.memo(({ columnIndex, rowIndex, style, key }) => {
-    const index = rowIndex * columnCount + columnIndex;
-    if (!totalCount || index >= totalCount) return null;
-
-    const item = itemsRef.current[index];
-    const cellStyle = { ...style, padding: noGutters ? 0 : 8 };
-
-    if (!item) {
-      return (
-        <div key={key} style={style}>
-          <div
-            className="thumb-skeleton"
-            style={{ height: rowHeight - 16, borderRadius: noGutters ? 0 : 6 }}
-          />
-        </div>
-      );
-    }
-
-    const folderAvailable = folderStatuses[item.folder_path] ?? true;
-    const thumbSrc = item.thumbnail_path
-      ? `orbit://thumbs/${item.id}_thumb.jpg`
-      : null;
-    const isNoGutterNoText = noGutters && currentSettings?.itemText === "none";
-    const hideText = scale <= 0.5 || currentSettings?.itemText === "none";
-
-    const isInAddMode =
-      explorerMode?.enabled &&
-      (explorerMode.type === "tag" || explorerMode.type === "memory");
-    const isInRemoveMode =
-      explorerMode?.enabled && explorerMode.type === "remove";
-
-    const cellClass = [
-      "thumb-cell",
-      isNoGutterNoText ? "thumb-no-gutter" : "",
-      isInAddMode && addModeSelected.has(item.id)
-        ? "thumb-selected-addmode"
-        : isInRemoveMode && removeModeSelected.has(item.id)
-          ? "thumb-selected-removemode"
-          : selectedItem?.id === item.id
-            ? "thumb-selected"
-            : "thumb-item",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const handleCellClick = (e) => {
-      // Suppress click if it was a drag operation
-      if (dragJustFinishedRef.current) {
-        dragJustFinishedRef.current = false;
-        return;
-      }
-      if (isInAddMode) handleAddModeClick(item);
-      else if (isInRemoveMode) handleRemoveModeClick(item);
-      else handleClick(e, item);
-    };
-
-    return (
-      <div
-        style={cellStyle}
-        className={cellClass}
-        onMouseEnter={() => handleMouseEnter(item)}
-        onMouseLeave={() => handleMouseLeave(item)}
-        onClick={handleCellClick}
-        onDoubleClick={() => folderAvailable && handleSelect(item, "double")}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setContextMenu({ x: e.clientX, y: e.clientY, item });
-        }}
-      >
-        <div
-          className="thumb-card"
-          title={`${item.filename}\n${formatLocalDateString(item.create_date_local) || formatTimestamp(item.create_date) || formatTimestamp(item.created) || ""}`}
-          style={{
-            width: "100%",
-            height: scale <= 0.5 || isNoGutterNoText ? "100%" : rowHeight - 36,
-            borderRadius: noGutters ? 0 : 6,
-          }}
-        >
-          {thumbSrc ? (
-            <img
-              alt={item.filename}
-              src={thumbSrc}
-              className="thumb-img"
-              style={{
-                objectFit: noGutters ? "cover" : "contain",
-                borderRadius: noGutters ? 0 : 6,
-              }}
-              onError={(e) => {
-                e.currentTarget.onerror = null;
-                e.currentTarget.src = "";
-              }}
-              draggable={false}
-            />
-          ) : (
-            <div className="thumb-no-image">No preview</div>
-          )}
-
-          {item.file_type === "video" && scale > 0.6 && (
-            <div className="thumb-video-indicator">
-              <FontAwesomeIcon icon={faVideo} />
-            </div>
-          )}
-
-          {!folderAvailable && (
-            <div className="thumb-video-unavailable">Unavailable</div>
-          )}
-        </div>
-
-        <div
-          className={`thumb-filename${!folderAvailable ? " thumb-filename-unavailable" : ""}${hideText ? " thumb-hidden" : ""}`}
-          title={getItemName(item)}
-          style={{
-            marginTop: 4,
-            fontSize: 12,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {getItemName(item)}
-        </div>
-      </div>
-    );
-  });
-
   // ─── Drag selection rectangle overlay ────────────────────────────────────
   // Rendered as a child of the grid outer div (position: absolute in content space).
   const DragSelectOverlay = () => {
@@ -1170,7 +1226,11 @@ const ExplorerView = ({
           rowCount={totalCount}
         >
           {({ onRowsRendered, registerChild }) => (
-            <div id="explorer-grid-outer" style={{ position: "relative" }}>
+            <div
+              id="explorer-grid-outer"
+              ref={gridOuterRef}
+              style={{ position: "relative" }}
+            >
               {scale < 0.4 ? (
                 <OverviewMosaic
                   scale={scale}
@@ -1195,7 +1255,37 @@ const ExplorerView = ({
                   width={containerWidth}
                   onScroll={handleScroll}
                   className="explorer-grid"
-                  cellRenderer={(props) => <Cell {...props} />} // ✅ THIS is required
+                  cellRenderer={({ columnIndex, rowIndex, style, key }) => (
+                    <Cell
+                      key={key}
+                      columnIndex={columnIndex}
+                      rowIndex={rowIndex}
+                      style={style}
+                      item={
+                        itemsRef.current[rowIndex * columnCount + columnIndex]
+                      }
+                      totalCount={totalCount}
+                      noGutters={noGutters}
+                      scale={scale}
+                      rowHeight={rowHeight}
+                      explorerMode={explorerMode}
+                      addModeSelected={addModeSelected}
+                      removeModeSelected={removeModeSelected}
+                      selectedItem={selectedItem}
+                      currentSettings={currentSettings}
+                      folderStatuses={folderStatuses}
+                      dragJustFinishedRef={dragJustFinishedRef}
+                      columnCount={columnCount}
+                      handleAddModeClick={handleAddModeClick}
+                      handleRemoveModeClick={handleRemoveModeClick}
+                      handleClick={handleClick}
+                      handleMouseEnter={handleMouseEnter}
+                      handleMouseLeave={handleMouseLeave}
+                      handleSelect={handleSelect}
+                      setContextMenu={setContextMenu}
+                      getItemName={getItemName}
+                    />
+                  )}
                   onSectionRendered={({
                     rowStartIndex,
                     rowStopIndex,

@@ -260,11 +260,7 @@ export default function TimelineOverlay({
 
       let index;
 
-      if (tgt?.firstIndex !== null && tgt?.firstIndex !== undefined) {
-        index = tgt.firstIndex;
-      } else {
-        index = Math.floor(frac * totalCount);
-      }
+      index = Math.floor(frac * totalCount);
 
       gridRef.current.scrollToCell({
         rowIndex: Math.floor(index / columnCount),

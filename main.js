@@ -60,6 +60,8 @@ app.whenReady().then(() => {
   });
 
   mainWindow.webContents.on("did-finish-load", () => {
+    if (mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return;
+  
     splash.close();
     mainWindow.show();
     setTimeout(startEmbeddingService, 3000);
