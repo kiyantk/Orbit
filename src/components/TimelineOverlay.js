@@ -203,8 +203,7 @@ export default function TimelineOverlay({
     return `${MONTHS[Number(mo) - 1]} ${yr}`;
   };
 
-  const getSectionForVisibleIndex = useCallback(
-  (index) => {
+  const getSectionForVisibleIndex = useCallback((index) => {
     if (!sectionsRef.current.length) return null;
 
     let result = sectionsRef.current[0];
@@ -218,9 +217,7 @@ export default function TimelineOverlay({
     }
 
     return result;
-  },
-  [],
-);
+  }, []);
 
   // ── Scroll hint ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -335,31 +332,41 @@ export default function TimelineOverlay({
   // ── Visible year labels ───────────────────────────────────────────────────
   const visibleYearGroups = useCallback(() => {
     if (yearGroups.length < 2 || !gridHeight) return [];
+
+    const idealTop = (yg) =>
+      (yg.photosBefore / Math.max(totalPhotos, 1)) * gridHeight;
+
     if (yearGroups.length === 2) {
       return [
         { ...yearGroups[0], top: HALF },
-        { ...yearGroups[yearGroups.length - 1], top: gridHeight - HALF },
+        {
+          ...yearGroups[yearGroups.length - 1],
+          top: Math.min(
+            idealTop(yearGroups[yearGroups.length - 1]),
+            gridHeight - HALF,
+          ),
+        },
       ];
     }
-    const idealTop = (yg) =>
-      (yg.photosBefore / Math.max(totalPhotos, 1)) * gridHeight;
+
     const first = { ...yearGroups[0], top: HALF };
-    const last = {
-      ...yearGroups[yearGroups.length - 1],
-      top: gridHeight - HALF,
-    };
+    const lastYg = yearGroups[yearGroups.length - 1];
+    const lastIdeal = Math.min(idealTop(lastYg), gridHeight - HALF);
+    const last = { ...lastYg, top: lastIdeal };
+
     const middle = yearGroups.slice(1, -1);
 
     const forwardSet = new Set();
     let nextMinTop = HALF + SLOT;
     for (const yg of middle) {
       const top = Math.max(idealTop(yg), nextMinTop);
-      if (top > gridHeight - HALF - SLOT) break;
+      if (top > lastIdeal - SLOT) break;
       forwardSet.add(yg.year);
       nextMinTop = top + SLOT;
     }
+
     const backwardSet = new Set();
-    let prevMaxTop = gridHeight - HALF - SLOT;
+    let prevMaxTop = lastIdeal - SLOT;
     for (let i = middle.length - 1; i >= 0; i--) {
       const yg = middle[i];
       const top = Math.min(idealTop(yg), prevMaxTop);
@@ -367,6 +374,7 @@ export default function TimelineOverlay({
       backwardSet.add(yg.year);
       prevMaxTop = top - SLOT;
     }
+
     const placed = [first];
     let minTop = HALF + SLOT;
     for (const yg of middle) {
