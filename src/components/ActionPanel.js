@@ -748,6 +748,7 @@ const ActionPanel = ({
               explore.resetFilters();
               resetSort();
               setSearchBy(e.target.value);
+              setSearchTerm("");
               setSmartSearchTerm("");
               // Clear any active smart search when switching away
               if (e.target.value !== "smart") {

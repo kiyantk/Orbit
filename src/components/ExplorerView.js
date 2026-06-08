@@ -669,6 +669,12 @@ const ExplorerView = ({
   }, [filters, setScrollPosition]);
 
   useEffect(() => {
+    if(scrollPosition === 0 && gridRef.current) {
+      gridRef.current.scrollToPosition({ scrollTop: 0 });
+    }
+  }, [scrollPosition]);
+
+  useEffect(() => {
     if (!currentSettings?.explorerDateScroll) return;
     setMonthData(null);
     window.electron.ipcRenderer

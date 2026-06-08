@@ -79,6 +79,7 @@ const App = () => {
         }
         return;
       }
+      setExplorerScroll(0);
       setFilters(data);
     } else if (actionPanelType === "shuffle-filter") {
       setShuffleFilters(data);

@@ -39,6 +39,7 @@ app.whenReady().then(() => {
     transparent: true,
     frame: false,
     alwaysOnTop: true,
+    focusable: false,
   });
   splash.loadFile(path.join(__dirname, "public/splash.html"));
   mainWindow = new BrowserWindow({
@@ -58,11 +59,17 @@ app.whenReady().then(() => {
     backgroundColor: "#15131a",
   });
 
-  mainWindow.once("ready-to-show", () => {
+  mainWindow.webContents.on("did-finish-load", () => {
     splash.close();
     mainWindow.show();
     setTimeout(startEmbeddingService, 3000);
   });
+
+  // mainWindow.once("ready-to-show", () => {
+  //   splash.close();
+  //   mainWindow.show();
+  //   setTimeout(startEmbeddingService, 3000);
+  // });
 
   app.on("browser-window-focus", () => {
     globalShortcut.register("CommandOrControl+Shift+I", () => {
@@ -86,9 +93,7 @@ app.whenReady().then(() => {
     mainWindow.webContents.send("check-unsaved-changes");
   });
 
-  app.on("ready", () => {
-    process.chdir(path.dirname(app.getPath("exe")));
-  });
+  process.chdir(path.dirname(app.getPath("exe")));
 
   // Serve thumbnails via a custom scheme: orbit://thumbs/<filename>
   protocol.handle("orbit", async (request) => {
